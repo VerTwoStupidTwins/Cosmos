@@ -21,12 +21,15 @@ in
     hardware.facter.reportPath = ../../hardware/thoth/facter.json;
     hardware.enableRedistributableFirmware = true;
 
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.efi.canTouchEfiVariables = true;
-
     # Root and resume swap are LVs inside cryptroot. Disko supplies
     # the Bcachefs root mount, swapDevices, and boot.resumeDevice.
-    boot.initrd.services.lvm.enable = true;
+    boot = {
+      loader = {
+        systemd-boot.enable = true;
+        efi.canTouchEfiVariables = true;
+      };
+      initrd.services.lvm.enable = true;
+    };
     powerManagement.enable = true;
 
     # Persistent root: no ZFS, Preservation, or root snapshot rollback.
