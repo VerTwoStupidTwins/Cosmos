@@ -21,14 +21,15 @@ in
     hardware.facter.reportPath = ../../hardware/thoth/facter.json;
     hardware.enableRedistributableFirmware = true;
 
-    # Root and resume swap are LVs inside cryptroot. Disko supplies
-    # the Bcachefs root mount, swapDevices, and boot.resumeDevice.
+    # Root and persistent swap are LVs inside cryptroot.
+    # Explicitly identify the hibernation resume LV for systemd initrd.
     boot = {
       loader = {
         systemd-boot.enable = true;
         efi.canTouchEfiVariables = true;
       };
       initrd.services.lvm.enable = true;
+      resumeDevice = "/dev/vg_thoth/lv_swap";
     };
     powerManagement.enable = true;
 
