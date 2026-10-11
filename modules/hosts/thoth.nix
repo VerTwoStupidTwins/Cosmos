@@ -33,7 +33,10 @@ in
     users.users.twins = {
       isNormalUser = true;
       createHome = true;
-      extraGroups = [ "wheel" "networkmanager" ];
+      extraGroups = [
+        "wheel"
+        "networkmanager"
+      ];
       shell = pkgs.fish;
     };
 

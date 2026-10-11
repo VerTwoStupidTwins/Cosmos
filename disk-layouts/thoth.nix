@@ -15,7 +15,10 @@
             content = {
               type = "filesystem";
               format = "vfat";
-              extraArgs = [ "-F" "32" ];
+              extraArgs = [
+                "-F"
+                "32"
+              ];
               mountpoint = "/boot";
               mountOptions = [ "umask=0077" ];
             };
@@ -27,7 +30,7 @@
               type = "luks";
               name = "cryptroot";
               initrdUnlock = true;
-	      settings.allowDiscards = true;
+              settings.allowDiscards = true;
               content = {
                 type = "bcachefs";
                 filesystem = "thoth-root";
