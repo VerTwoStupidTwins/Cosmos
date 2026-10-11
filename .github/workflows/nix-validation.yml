@@ -59,8 +59,8 @@ jobs:
         run: |
           resume="$(nix eval --raw '.#nixosConfigurations.thoth.config.boot.resumeDevice')"
           swap="$(nix eval --raw --apply 'swaps: (builtins.head swaps).device' '.#nixosConfigurations.thoth.config.swapDevices')"
-          if [[ "$resume" != "/dev/vg_thoth/lv_swap" || "$swap" != "$resume" ]]; then
-            echo "::error::Thoth resume '$resume' must match swap '$swap' at /dev/vg_thoth/lv_swap"
+          if [[ "$resume" != "/dev/nixos/swap" || "$swap" != "$resume" ]]; then
+            echo "::error::Thoth resume '$resume' must match swap '$swap' at /dev/nixos/swap"
             exit 1
           fi
 
