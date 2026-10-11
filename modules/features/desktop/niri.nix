@@ -6,9 +6,11 @@
       wayland.enable = true;
     };
     hardware.graphics.enable = true;
-    security.polkit.enable = true;
-    security.rtkit.enable = true;
-    security.pam.services.swaylock = { };
+    security = {
+      polkit.enable = true;
+      rtkit.enable = true;
+      pam.services.swaylock = { };
+    };
 
     services.pipewire = {
       enable = true;
