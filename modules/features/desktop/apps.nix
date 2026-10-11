@@ -2,9 +2,11 @@
 # Only installs packages and basic file-manager integrations; no user config.
 {
   flake.modules.nixos."niri-desktop" = { pkgs, ... }: {
-    services.gvfs.enable = true;
-    services.udisks2.enable = true;
-    services.tumbler.enable = true;
+    services = {
+      gvfs.enable = true;
+      udisks2.enable = true;
+      tumbler.enable = true;
+    };
 
     fonts.packages = [ pkgs.nerd-fonts.monoid ];
 

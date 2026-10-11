@@ -1,26 +1,29 @@
 {
   flake.modules.nixos.workstation = { lib, ... }: {
-    nixpkgs.config.allowUnfreePredicate = pkg:
+    nixpkgs.config.allowUnfreePredicate =
+      pkg:
       builtins.elem (lib.getName pkg) [
         "1password"
-	"1password-cli"
-	"1password-gui"
+        "1password-cli"
+        "1password-gui"
       ];
-    
-    programs._1password.enable = true;
 
-    programs._1password-gui = {
-      enable = true;
-      polkitPolicyOwners = [ "twins" ];
-    };
+    programs = {
+      _1password.enable = true;
 
-    programs.ssh = {
-      startAgent = false;
+      _1password-gui = {
+        enable = true;
+        polkitPolicyOwners = [ "twins" ];
+      };
 
-      extraConfig = ''
-        Host *
-	  IdentityAgent ~/.1password/agent.sock
-      '';
+      ssh = {
+        startAgent = false;
+
+        extraConfig = ''
+          Host *
+          IdentityAgent ~/.1password/agent.sock
+        '';
+      };
     };
   };
 }
