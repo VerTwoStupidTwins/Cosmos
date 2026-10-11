@@ -1,0 +1,9 @@
+result
+result-*
+.direnv/
+*.swp
+*.swo
+*.bak
+.DS_Store
+# Hardware report is intentionally NOT ignored; it is required for Thoth.
+# Never commit credentials, LUKS keys or other private secrets.
