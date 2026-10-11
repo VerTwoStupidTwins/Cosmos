@@ -48,7 +48,7 @@ An evaluation succeeds only if the Nix expressions evaluate; it is not a substit
 /dev/disk/by-id/nvme-eui.00080d030011aa76
 ```
 
-It creates a 2 GiB FAT32 EFI system partition and a LUKS2 container holding LVM volume group `vg_thoth`, with `lv_swap` (32 GiB) and Bcachefs `lv_root` (remaining space). This layout is designed for 16 GiB RAM today and 24 GiB after the SODIMM upgrade. It must never be applied blindly to an existing installation. Verify the device resolves to the internal NVMe, not a USB installer. This **erases all existing partitions and data**. If there is anything to keep, back it up before continuing; for an explicitly disposable fresh installation, no backup is required. **Do not run `nixos-rebuild switch` with this new storage layout on the existing installation**: the generated device and resume paths do not match the currently installed partitions.
+It creates a 2 GiB FAT32 EFI system partition and a LUKS2 container holding LVM volume group `nixos`, with logical volumes `swap` (32 GiB) and Bcachefs `root` (remaining space). This layout is designed for 16 GiB RAM today and 24 GiB after the SODIMM upgrade. It must never be applied blindly to an existing installation. Verify the device resolves to the internal NVMe, not a USB installer. This **erases all existing partitions and data**. If there is anything to keep, back it up before continuing; for an explicitly disposable fresh installation, no backup is required. **Do not run `nixos-rebuild switch` with this new storage layout on the existing installation**: the generated device and resume paths do not match the currently installed partitions.
 
 ### 1. Boot an appropriate NixOS installer in UEFI mode
 
@@ -81,7 +81,7 @@ nix eval --raw '.#nixosConfigurations.thoth.config.system.build.toplevel.drvPath
 
 The swap check deliberately selects only defined attributes. Evaluating the entire `swapDevices` list as JSON can fail on optional NixOS fields such as `label` that have no configured value.
 
-Expected values include `thoth`, the pinned NVMe path, `bcachefs`, a Bcachefs UUID-based root device, `/dev/vg_thoth/lv_swap` for resume, a matching swap device, `true` for LVM initrd and Niri, and a derivation path. A successful evaluation does not prove the full system builds or boots.
+Expected values include `thoth`, the pinned NVMe path, `bcachefs`, a Bcachefs UUID-based root device, `/dev/nixos/swap` for resume, a matching swap device, `true` for LVM initrd and Niri, and a derivation path. A successful evaluation does not prove the full system builds or boots.
 
 ### 3. Inspect the pinned Disko plan
 
@@ -109,13 +109,13 @@ cryptsetup status cryptroot
 sudo pvs
 sudo vgs
 sudo lvs
-sudo blkid /dev/vg_thoth/lv_swap /dev/vg_thoth/lv_root
+sudo blkid /dev/nixos/swap /dev/nixos/root
 findmnt /mnt
 findmnt /mnt/boot
 df -h /mnt/boot /mnt
 ```
 
-Confirm Bcachefs `lv_root` at `/mnt`, persistent swap `lv_swap` (32 GiB), and a roughly 2 GiB FAT32 ESP at `/mnt/boot`. Verify `swapon --show` before installing. There is no ZFS pool or dedicated `/persist`.
+Confirm Bcachefs LV `root` at `/mnt`, persistent swap LV `swap` (32 GiB), and a roughly 2 GiB FAT32 ESP at `/mnt/boot`. Verify `swapon --show` before installing. There is no ZFS pool or dedicated `/persist`.
 
 ```fish
 sudo nixos-install \
