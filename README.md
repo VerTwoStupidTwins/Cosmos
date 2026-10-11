@@ -1,88 +1,78 @@
-# Cosmos: Thoth on NixOS 26.05, Bcachefs + Niri
+# Cosmos
 
-Rebuilt source tree for the Lenovo ThinkPad T490 (`thoth`). This consolidates
-the previous Cosmos Bcachefs baseline and the latest T490-only Niri package
-changes. The repository retains the **Dendritic Nix** module organization
-(`flake-parts` + `import-tree`), NixOS Facter and Disko.
+Declarative NixOS configuration for the homelab, starting with `thoth`, a Lenovo ThinkPad T490. Cosmos uses Dendritic Nix modules via [flake-parts](https://github.com/hercules-ci/flake-parts) and [import-tree](https://github.com/denful/import-tree).
 
-## What it configures
+**Current status:** Thoth is installed and running NixOS 26.05 with Niri. The working configuration is maintained in `/Cosmos` and tracked in this repository. Only `thoth` is currently defined as a NixOS host.
 
-- NixOS 26.05, x86_64-linux, hostname `thoth`, user `twins` with Fish.
-- GPT disk layout on the verified Toshiba NVMe by-id device: 2 GiB EFI/FAT32,
-  the remainder LUKS2 with **one native-Disko Bcachefs filesystem** at `/`.
-- Systemd initrd with a root device of `/dev/mapper/cryptroot`, zram swap.
-- **Persistent system**: no ZFS, Preservation, Impermanence, root rollback,
-  snapshots, dedicated `/persist`, or predefined password-hash secrets.
-- Niri + SDDM from the first boot, with hardware graphics, PipeWire,
-  Bluetooth, Polkit and a basic PAM entry for the lock screen.
-- All previously selected workstation packages: see `PACKAGES.md`.
-- **No custom Niri configuration**: no `config.kdl`, keybindings, autostarts,
-  Waybar settings, wallpaper themes or Home Manager dotfiles.
-- **No Chromebook convertible/tablet utilities**: no `wvkbd`,
-  `iio-niri`, `iio-sensor-proxy`, tablet-mode units, screen rotation,
-  or Chromebook-specific key remapping.
+## Thoth at a glance
 
-## Required machine-specific inputs
+| Area | Configuration |
+| --- | --- |
+| System | NixOS 26.05, `x86_64-linux`, Fish shell, user `twins` |
+| Disk | GPT with 2 GiB FAT32 ESP and LUKS2-encrypted Bcachefs root |
+| Boot / storage | systemd-boot, systemd initrd, `/dev/mapper/cryptroot`, zram |
+| Desktop | SDDM (Wayland), Niri, PipeWire, Bluetooth, LXQt Polkit |
+| Network | NetworkManager, firewall, OpenSSH, NetBird client `wt0` |
+| Credentials | 1Password desktop and SSH agent |
+| State | Persistent root; no ZFS, impermanence, or automatic root rollback |
 
-The original T490 `hardware/thoth/facter.json` cannot be recreated accurately
-without the T490 or the original Cosmos repository. **It is intentionally not
-included.** Restore it from your existing Cosmos checkout or regenerate it on
-the actual T490 using `nixos-facter`. See `hardware/thoth/README.md`.
+The Thoth-specific Disko layout is `disk-layouts/thoth.nix`. **Do not run Disko's destructive formatting mode on an already installed machine.** See [INSTALL.md](INSTALL.md) for installation and recovery precautions.
 
-`flake.lock` is also intentionally absent. Generate it on the NixOS installer
-(`nix flake lock`) or bring forward your existing lockfile and update it.
-**Commit both before installing** if working inside a Git clone.
+## Repository layout
 
-This source is ready to be checked, but is **not a verified bootable image**.
-Evaluate the entire NixOS configuration and confirm the installer kernel can
-load Bcachefs **before** executing any destructive Disko operation.
+- `flake.nix` and `flake.lock`: pinned inputs and flake entry point.
+- `modules/hosts/thoth.nix`: host composition, user, hardware report, and boot settings.
+- `modules/features/base.nix`: common Nix settings, locale, and base utilities.
+- `modules/features/workstation.nix` and `cli-tools.nix`: NetworkManager and workstation/CLI packages.
+- `modules/features/desktop/`: Niri, applications, and the LXQt Polkit systemd user service.
+- `modules/features/security/onepassword.nix`: 1Password desktop and OpenSSH agent integration.
+- `modules/features/netbird.nix`, `ssh.nix`, and `firewall.nix`: networking services.
+- `modules/features/storage/bcachefs-root.nix`: root filesystem support.
+- `hardware/thoth/facter.json`: the actual T490 hardware report used by NixOS Facter.
+- `PACKAGES.md`: package and service inventory.
 
-## Repository structure
+`flake.lock` and the Facter report are **already tracked** in the repository. Home Manager is declared as a flake input but is not yet activated. There are no custom Niri keybindings, themes, or Home Manager dotfiles in this repository.
 
-```text
-Cosmos-T490-Bcachefs-Niri/
-├── flake.nix
-├── disk-layouts/
-│   └── thoth.nix               # Native Disko Bcachefs + LUKS2
-├── hardware/
-│   └── thoth/
-│       └── README.md           # Add your actual facter.json here
-├── modules/
-│   ├── development.nix        # Formatter, dev shell, pinned Disko app
-│   ├── features/
-│   │   ├── base.nix
-│   │   ├── cli-tools.nix
-│   │   ├── workstation.nix
-│   │   ├── desktop/
-│   │   │   ├── niri.nix         # Desktop services and Wayland packages
-│   │   │   └── apps.nix         # Additional workstation apps
-│   │   └── storage/
-│   │       └── bcachefs-root.nix
-│   └── hosts/
-│       └── thoth.nix          # Niri enabled on first boot
-├── INSTALL.md
-├── PACKAGES.md
-└── README.md
-```
+## Network and SSH details
 
-The Home Manager flake input is reserved for future customization; it is **not
-currently activated**, to avoid generating user-specific configuration before
-the initial boot. The repository only declares `thoth`: other homelab hosts
-require their own verified hardware and disk layouts.
+The NetBird client is named `wt0` and uses network interface `wt0` with configured UDP port `58120`. NetBird's NixOS service is enabled to autostart; configuration alone does not prove peer enrollment or connectivity.
 
-## Quick verification (Fish shell)
+OpenSSH is enabled with `openFirewall = true`. **SSH is not yet restricted to NetBird**. Verify NetBird access before tightening SSH firewall rules, to avoid losing remote access.
+
+1Password supplies SSH identities through `~/.1password/agent.sock`. The NixOS OpenSSH client sets `IdentityAgent` system-wide, so `~/.ssh/config` is not required for that setting. The LXQt Polkit agent is declared as a systemd user service attached to `graphical-session.target`. The 1Password application must be running with its SSH agent enabled for the socket to accept connections.
+
+## Working on Thoth
+
+After merging changes on GitHub, update the local checkout:
 
 ```fish
-set -gx NIX_CONFIG 'experimental-features = nix-command flakes'
-# Restore hardware/thoth/facter.json first.
-nix flake lock
-nix flake show
-nix eval --json '.#nixosConfigurations.thoth.config.programs.niri.enable'
-nix eval --json '.#nixosConfigurations.thoth.config.services.displayManager.sddm.enable'
-nix eval --raw '.#nixosConfigurations.thoth.config.fileSystems."/".fsType'
-nix eval --raw '.#nixosConfigurations.thoth.config.fileSystems."/".device'
+cd /Cosmos
+git status --short
+git pull --ff-only
+
 nix eval --raw '.#nixosConfigurations.thoth.config.system.build.toplevel.drvPath'
 ```
 
-Read `INSTALL.md` for the full procedure and disk safety checks. **Do not run
-Disko based on this README alone.**
+For a **Nix configuration change**, rebuild locally after reviewing the diff:
+
+```fish
+sudo nixos-rebuild switch --flake /Cosmos#thoth
+```
+
+Documentation-only updates do not require a rebuild.
+
+Useful checks:
+
+```fish
+nix eval --raw '.#nixosConfigurations.thoth.config.services.netbird.clients.wt0.interface'
+systemctl --user status lxqt-policykit-agent.service
+ssh -G github.com | rg -i '^identityagent '
+set -gx SSH_AUTH_SOCK "$HOME/.1password/agent.sock"
+ssh-add -l
+```
+
+For installation from scratch or recovery, use [INSTALL.md](INSTALL.md), not the routine update commands above.
+
+## Security note
+
+This repository is **public**. The tracked Facter report can contain device identifiers or other machine metadata. Review it before publishing subsequent changes, and never commit passwords, SSH private keys, 1Password secrets, recovery keys, or LUKS key material.
