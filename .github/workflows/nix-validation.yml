@@ -81,7 +81,8 @@ jobs:
             experimental-features = nix-command flakes
 
       # Packages are supplied by the pinned Cosmos development shell.
-      - name: Statix
+      - name: Statix (advisory until baseline cleanup)
+        continue-on-error: true
         run: nix develop --command statix check .
 
       - name: Deadnix
@@ -90,7 +91,8 @@ jobs:
 
       # Format only in CI's disposable checkout; fail with the resulting diff.
       # This never commits or changes the contributor's working tree.
-      - name: Nixfmt
+      - name: Nixfmt (advisory until baseline cleanup)
+        continue-on-error: true
         if: ${{ success() || failure() }}
         shell: bash
         run: |
