@@ -36,8 +36,22 @@ jobs:
       - name: Validate flake outputs
         run: nix flake check --no-build --show-trace
 
-      - name: Evaluate Thoth system derivation
-        run: nix eval --raw '.#nixosConfigurations.thoth.config.system.build.toplevel.drvPath'
+      # Discover and evaluate all configured NixOS hosts, including future hosts.
+      - name: Evaluate all NixOS host derivations
+        shell: bash
+        run: |
+          hosts_json="$(nix eval --json --apply builtins.attrNames '.#nixosConfigurations')"
+          mapfile -t hosts < <(jq -r '.[]' <<< "$hosts_json")
+          if (( ${#hosts[@]} == 0 )); then
+            echo "::error::No NixOS hosts defined"
+            exit 1
+          fi
+          for host in "${hosts[@]}"; do
+            echo "::group::Evaluate $host"
+            nix eval --raw ".#nixosConfigurations.\"$host\".config.system.build.toplevel.drvPath"
+            echo
+            echo "::endgroup::"
+          done
 
       # Regression check for the previously mismatched NetBird client/interface.
       - name: Verify NetBird interface
@@ -48,3 +62,39 @@ jobs:
             echo "::error::Expected NetBird interface wt0; got '$interface'"
             exit 1
           fi
+
+  lint:
+    name: Nix style and lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out Cosmos
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      # Packages are supplied by the pinned Cosmos development shell.
+      - name: Statix
+        run: nix develop --command statix check .
+
+      - name: Deadnix
+        if: ${{ success() || failure() }}
+        run: nix develop --command deadnix --fail .
+
+      # Format only in CI's disposable checkout; fail with the resulting diff.
+      # This never commits or changes the contributor's working tree.
+      - name: Nixfmt
+        if: ${{ success() || failure() }}
+        shell: bash
+        run: |
+          nix develop --command bash -euo pipefail -c '
+            git ls-files -z -- "*.nix" | xargs -0 -r -n1 nixfmt
+            git diff --exit-code -- "*.nix"
+          '
