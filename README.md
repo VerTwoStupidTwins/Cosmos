@@ -16,7 +16,7 @@ Declarative NixOS configuration for the homelab, starting with `thoth`, a Lenovo
 | Credentials | 1Password desktop and SSH agent |
 | State | Persistent root; no ZFS, impermanence, or automatic root rollback |
 
-The proposed Thoth reinstall layout in `disk-layouts/thoth.nix` uses LUKS2, an LVM volume group, Bcachefs root and a 32 GiB swap LV for hibernation (16 GiB RAM now, 24 GiB planned). **The currently running installation still has the original direct LUKS/Bcachefs layout. Do not run `nixos-rebuild switch` with the reinstall branch or run Disko formatting on an existing installation without verified backups.** See [INSTALL.md](INSTALL.md) for installation and recovery precautions.
+The proposed Thoth reinstall layout in `disk-layouts/thoth.nix` uses LUKS2, LVM volume group `nixos` with logical volumes `root` and `swap` (visible as `nixos-root` and `nixos-swap`), Bcachefs root and a 32 GiB swap LV for hibernation (16 GiB RAM now, 24 GiB planned). **The currently running installation still has the original direct LUKS/Bcachefs layout. Do not run `nixos-rebuild switch` with the reinstall branch or run Disko formatting on an existing installation without verified backups.** See [INSTALL.md](INSTALL.md) for installation and recovery precautions.
 
 ## Repository layout
 
