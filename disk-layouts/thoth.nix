@@ -1,6 +1,6 @@
-# Thoth: single-device Bcachefs on LUKS2 using Disko's native Bcachefs type.
+# Fresh Thoth reinstall: LUKS2 with LVM root and persistent swap for hibernation.
 # DESTRUCTIVE if applied using disko --mode destroy,format,mount.
-# Disk is specific to Thoth. Verify /dev/disk/by-id resolves to the Toshiba NVMe.
+# Verify the by-id target against the actual internal T490 NVMe before formatting.
 {
   disko.devices = {
     disk.main = {
@@ -32,11 +32,33 @@
               initrdUnlock = true;
               settings.allowDiscards = true;
               content = {
-                type = "bcachefs";
-                filesystem = "thoth-root";
-                label = "thoth-root";
+                type = "lvm_pv";
+                vg = "vg_thoth";
               };
             };
+          };
+        };
+      };
+    };
+
+    lvm_vg.vg_thoth = {
+      type = "lvm_vg";
+      lvs = {
+        # Fixed-size swap is created before the root LV that uses all free extents.
+        # 32 GiB accommodates the planned 24 GiB RAM upgrade.
+        lv_swap = {
+          size = "32G";
+          content = {
+            type = "swap";
+            resumeDevice = true;
+          };
+        };
+        lv_root = {
+          size = "100%";
+          content = {
+            type = "bcachefs";
+            filesystem = "thoth-root";
+            label = "thoth-root";
           };
         };
       };
@@ -45,7 +67,10 @@
     bcachefs_filesystems."thoth-root" = {
       type = "bcachefs_filesystem";
       mountpoint = "/";
-      mountOptions = [ "noatime" ];
+      mountOptions = [
+        "noatime"
+        "x-systemd.device-timeout=infinity"
+      ];
       extraFormatArgs = [ "--compression=zstd" ];
     };
   };
