@@ -33,7 +33,7 @@
               settings.allowDiscards = true;
               content = {
                 type = "lvm_pv";
-                vg = "vg_thoth";
+                vg = "nixos";
               };
             };
           };
@@ -41,19 +41,19 @@
       };
     };
 
-    lvm_vg.vg_thoth = {
+    lvm_vg.nixos = {
       type = "lvm_vg";
       lvs = {
         # Fixed-size swap is created before the root LV that uses all free extents.
         # 32 GiB accommodates the planned 24 GiB RAM upgrade.
-        lv_swap = {
+        swap = {
           size = "32G";
           content = {
             type = "swap";
             resumeDevice = true;
           };
         };
-        lv_root = {
+        root = {
           size = "100%";
           content = {
             type = "bcachefs";
