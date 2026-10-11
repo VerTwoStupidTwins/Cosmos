@@ -29,7 +29,7 @@ in
         efi.canTouchEfiVariables = true;
       };
       initrd.services.lvm.enable = true;
-      resumeDevice = "/dev/vg_thoth/lv_swap";
+      resumeDevice = "/dev/nixos/swap";
     };
     powerManagement.enable = true;
 
