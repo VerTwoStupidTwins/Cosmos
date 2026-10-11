@@ -4,7 +4,7 @@
 
     services.netbird.clients.wt0 = {
       port = 58120;
-      interface = "wto";
+      interface = "wt0";
 
       hardened = true;
       autoStart = true;
