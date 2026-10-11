@@ -23,7 +23,7 @@
     environment.systemPackages = with pkgs; [
       waybar
       wofi
-      fuzzel  # Niri's unmodified default launcher binding.
+      fuzzel # Niri's unmodified default launcher binding.
       mako
       swayidle
       swaylock-effects
