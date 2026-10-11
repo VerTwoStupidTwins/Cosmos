@@ -73,11 +73,13 @@ nix eval --raw '.#nixosConfigurations.thoth.config.disko.devices.disk.main.devic
 nix eval --raw '.#nixosConfigurations.thoth.config.fileSystems."/".fsType'
 nix eval --raw '.#nixosConfigurations.thoth.config.fileSystems."/".device'
 nix eval --raw '.#nixosConfigurations.thoth.config.boot.resumeDevice'
-nix eval --json '.#nixosConfigurations.thoth.config.swapDevices'
+nix eval --json --apply 'map (swap: { device = swap.device; randomEncryption = swap.randomEncryption.enable; })' '.#nixosConfigurations.thoth.config.swapDevices'
 nix eval --json '.#nixosConfigurations.thoth.config.boot.initrd.services.lvm.enable'
 nix eval --json '.#nixosConfigurations.thoth.config.programs.niri.enable'
 nix eval --raw '.#nixosConfigurations.thoth.config.system.build.toplevel.drvPath'
 ```
+
+The swap check deliberately selects only defined attributes. Evaluating the entire `swapDevices` list as JSON can fail on optional NixOS fields such as `label` that have no configured value.
 
 Expected values include `thoth`, the pinned NVMe path, `bcachefs`, a Bcachefs UUID-based root device, `/dev/vg_thoth/lv_swap` for resume, a matching swap device, `true` for LVM initrd and Niri, and a derivation path. A successful evaluation does not prove the full system builds or boots.
 
