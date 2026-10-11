@@ -7,20 +7,22 @@
 	"1password-gui"
       ];
     
-    programs._1password.enable = true;
+    programs = {
+      _1password.enable = true;
 
-    programs._1password-gui = {
-      enable = true;
-      polkitPolicyOwners = [ "twins" ];
-    };
+      _1password-gui = {
+        enable = true;
+        polkitPolicyOwners = [ "twins" ];
+      };
 
-    programs.ssh = {
+      ssh = {
       startAgent = false;
 
       extraConfig = ''
         Host *
 	  IdentityAgent ~/.1password/agent.sock
       '';
+      };
     };
   };
 }
