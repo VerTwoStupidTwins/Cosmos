@@ -2,7 +2,10 @@
   # Modules in this directory contribute to shared profiles.
   flake.modules.nixos.base = { pkgs, ... }: {
     nix.settings = {
-      experimental-features = [ "nix-command" "flakes" ];
+      experimental-features = [
+        "nix-command"
+        "flakes"
+      ];
       max-jobs = 1;
       cores = 2;
     };
