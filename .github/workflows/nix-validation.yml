@@ -53,6 +53,17 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Hibernation must point to the encrypted LVM swap, not the empty default.
+      - name: Verify Thoth hibernation resume device
+        shell: bash
+        run: |
+          resume="$(nix eval --raw '.#nixosConfigurations.thoth.config.boot.resumeDevice')"
+          swap="$(nix eval --raw '.#nixosConfigurations.thoth.config.swapDevices.0.device')"
+          if [[ "$resume" != "/dev/vg_thoth/lv_swap" || "$swap" != "$resume" ]]; then
+            echo "::error::Thoth resume '$resume' must match swap '$swap' at /dev/vg_thoth/lv_swap"
+            exit 1
+          fi
+
       # Regression check for the previously mismatched NetBird client/interface.
       - name: Verify NetBird interface
         shell: bash
