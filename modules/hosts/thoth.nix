@@ -4,7 +4,7 @@ let
   nixos = config.flake.modules.nixos;
 in
 {
-  flake.modules.nixos.thoth = { lib, pkgs, ... }: {
+  flake.modules.nixos.thoth = { pkgs, ... }: {
     imports = [
       nixos.base
       nixos.workstation
@@ -21,12 +21,17 @@ in
     hardware.facter.reportPath = ../../hardware/thoth/facter.json;
     hardware.enableRedistributableFirmware = true;
 
-    boot.loader.systemd-boot.enable = true;
-    boot.loader.efi.canTouchEfiVariables = true;
-
-    # NixOS 26.05 systemd initrd should wait for the decrypted mapper.
-    # This is a single-device Bcachefs filesystem inside LUKS.
-    fileSystems."/".device = lib.mkForce "/dev/mapper/cryptroot";
+    # Root and persistent swap are LVs inside cryptroot.
+    # Explicitly identify the hibernation resume LV for systemd initrd.
+    boot = {
+      loader = {
+        systemd-boot.enable = true;
+        efi.canTouchEfiVariables = true;
+      };
+      initrd.services.lvm.enable = true;
+      resumeDevice = "/dev/nixos/swap";
+    };
+    powerManagement.enable = true;
 
     # Persistent root: no ZFS, Preservation, or root snapshot rollback.
     users.mutableUsers = true;
