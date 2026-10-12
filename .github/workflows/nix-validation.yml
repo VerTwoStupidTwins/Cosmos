@@ -64,6 +64,20 @@ jobs:
             exit 1
           fi
 
+      # Regression check for unattended laptop hibernation and UPower thresholds.
+      - name: Verify Thoth laptop power policy
+        shell: bash
+        run: |
+          lid="$(nix eval --raw '.#nixosConfigurations.thoth.config.services.logind.settings.Login.HandleLidSwitch')"
+          delay="$(nix eval --raw '.#nixosConfigurations.thoth.config.systemd.sleep.settings.Sleep.HibernateDelaySec')"
+          battery_action="$(nix eval --raw '.#nixosConfigurations.thoth.config.services.upower.criticalPowerAction')"
+          battery_percent="$(nix eval --json '.#nixosConfigurations.thoth.config.services.upower.percentageAction')"
+          upower_enabled="$(nix eval --json '.#nixosConfigurations.thoth.config.services.upower.enable')"
+          [[ "$lid" == "suspend-then-hibernate" ]] || exit 1
+          [[ "$delay" == "60min" ]] || exit 1
+          [[ "$battery_action" == "Hibernate" ]] || exit 1
+          [[ "$battery_percent" == "8" && "$upower_enabled" == "true" ]] || exit 1
+
       # Regression check for the previously mismatched NetBird client/interface.
       - name: Verify NetBird interface
         shell: bash

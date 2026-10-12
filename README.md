@@ -9,14 +9,14 @@ Declarative NixOS configuration for the homelab, starting with `thoth`, a Lenovo
 | Area | Configuration |
 | --- | --- |
 | System | NixOS 26.05, `x86_64-linux`, Fish shell, user `twins` |
-| Disk (currently installed) | GPT with 2 GiB FAT32 ESP and LUKS2-encrypted Bcachefs root |
-| Boot / storage (currently installed) | systemd-boot, systemd initrd, `/dev/mapper/cryptroot`, zram |
+| Disk (currently installed) | GPT with 2 GiB FAT32 ESP and LUKS2-encrypted LVM: Bcachefs `nixos-root` and 32 GiB swap `nixos-swap` |
+| Boot / storage (currently installed) | systemd-boot, systemd initrd, `/dev/mapper/cryptroot`, persistent swap and resume at `/dev/nixos/swap` |
 | Desktop | SDDM (Wayland), Niri, PipeWire, Bluetooth, LXQt Polkit |
 | Network | NetworkManager, firewall, OpenSSH, NetBird client `wt0` |
 | Credentials | 1Password desktop and SSH agent |
 | State | Persistent root; no ZFS, impermanence, or automatic root rollback |
 
-The proposed Thoth reinstall layout in `disk-layouts/thoth.nix` uses LUKS2, LVM volume group `nixos` with logical volumes `root` and `swap` (visible as `nixos-root` and `nixos-swap`), Bcachefs root and a 32 GiB swap LV for hibernation (16 GiB RAM now, 24 GiB planned). **The currently running installation still has the original direct LUKS/Bcachefs layout. Do not run `nixos-rebuild switch` with the reinstall branch or run Disko formatting on an existing installation without verified backups.** See [INSTALL.md](INSTALL.md) for installation and recovery precautions.
+Thoth has been reinstalled with LUKS2, LVM volume group `nixos`, Bcachefs `root` and a 32 GiB `swap` LV for hibernation (16 GiB RAM now, 24 GiB planned). A manual hibernate/resume test successfully restored Niri. **Never rerun destructive Disko formatting for routine rebuilds.** See [INSTALL.md](INSTALL.md) for installation and recovery precautions.
 
 ## Repository layout
 
@@ -28,6 +28,7 @@ The proposed Thoth reinstall layout in `disk-layouts/thoth.nix` uses LUKS2, LVM 
 - `modules/features/security/onepassword.nix`: 1Password desktop and OpenSSH agent integration.
 - `modules/features/netbird.nix`, `ssh.nix`, and `firewall.nix`: networking services.
 - `modules/features/storage/bcachefs-root.nix`: root filesystem support.
+- `modules/features/power/laptop-sleep.nix`: lid-driven suspend-then-hibernate, UPower critical-battery protection, and a Niri sleep-lock service.
 - `hardware/thoth/facter.json`: the actual T490 hardware report used by NixOS Facter.
 - `PACKAGES.md`: package and service inventory.
 
@@ -53,7 +54,7 @@ git pull --ff-only
 nix eval --raw '.#nixosConfigurations.thoth.config.system.build.toplevel.drvPath'
 ```
 
-For a **non-storage Nix configuration change**, rebuild locally after reviewing the diff. **Do not apply the reinstall branch to the currently installed filesystem:**
+For a **non-storage Nix configuration change**, rebuild locally after reviewing the diff:
 
 ```fish
 sudo nixos-rebuild switch --flake /Cosmos#thoth
