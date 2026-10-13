@@ -34,6 +34,13 @@ in
     };
     powerManagement.enable = true;
 
+    # Install Hermes CLI and Desktop without a persistent gateway service.
+    # Runtime auth, sessions and memory remain in ~/.hermes.
+    environment.systemPackages = [
+      inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.default
+      inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop
+    ];
+
     # Persistent root: no ZFS, Preservation, or root snapshot rollback.
     users.mutableUsers = true;
     users.users.twins = {

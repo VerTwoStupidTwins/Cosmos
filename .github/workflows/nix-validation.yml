@@ -32,10 +32,10 @@ jobs:
           extra_nix_config: |
             experimental-features = nix-command flakes
 
-      # Evaluate flake outputs without compiling the whole NixOS desktop.
-      - name: Validate flake outputs
-        run: nix flake check --no-build --show-trace
-
+      # Evaluate host derivations with a writable store before read-only flake checks.
+      # Hermes upstream uses filtered source paths when uv2nix reads uv.lock;
+      # nix flake check --no-build on a clean store cannot realise those paths.
+      # Workaround until https://github.com/NousResearch/hermes-agent/pull/71228 lands.
       # Discover and evaluate all configured NixOS hosts, including future hosts.
       - name: Evaluate all NixOS host derivations
         shell: bash
@@ -52,6 +52,10 @@ jobs:
             echo
             echo "::endgroup::"
           done
+
+      # Evaluate flake outputs without compiling the whole NixOS desktop.
+      - name: Validate flake outputs
+        run: nix flake check --no-build --show-trace
 
       # Hibernation must point to the encrypted LVM swap, not the empty default.
       - name: Verify Thoth hibernation resume device
