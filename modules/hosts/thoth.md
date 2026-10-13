@@ -119,15 +119,19 @@ modify. Only after verified generation/listening and approval to change TTS, run
 these **Bash** commands (no pip, uv, or runtime PM installation):
 
 ```bash
-hermes -p default config set tts.providers.piper-local.type command
-hermes -p default config set tts.providers.piper-local.command 'piper --model {model} --length-scale 1.0 --output-file {output_path} < {input_path}'
-hermes -p default config set tts.providers.piper-local.model "${XDG_CACHE_HOME:-$HOME/.cache}/piper-voices/en_US-lessac-medium.onnx"
-hermes -p default config set tts.providers.piper-local.output_format wav
-hermes -p default config set tts.providers.piper-local.timeout 180
+hermes -p default config set --force tts.providers.piper-local.type command
+hermes -p default config set --force tts.providers.piper-local.command 'piper --model {model} --length-scale 1.0 --output-file {output_path} < {input_path}'
+hermes -p default config set --force tts.providers.piper-local.model "${XDG_CACHE_HOME:-$HOME/.cache}/piper-voices/en_US-lessac-medium.onnx"
+hermes -p default config set --force tts.providers.piper-local.output_format wav
+hermes -p default config set --force tts.providers.piper-local.timeout 180
 hermes -p default config set tts.provider piper-local
 ```
 
 The provider is named `piper-local` to avoid shadowing Hermes's built-in provider.
+The pinned CLI validator rejects these dynamically named provider paths without
+`--force`, even though the TTS runtime reads them. Keep the `tts.providers` prefix;
+the validator's suggested top-level `providers.piper-local` path is not the TTS
+registry. `tts.provider` is a recognized key and does not need `--force`.
 These commands change only TTS keys in `default`, not GPT models, Codex OAuth,
 the sticky active profile or other profiles. Start a fresh default-profile
 CLI/Desktop session after applying them. No rebuild is needed to change the
