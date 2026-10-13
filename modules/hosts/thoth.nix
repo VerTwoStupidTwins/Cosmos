@@ -10,6 +10,7 @@ in
       nixos.workstation
       nixos."bcachefs-root"
       nixos."niri-desktop"
+      nixos."laptop-sleep"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/thoth.nix
     ];
