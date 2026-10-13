@@ -35,6 +35,7 @@ Multiple feature files can extend the same profile:
 | `niri-desktop` | Niri/SDDM, audio, graphics, desktop packages and integration |
 | `bcachefs-root` | Bcachefs support, systemd initrd, disabled zram swap |
 | `laptop-sleep` | Lid handling, timed hibernation, UPower, Niri sleep locking |
+| `local-tts` | nixpkgs Piper CPU speech CLI and timing tools; Hermes packages remain unchanged |
 
 Host modules compose these profiles with machine-specific settings and expose `flake.nixosConfigurations.<host>` through `nixpkgs.lib.nixosSystem`. Disk layouts outside `modules/` are imported explicitly. Host Markdown files are documentation, not imported Nix modules.
 
