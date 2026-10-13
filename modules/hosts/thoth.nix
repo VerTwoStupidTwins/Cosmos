@@ -11,6 +11,7 @@ in
       nixos."bcachefs-root"
       nixos."niri-desktop"
       nixos."laptop-sleep"
+      nixos."local-tts"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/thoth.nix
     ];

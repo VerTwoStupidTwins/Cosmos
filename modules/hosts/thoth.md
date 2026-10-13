@@ -38,6 +38,102 @@ NetBird's named client and interface are both `wt0`, with UDP port `58120`, auto
 
 1Password provides SSH identities at `~/.1password/agent.sock`; the OpenSSH client sets `IdentityAgent` system-wide and the built-in SSH agent is disabled. The GUI must be running with Settings → Developer → Use the SSH agent enabled. A refused connection can mean the agent has no socket listener. Its unfree allowance is narrowly declared in the workstation security feature.
 
+## Local speech: packaged Piper
+
+The [local TTS feature](../features/local-tts.nix) installs nixpkgs's Piper CPU
+CLI and GNU Time. Training, HTTP-server and alignment extras are disabled through
+the package's supported overrides. Hermes CLI/Desktop packages and their sealed
+Python dependencies are unchanged. There are no KittenTTS dependencies, custom
+upstream patches, services, activation scripts or declaratively managed profiles.
+
+After explicit deployment approval, use the routine non-storage update procedure
+below. Voice downloads and inference tests are separate post-deployment steps.
+The initial voice is `en_US-lessac-medium`: approximately **60.3 MiB** for its ONNX
+model and JSON config, stored in a user-writable cache outside Git/the Nix store.
+
+### Download and verify the voice (after approval)
+
+Run these **Bash** commands as `twins`. The pinned revision and hashes identify
+the exact voice files; do not overwrite an existing voice without reviewing it.
+
+```bash
+voices="${XDG_CACHE_HOME:-$HOME/.cache}/piper-voices"
+mkdir -p "$voices"
+base='https://huggingface.co/rhasspy/piper-voices/resolve/c10ece1aade47bb51c153c893d14e5bf8e5b7117/en/en_US/lessac/medium'
+for suffix in onnx onnx.json; do
+  file="$voices/en_US-lessac-medium.$suffix"
+  if [[ -e "$file" || -L "$file" ]]; then
+    printf 'Keeping existing file; verify its hash: %s\n' "$file"
+  else
+    curl --fail --location --output "$file" "$base/en_US-lessac-medium.$suffix"
+  fi
+done
+printf '%s  %s\n' \
+  5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f "$voices/en_US-lessac-medium.onnx" \
+  efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0 "$voices/en_US-lessac-medium.onnx.json" \
+  | sha256sum --check
+```
+
+Stop on any download/hash failure. Package-build validation does not run these
+commands or download voices. Cached local paths require no cloud inference or
+paid API, and Piper defaults to CPU unless `--cuda` is explicitly requested.
+
+### Offline samples and timing (after approval)
+
+Keep Thoth on AC with its lid open and other CPU-heavy work idle. These **Bash**
+commands generate identical short/long samples across three repetitions, saving
+audio and elapsed/user/system CPU time, CPU percentage and peak RSS:
+
+```bash
+voice="${XDG_CACHE_HOME:-$HOME/.cache}/piper-voices/en_US-lessac-medium.onnx"
+results="$HOME/piper-results/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$results"
+printf '%s\n' 'Your next meeting starts soon. Save your work and bring your notes.' > "$results/short.txt"
+printf '%s\n' 'A local voice assistant turns written replies into speech on your computer. Once its voice files are downloaded, the speech engine does not need an internet connection. Short replies should begin quickly and sound clear. Longer explanations should remain natural, with comfortable pauses and consistent pronunciation. Listen for clipped words, odd emphasis, harsh consonants, and pauses that interrupt the meaning. Choose a voice that balances speed, clarity, and comfort throughout a busy day.' > "$results/long.txt"
+for sample in short long; do
+  for trial in 1 2 3; do
+    unshare --user --map-root-user --net \
+      time --format='elapsed_s=%e user_cpu_s=%U system_cpu_s=%S cpu_percent=%P peak_rss_kib=%M' \
+      --output="$results/$sample-$trial.metrics" \
+      piper --model "$voice" --length-scale 1.0 \
+      --input-file "$results/$sample.txt" --output-file "$results/$sample-$trial.wav"
+  done
+done
+```
+
+The network namespace isolates only the test processes, not host networking or
+NetBird. Stop if namespaces are unavailable; do not weaken host policy. Each CLI
+call reloads the model. Later repetitions warm the **filesystem cache**, not a
+resident model. These timings measure complete-file generation, **not** first
+audio/playback latency. A resident-model/first-audio benchmark remains a separate
+post-deployment test; command providers launch a new process per request. Listen
+to the WAV files before changing the active provider, then test actual Hermes
+CLI/Desktop playback. Offline TTS does not make GPT/Codex conversations local.
+
+### Hermes Daily Assistant (`default`)
+
+Use Hermes's supported command-provider interface to call the packaged executable
+from both CLI and Desktop. Its built-in `piper` provider instead imports a Python
+SDK into Hermes's interpreter, which this configuration deliberately does not
+modify. Only after verified generation/listening and approval to change TTS, run
+these **Bash** commands (no pip, uv, or runtime PM installation):
+
+```bash
+hermes -p default config set tts.providers.piper-local.type command
+hermes -p default config set tts.providers.piper-local.command 'piper --model {model} --length-scale 1.0 --output-file {output_path} < {input_path}'
+hermes -p default config set tts.providers.piper-local.model "${XDG_CACHE_HOME:-$HOME/.cache}/piper-voices/en_US-lessac-medium.onnx"
+hermes -p default config set tts.providers.piper-local.output_format wav
+hermes -p default config set tts.providers.piper-local.timeout 180
+hermes -p default config set tts.provider piper-local
+```
+
+The provider is named `piper-local` to avoid shadowing Hermes's built-in provider.
+These commands change only TTS keys in `default`, not GPT models, Codex OAuth,
+the sticky active profile or other profiles. Start a fresh default-profile
+CLI/Desktop session after applying them. No rebuild is needed to change the
+voice/model path. Preserve the previous TTS values for rollback rather than
+overwriting the entire config.
+
 ## Routine updates
 
 Documentation-only changes do not require a rebuild. For merged configuration updates, start on a clean checkout, inspect incoming changes, and fast-forward local main; do not edit or commit on main. Work on topic branches follows AGENTS.md.
