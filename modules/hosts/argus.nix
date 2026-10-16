@@ -7,6 +7,7 @@ in
   flake.modules.nixos.argus = { pkgs, ... }: {
     imports = [
       nixos.base
+      nixos."bcachefs-root"
       nixos."frigate-nvr"
       nixos."nvidia-headless"
       inputs.disko.nixosModules.disko

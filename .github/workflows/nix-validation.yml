@@ -120,6 +120,8 @@ jobs:
             hwaccel = c.services.frigate.settings.ffmpeg.hwaccel_args;
             mediaType = c.fileSystems."/var/lib/frigate".fsType;
             rootType = c.fileSystems."/".fsType;
+            bcachefsSupport = c.boot.supportedFilesystems.bcachefs or false;
+            systemdInitrd = c.boot.initrd.systemd.enable;
             rootDisk = c.disko.devices.disk.system.device;
             mediaDisk = c.disko.devices.disk.media.device;
             mountDependencies = c.systemd.services.frigate.unitConfig.RequiresMountsFor;
@@ -142,7 +144,8 @@ jobs:
             and .cameras == {} and (.detect | not) and (.record | not) and (.mqtt | not)
             and .database == "/var/lib/frigate-db/frigate.db"
             and .hwaccel == "preset-nvidia"
-            and .mediaType == "ext4" and .rootType == "ext4"
+            and .mediaType == "xfs" and .rootType == "bcachefs"
+            and .bcachefsSupport and .systemdInitrd
             and .rootDisk == "/dev/disk/by-id/ata-GIGASTONE_SSD_128GB_GSTPDEGAAB25250706"
             and .mediaDisk == "/dev/disk/by-id/ata-ST4000VN008-2DR166_ZDHBZ39G"
             and (.mountDependencies | index("/var/lib/frigate") != null)
