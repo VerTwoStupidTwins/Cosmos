@@ -33,7 +33,7 @@ Do not reuse an existing branch or rewrite history without checking with the use
 - Put reusable features in `modules/features/`; put host composition, user/hardware choices, and `nixosConfigurations.<host>` in `modules/hosts/<host>.nix`.
 - Keep host operations in `modules/hosts/<host>.md`, next to the host module. Keep root README content focused on repository/flake structure; do not create redundant host guides or package inventories.
 - Keep machine-specific Disko layouts in `disk-layouts/<host>.nix` and real Facter reports in `hardware/<host>/facter.json`.
-- `thoth` is currently the only host; it uses `x86_64-linux` and NixOS 26.05. Home Manager is an input, not an activated configuration.
+- `thoth` is currently the only host; it uses `x86_64-linux` and pinned `nixos-unstable`, with `system.stateVersion = "26.05"`. Home Manager is an input, not an activated configuration. greetd/tuigreet discovers installed sessions and remembers each user's selection, without a forced compositor command. `laptop-sleep` declares shared Wayland locking for Niri and Mango; deployment and runtime lock/resume tests remain separate requirements.
 - Preserve `system.stateVersion` unless a deliberate migration requires changing it; it is not a package-release selector.
 - Prefer focused declarative contributions and normal module merging. Do not introduce `mkForce`, global unfree enablement, overlays, or imperative workarounds without explaining the need.
 - Audit shared assumptions when adding hosts: the base profile enables OpenSSH and NetBird `wt0`, and the 1Password policy names `twins`.
@@ -73,7 +73,7 @@ nix develop --no-write-lock-file --command deadnix --fail .
 
 Check formatting with the pinned Nixfmt. Formatting tools may rewrite files: review resulting changes and do not copy CI's in-place formatting step into a read-only exploration. CI formats tracked Nix files in its disposable checkout and fails on the diff.
 
-Retain the regression checks in `.github/workflows/nix-validation.yml`: Thoth resume and swap must match `/dev/nixos/swap`; lid policy is `suspend-then-hibernate`; delay is `60min`; UPower is enabled with `Hibernate` at 8%; NetBird interface is `wt0`.
+Retain the regression checks in `.github/workflows/nix-validation.yml`: Thoth resume and swap must match `/dev/nixos/swap`; lid policy is `suspend-then-hibernate`; delay is `60min`; UPower is enabled with `Hibernate` at 8%; NetBird interface is `wt0`; Niri and Mango are enabled/registered; the shared Wayland locker follows `graphical-session.target`, checks `WAYLAND_DISPLAY`, and handles logind lock/before-sleep events; greetd has a nonempty tuigreet command with generated session directories, per-user session memory, no `--cmd`/forced desktop environment, text-greeter mode and no autologin, while SDDM is disabled.
 
 Evaluation is not a successful build; a build is not a boot, network-connectivity, screen-lock, or resume test. Perform additional build/runtime checks only within the authorized scope. Nix commands may download inputs and write to the Nix store even with `--no-build`; do not run them for strictly read-only requests. For Git inspections, use `GIT_OPTIONAL_LOCKS=0` where appropriate.
 

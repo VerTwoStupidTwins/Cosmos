@@ -9,7 +9,10 @@ in
       nixos.base
       nixos.workstation
       nixos."bcachefs-root"
+      nixos."base-desktop"
       nixos."niri-desktop"
+      nixos."mango-desktop"
+      nixos."tuigreet-login"
       nixos."laptop-sleep"
       nixos."local-tts"
       inputs.disko.nixosModules.disko
