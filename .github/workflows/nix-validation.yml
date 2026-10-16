@@ -127,6 +127,13 @@ jobs:
             and .stateVersion == "26.05"
           '
 
+      - name: Verify Quickshell is installed
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json \
+            --apply 'packages: builtins.any (p: (p.pname or "") == "quickshell") packages' \
+            '.#nixosConfigurations.thoth.config.environment.systemPackages' | jq -e '.'
+
       - name: Verify Mango Waybar autostart
         shell: bash
         run: |
