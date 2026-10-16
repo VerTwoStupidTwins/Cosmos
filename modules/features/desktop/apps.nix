@@ -28,6 +28,9 @@
       ffmpeg
       mpv
 
+      # QML desktop-shell toolkit; no shell configuration or autostart.
+      quickshell
+
       # General workstation applications.
       firefox
       emacs
