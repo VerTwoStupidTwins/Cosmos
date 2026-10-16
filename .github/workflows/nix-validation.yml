@@ -100,6 +100,60 @@ jobs:
             exit 1
           fi
 
+      - name: Verify Argus headless NVR baseline
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: {
+            hostname = c.networking.hostName;
+            adminKeys = c.users.users.twins.openssh.authorizedKeys.keys;
+            facter = c.hardware.facter.enable;
+            reportName = if c.hardware.facter.reportPath == null then "" else builtins.baseNameOf c.hardware.facter.reportPath;
+            initrdModules = c.boot.initrd.availableKernelModules;
+            netbird = c.services.netbird.clients.wt0.interface;
+            dhcp = c.networking.useDHCP;
+            frigate = c.services.frigate.enable;
+            cameras = c.services.frigate.settings.cameras;
+            detect = c.services.frigate.settings.detect.enabled;
+            record = c.services.frigate.settings.record.enabled;
+            mqtt = c.services.frigate.settings.mqtt.enabled;
+            database = c.services.frigate.settings.database.path;
+            hwaccel = c.services.frigate.settings.ffmpeg.hwaccel_args;
+            mediaType = c.fileSystems."/var/lib/frigate".fsType;
+            rootType = c.fileSystems."/".fsType;
+            rootDisk = c.disko.devices.disk.system.device;
+            mediaDisk = c.disko.devices.disk.media.device;
+            mountDependencies = c.systemd.services.frigate.unitConfig.RequiresMountsFor;
+            mountGuard = c.systemd.services.frigate.unitConfig.ConditionPathIsMountPoint;
+            nvidia = c.hardware.nvidia.enabled;
+            openDriver = c.hardware.nvidia.open;
+            xserver = c.services.xserver.enable;
+            greetd = c.services.greetd.enable;
+            networkmanager = c.networking.networkmanager.enable;
+            onepassword = c.programs._1password-gui.enable;
+            httpPorts = c.networking.firewall.interfaces.wt0.allowedTCPPorts;
+            globalPorts = c.networking.firewall.allowedTCPPorts;
+            sleep = c.systemd.targets.sleep.enable;
+            stateVersion = c.system.stateVersion;
+          }' '.#nixosConfigurations.argus.config' | jq -e '
+            .hostname == "argus" and .netbird == "wt0" and .dhcp and .frigate
+            and (.adminKeys | length > 0 and all(.[]; startswith("ssh-ed25519 ")))
+            and .facter and .reportName == "facter.json"
+            and (.initrdModules | index("ahci") != null and index("sd_mod") != null)
+            and .cameras == {} and (.detect | not) and (.record | not) and (.mqtt | not)
+            and .database == "/var/lib/frigate-db/frigate.db"
+            and .hwaccel == "preset-nvidia"
+            and .mediaType == "ext4" and .rootType == "ext4"
+            and .rootDisk == "/dev/disk/by-id/ata-GIGASTONE_SSD_128GB_GSTPDEGAAB25250706"
+            and .mediaDisk == "/dev/disk/by-id/ata-ST4000VN008-2DR166_ZDHBZ39G"
+            and (.mountDependencies | index("/var/lib/frigate") != null)
+            and .mountGuard == "/var/lib/frigate"
+            and .nvidia and .openDriver
+            and (.xserver | not) and (.greetd | not) and (.networkmanager | not) and (.onepassword | not)
+            and (.httpPorts | index(80) != null)
+            and (.globalPorts | index(80) == null)
+            and (.sleep | not) and .stateVersion == "26.05"
+          '
+
       # Mango and Niri must both remain available through the session chooser.
       - name: Verify Thoth desktop sessions
         shell: bash
