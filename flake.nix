@@ -2,7 +2,7 @@
   description = "Cosmos: Dendritic NixOS homelab";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     import-tree.url = "github:denful/import-tree";
     hermes-agent.url = "github:NousResearch/hermes-agent";
@@ -14,7 +14,7 @@
 
     # Not activated until the desktop stage.
     home-manager = {
-      url = "github:nix-community/home-manager/release-26.05";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

@@ -82,6 +82,14 @@ jobs:
           [[ "$battery_action" == "Hibernate" ]] || exit 1
           [[ "$battery_percent" == "8" && "$upower_enabled" == "true" ]] || exit 1
 
+      # Battery protection must not depend on a desktop client activating UPower.
+      - name: Verify UPower starts without a desktop client
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'services: services.upower.wantedBy or []' \
+            '.#nixosConfigurations.thoth.config.systemd.services' \
+            | jq -e 'index("multi-user.target") != null'
+
       # Regression check for the previously mismatched NetBird client/interface.
       - name: Verify NetBird interface
         shell: bash
@@ -91,6 +99,111 @@ jobs:
             echo "::error::Expected NetBird interface wt0; got '$interface'"
             exit 1
           fi
+
+      # Mango and Niri must both remain available through the session chooser.
+      - name: Verify Thoth desktop sessions
+        shell: bash
+        run: |
+          nix eval --json --apply 'c: {
+            niri = c.programs.niri.enable;
+            mango = c.programs.mango.enable;
+            sddm = c.services.displayManager.sddm.enable;
+            greetd = c.services.greetd.enable;
+            textGreeter = c.services.greetd.useTextGreeter;
+            greeterCommand = if c.services.greetd.enable then (c.services.greetd.settings.default_session.command or "") else "";
+            greeterUser = if c.services.greetd.enable then (c.services.greetd.settings.default_session.user or "") else "";
+            autoLogin = c.services.displayManager.autoLogin.enable || (c.services.greetd.enable && (c.services.greetd.settings ? initial_session));
+            sessionDirectory = "${c.services.displayManager.sessionData.desktops}/share/wayland-sessions";
+            sessions = builtins.concatLists (map (p: p.providedSessions) c.services.displayManager.sessionPackages);
+            mangoSessionTarget = builtins.elem c.programs.mango.package c.systemd.packages;
+            stateVersion = c.system.stateVersion;
+          }' '.#nixosConfigurations.thoth.config' | jq -e '
+            .niri and .mango and (.sddm | not) and .greetd and .textGreeter
+            and .greeterUser == "greeter" and (.autoLogin | not)
+            and (.greeterCommand | contains("tuigreet") and contains("--sessions") and contains("--xsessions") and contains("--remember-user-session") and (contains("--cmd") | not) and (contains("--env") | not))
+            and (.sessionDirectory as $directory | .greeterCommand | contains($directory))
+            and (.sessions | index("niri") != null and index("mango") != null)
+            and .mangoSessionTarget
+            and .stateVersion == "26.05"
+          '
+
+      - name: Verify Mango Waybar autostart
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: {
+            wantedBy = c.systemd.user.services.waybar.wantedBy or [];
+            condition = c.systemd.user.services.waybar.unitConfig.ConditionEnvironment or "";
+            packagedUnit = builtins.any (p: (p.pname or "") == "waybar") c.systemd.packages;
+          }' '.#nixosConfigurations.thoth.config' | jq -e '
+            .wantedBy == ["mango-session.target"]
+            and .condition == "WAYLAND_DISPLAY"
+            and .packagedUnit
+          '
+
+      - name: Verify Mango Mako autostart
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: {
+            wantedBy = c.systemd.user.services.mako.wantedBy or [];
+            condition = c.systemd.user.services.mako.unitConfig.ConditionEnvironment or "";
+            packagedUnit = builtins.any (p: (p.pname or "") == "mako") c.systemd.packages;
+          }' '.#nixosConfigurations.thoth.config' | jq -e '
+            .wantedBy == ["mango-session.target"]
+            and .condition == "WAYLAND_DISPLAY"
+            and .packagedUnit
+          '
+
+      - name: Verify Mango awww autostart
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: let
+            s = c.systemd.user.services.awww or {};
+            packages = builtins.filter (p: (p.pname or "") == "awww") c.environment.systemPackages;
+            package = if packages == [] then null else builtins.head packages;
+          in {
+            installed = package != null;
+            wantedBy = s.wantedBy or [];
+            partOf = s.partOf or [];
+            after = s.after or [];
+            condition = s.unitConfig.ConditionEnvironment or "";
+            command = s.serviceConfig.ExecStart or "";
+            daemonCommand = if package != null then "${package}/bin/awww-daemon" else "";
+            type = s.serviceConfig.Type or "";
+            restart = s.serviceConfig.Restart or "";
+          }' '.#nixosConfigurations.thoth.config' | jq -e '
+            .installed
+            and .wantedBy == ["mango-session.target"]
+            and .partOf == ["mango-session.target"]
+            and .after == ["graphical-session.target"]
+            and .condition == "WAYLAND_DISPLAY"
+            and .command == .daemonCommand
+            and .type == "simple" and .restart == "on-failure"
+          '
+
+      - name: Verify compositor-independent Wayland locking
+        shell: bash
+        run: |
+          nix eval --json --apply 'c: let
+            s = c.systemd.user.services.swayidle;
+            package = name: builtins.head (builtins.filter (p: (p.pname or "") == name) c.environment.systemPackages);
+          in {
+            wantedBy = s.wantedBy;
+            partOf = s.partOf;
+            after = s.after;
+            condition = s.unitConfig.ConditionEnvironment or "";
+            command = s.serviceConfig.ExecStart;
+            idleCommand = "${package "swayidle"}/bin/swayidle";
+            lockCommand = "${package "swaylock-effects"}/bin/swaylock -f";
+            restart = s.serviceConfig.Restart;
+            pam = builtins.hasAttr "swaylock" c.security.pam.services;
+          }' '.#nixosConfigurations.thoth.config' | jq -e '
+            .wantedBy == ["graphical-session.target"]
+            and .partOf == ["graphical-session.target"]
+            and .after == ["graphical-session.target"]
+            and .condition == "WAYLAND_DISPLAY"
+            and .restart == "on-failure" and .pam
+            and (. as $c | (.command | split("\u0027")) == [($c.idleCommand + " -w -C /dev/null lock "), $c.lockCommand, " before-sleep ", $c.lockCommand, ""])
+          '
 
   lint:
     name: Nix style and lint

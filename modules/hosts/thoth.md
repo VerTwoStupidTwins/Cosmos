@@ -6,11 +6,11 @@ This is the single host guide for [thoth.nix](thoth.nix). Repository structure a
 
 | Area | Declared configuration |
 | --- | --- |
-| System | NixOS 26.05, `x86_64-linux`, user `twins`, Fish |
+| System | Pinned `nixos-unstable`, `x86_64-linux`, user `twins`, Fish; `system.stateVersion = "26.05"` |
 | Storage | GPT, 2 GiB FAT32 ESP, LUKS container `cryptroot`, LVM VG `nixos` |
 | Logical volumes | Bcachefs `root`, persistent 32 GiB `swap` |
 | Boot/resume | systemd-boot, systemd initrd with LVM, `/dev/nixos/swap` |
-| Desktop | Wayland SDDM, Niri, PipeWire, Bluetooth, LXQt Polkit |
+| Desktop | greetd/tuigreet session chooser, Niri and experimental Mango, PipeWire, Bluetooth, LXQt Polkit |
 | Network | NetworkManager, resolved, firewall, OpenSSH, NetBird `wt0` |
 | Credentials | 1Password desktop/CLI and SSH agent |
 | State | Persistent root; no ZFS, impermanence, or automatic root rollback |
@@ -23,20 +23,118 @@ Sources of truth:
 - [Disk layout](../../disk-layouts/thoth.nix): target device and generated filesystem/swap configuration.
 - [Hardware report](../../hardware/thoth/facter.json): the tracked real T490 Facter report.
 - [Base features](../features/base.nix), [CLI tools](../features/cli-tools.nix), and [workstation](../features/workstation.nix).
-- [Niri](../features/desktop/niri.nix), [applications](../features/desktop/apps.nix), [Polkit agent](../features/desktop/polkit-agent.nix), and [1Password](../features/security/onepassword.nix).
+- [Shared desktop](../features/desktop/base.nix), [applications](../features/desktop/apps.nix), and [Polkit agent](../features/desktop/polkit-agent.nix): contributions to `base-desktop`.
+- [Niri](../features/desktop/niri.nix), [Mango](../features/desktop/mango.nix), and [1Password](../features/security/onepassword.nix).
+- [Login/session chooser](../features/desktop/tuigreet.nix): greetd and tuigreet.
 - [Power policy](../features/power/laptop-sleep.nix), [NetBird](../features/netbird.nix), and [SSH](../features/ssh.nix).
 
 ## Packages, services, and session behavior
 
 Use the Nix modules above as the authoritative package inventory rather than maintaining a second exhaustive list. Hermes CLI and Desktop are installed from the pinned Hermes flake, with no persistent gateway service declared; runtime authentication, sessions, and memory stay outside Git in `~/.hermes`.
 
-Niri/SDDM, PipeWire ALSA/PulseAudio, RTKit, Polkit, Bluetooth, NetworkManager, GVfs, UDisks2, and Tumbler are enabled. The LXQt Polkit agent is a user service attached to `graphical-session.target`; `swayidle.service` is attached to `niri.service` and locks before sleep.
+Thoth composes `base-desktop` independently of `niri-desktop` and `mango-desktop`. The shared profile supplies graphics, PipeWire ALSA/PulseAudio, RTKit, Polkit, Bluetooth, dconf, GNOME Keyring, GVfs, UDisks2, Tumbler, fonts and desktop applications. Niri and Mango remain enabled; greetd/tuigreet supplies login and `workstation` supplies NetworkManager. SDDM is not enabled. The LXQt Polkit agent and shared `swayidle.service` follow `graphical-session.target`; the locker is declared for both Niri and Mango, with a Wayland-environment guard.
 
-Optional packages do not necessarily autostart. Cosmos does not declare custom Niri `config.kdl`, keybindings, themes, Waybar styling, wallpaper selection, or user units for Waybar, Mako, awww, and clipboard utilities. Home Manager is not activated. Installing TLP, Flatpak, Podman, or GNOME Keyring does not mean their services/integrations are enabled. Clipse is the selected clipboard-history package and Crosspipe the included audio-routing application; do not assume alternatives are installed. Niri upstream defaults commonly use Super+T for Alacritty and Super+D for Fuzzel, but Cosmos does not declare those bindings itself.
+Optional packages do not necessarily autostart. Mango starts the packaged Waybar and Mako services and the awww daemon with its session; this does not add Niri autostart. Cosmos does not declare custom Niri `config.kdl`, keybindings, themes, Waybar styling, wallpaper selection, or user units for clipboard utilities. Home Manager is not activated. Installing TLP, Flatpak, or Podman does not mean their services/integrations are enabled. GNOME Keyring's service is explicitly enabled by `base-desktop`; unlocking and application integration still require runtime verification. Clipse is the selected clipboard-history package and Crosspipe the included audio-routing application; do not assume alternatives are installed. Niri upstream defaults commonly use Super+T for Alacritty and Super+D for Fuzzel, but Cosmos does not declare those bindings itself.
 
 NetBird's named client and interface are both `wt0`, with UDP port `58120`, autostart, hardened mode, and firewall options enabled. Startup alone does not prove enrollment or peer connectivity. OpenSSH uses `openFirewall = true` and is **not restricted to NetBird**. Establish and test NetBird access before tightening SSH exposure.
 
 1Password provides SSH identities at `~/.1password/agent.sock`; the OpenSSH client sets `IdentityAgent` system-wide and the built-in SSH agent is disabled. The GUI must be running with Settings → Developer → Use the SSH agent enabled. A refused connection can mean the agent has no socket listener. Its unfree allowance is narrowly declared in the workstation security feature.
+
+## Login and desktop selection
+
+The `tuigreet-login` profile runs greetd on VT1 with an explicit, store-qualified
+tuigreet command as the unprivileged `greeter` user. `useTextGreeter = true` applies
+the NixOS module's TTY settings and sends errors to the journal rather than
+overlaying the login prompt. No autologin/`initial_session` is declared.
+
+Tuigreet reads the NixOS-generated Wayland session directory, containing Niri and
+Mango. X11 entries, if added later, are passed separately through `--xsessions`.
+Press **F3** (or Fn+F3 if firmware maps the key to a media action) to select a
+desktop, then authenticate. No `--cmd` or forced desktop environment is supplied:
+the selected desktop entry provides its command, desktop names and session type.
+Niri's entry runs `niri-session`, preserving its systemd session and sleep locker.
+Tuigreet remembers the username and each user's selected session using
+`--remember --remember-user-session`. With no remembered selection it picks the
+first session alphabetically (currently Mango). Use F3 to choose either desktop;
+verify the shared locker in each before relying on sleep locking.
+
+After an explicitly approved deployment and logout/reboot, verify the actual
+login prompt, both F3 entries, Niri login/logout and return to the prompt. Do not
+restart the active display manager to test it during an unsaved desktop session.
+From a separate TTY, these read-only **Fish** diagnostics identify greeter errors:
+
+```fish
+systemctl status greetd.service --no-pager
+journalctl -b -u greetd.service --no-pager
+```
+
+`default_session contains no command` means greetd could not launch any greeter;
+it is not evidence of a kernel/storage boot failure. Keep the configured command
+nonempty and use the generated session directory, not an assumed global path.
+
+## Mango: experimental second session
+
+The `mango-desktop` profile uses `programs.mango.enable` from the pinned root
+nixpkgs. It installs Mango, registers its `mango` login session and supplies GTK/wlr
+portal configuration. No separate Mango flake, overlay or Home Manager activation
+is needed. Choose Niri or Mango from tuigreet; no autologin is enabled.
+
+This is the initial package/session stage, not a fully integrated daily desktop.
+The `base-desktop` profile supplies shared desktop packages and services without depending on either compositor. Niri's profile now contains only Niri and XWayland Satellite; retain the shared profile when removing or replacing a compositor.
+Cosmos declares a minimal fallback at `/etc/mango/config.conf`: Super+Return opens
+Alacritty, Super+D opens Fuzzel, Super+Escape requests a manual Swaylock,
+Super+Shift+Q exits, Super+Q closes a window, Super+R reloads, Super+Tab cycles
+focus, Super+N cycles layouts and Alt+arrows change directional focus. Existing
+`~/.config/mango/config.conf` or `config.toml` takes precedence and is not modified.
+The fallback avoids Mango's upstream foot/rofi bindings without adding applications.
+
+The profile registers Mango's shipped `mango-session.target`. Mango itself imports
+the Wayland activation environment and starts that target, which binds to
+`graphical-session.target`; it also requests graphical-session shutdown on exit.
+There is no `mango.service` or custom session wrapper. Verify that the LXQt Polkit
+agent, portals and environment actually start/stop correctly when switching
+sessions. The packaged Waybar and Mako units are wanted by `mango-session.target`,
+start only with a Wayland environment, and stop with `graphical-session.target`.
+No separate `exec_once=waybar` or `exec_once=mako` entries are needed in the user
+config. Mako retains its D-Bus notification service and user configuration. Waybar
+uses its packaged configuration unless overridden by the user; Mango-specific
+modules and styling and a fuller desktop configuration remain undeclared.
+
+The shared desktop profile installs `awww`; Mango declares `awww.service`, running
+`awww-daemon` in the foreground. It starts with and stops with
+`mango-session.target`, requires `WAYLAND_DISPLAY`, and restarts on failure.
+Do not add a duplicate `exec_once=awww-daemon` to the Mango config. No wallpaper
+path is declared; awww restores its cache when available. After deployment and
+a fresh Mango login, check and select an image with these **Fish** commands:
+
+```fish
+systemctl --user status awww.service --no-pager
+journalctl --user -b -u awww.service --no-pager
+awww img /path/to/wallpaper.png
+```
+
+**Sleep locking:** `laptop-sleep` declares one shared `swayidle.service` for both
+compositors through `graphical-session.target`, not a Niri-specific service.
+This fixes the declared session dependency, not proof of runtime protection.
+Do not rely on Mango or Niri locking before sleep until the reviewed configuration
+is deployed and the [locking checks](#sleep-locking-and-hibernation) pass in both.
+Lid-triggered and low-battery hibernation remain active; keep the lid open and AC
+connected during supervised bring-up and do not change power policy silently.
+
+After a reviewed build and explicit deployment approval, log out of Niri and
+select Mango with tuigreet's F3 menu for a supervised trial. Return to Niri through
+the same menu if Mango is not usable; this does not replace Niri or its configuration. Deployment,
+logout and runtime testing have not been performed merely by adding the module.
+
+Before promoting Mango to a daily desktop:
+
+- Exercise the fallback terminal/launcher, exit and manual-lock bindings in-session.
+- Integrate session environment/lifecycle, the Polkit agent and portal activation;
+  verify file dialogs, screen sharing and XWayland in the actual Mango session.
+- Verify the shared before-sleep locker starts/stops with each session without
+  duplicate listeners or stale environment across compositor changes.
+- Test manual lock, approved suspend/hibernate and logout/login in both desktops,
+  including stopping the old session's services and preserving Niri behavior.
 
 ## Local speech: packaged Piper
 
@@ -167,7 +265,7 @@ Routine switching does not invoke destructive Disko formatting. A storage migrat
 
 ## Fresh installation and recovery
 
-**Already installed and booting? Do not run Disko formatting.** Do not erase/reinstall because a configuration switch or desktop service failed. Identify the failing stage (bootloader, LUKS unlock, Bcachefs mount, userspace, SDDM, or Niri), collect the exact error/logs, and diagnose first.
+**Already installed and booting? Do not run Disko formatting.** Do not erase/reinstall because a configuration switch or desktop service failed. Identify the failing stage (bootloader, LUKS unlock, Bcachefs mount, userspace, greetd, or Niri), collect the exact error/logs, and diagnose first.
 
 Installer examples use Bash; workstation examples elsewhere use Fish. Current main already contains the encrypted-LVM layout: the old migration-branch installation advice is obsolete. Clone the reviewed main revision over HTTPS in the live installer:
 
@@ -262,7 +360,7 @@ The live-environment checkout does not persist automatically. After reboot, rest
 
 ## First boot and service checks
 
-Log in through SDDM to Niri, then inspect:
+Log in through tuigreet to Niri, then inspect:
 
 ```fish
 cd /Cosmos
@@ -285,7 +383,42 @@ nix eval --no-write-lock-file --raw '.#nixosConfigurations.thoth.config.services
 
 ## Sleep, locking, and hibernation
 
-The [laptop policy](../features/power/laptop-sleep.nix) requests suspend-then-hibernate on lid close on battery and AC; docked lid closure is ignored. Hibernation follows 60 minutes of suspension, including on AC. UPower's awake-state battery thresholds are low 20%, critical 12%, and Hibernate at 8%. `swayidle.service` runs `swaylock -f` before sleep, tied to `niri.service`. Always verify the locker service before relying on lid-close suspension in public.
+The [laptop policy](../features/power/laptop-sleep.nix) requests suspend-then-hibernate on lid close on battery and AC; docked lid closure is ignored. Hibernation follows 60 minutes of suspension, including on AC. UPower's awake-state battery thresholds are low 20%, critical 12%, and Hibernate at 8%. The policy pulls `upower.service` into `multi-user.target` so battery protection starts at boot without a desktop client requesting D-Bus activation. These power settings are independent of the compositor.
+
+The same profile supplies Swayidle, Swaylock and its PAM authentication service.
+One `swayidle.service` is wanted by, ordered after and stopped with
+`graphical-session.target`. Niri and Mango import the Wayland environment before
+activating that target. `ConditionEnvironment=WAYLAND_DISPLAY` avoids starting
+the listener outside a Wayland session. Logging out stops it; the next compositor
+starts a new listener with its environment. This supports switching sessions,
+not multiple concurrent graphical sessions for the same user.
+
+The listener runs `swaylock -f` for both logind's `lock` and `before-sleep` events.
+Swayidle's `-w` and Swaylock's `-f` wait for lock readiness before releasing the
+sleep delay inhibitor, subject to logind's `InhibitDelayMaxSec` limit. No
+inactivity timeout, automatic idle suspension, screen-power command or unlock
+command is added. `-C /dev/null` prevents user Swayidle configurations from
+silently adding conflicting events. Manual `swaylock` bindings still work.
+
+After an approved deployment, use a fresh login and inspect these read-only
+**Fish** diagnostics in each compositor:
+
+```fish
+systemctl --user is-active graphical-session.target swayidle.service
+systemctl --user status swayidle.service --no-pager
+systemctl --user show swayidle.service -p PartOf -p After -p MainPID
+journalctl --user -b -u swayidle.service --no-pager
+```
+
+With separate authorization for disruptive runtime tests, lock the current
+session with `loginctl lock-session`, authenticate, and repeat in the other
+compositor. Before login, or after logout from a separate TTY, verify the listener
+is inactive; after switching desktops confirm there is one listener with a new
+PID and no missing-display/protocol errors. Then perform the approved sleep tests
+below in both desktops, checking that the session is already locked on resume.
+Include rapid compositor switching in the authorized logout/login tests because
+Mango requests target shutdown and environment cleanup asynchronously.
+Always verify the locker before relying on lid-close suspension in public.
 
 Before any approved deployment of power-policy changes:
 
@@ -314,7 +447,7 @@ Before a controlled, approved manual hibernation test, save work, use reliable A
 
 **Fresh-install precaution:** The host already imports `laptop-sleep`, so lid-triggered and critical-battery hibernation are active from first boot; this guide does not disable them. Keep the lid open and the laptop on reliable AC during initial bring-up, save work, and do not leave it unattended or rely on automatic transitions until multiple manual resume tests and the timed-transition/locking tests below pass. These precautions reduce exposure but do not disable the configured triggers. If automatic hibernation must be prevented during testing, request a separately reviewed and explicitly approved temporary power-policy configuration/deployment, then restore and verify the intended policy after testing. Do not silently change the configuration or assume untested resume is safe.
 
-Separately test short lid-close suspension on AC: reopening should restore a **locked** Niri session. Then test the full 60-minute transition, RTC wake, LUKS unlock, and session restoration. Historical manual hibernation success is not proof of this timed transition. Useful diagnostics:
+Separately test short lid-close suspension on AC in both Niri and Mango: reopening should restore a **locked** session. Then test the full 60-minute transition, RTC wake, LUKS unlock, and session restoration. Historical manual hibernation success is not proof of this timed transition. Useful diagnostics:
 
 ```fish
 journalctl -b -u systemd-suspend-then-hibernate.service --no-pager

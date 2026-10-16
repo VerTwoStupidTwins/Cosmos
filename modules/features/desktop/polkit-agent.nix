@@ -1,5 +1,5 @@
 {
-  flake.modules.nixos."niri-desktop" = { pkgs, ... }: {
+  flake.modules.nixos."base-desktop" = { pkgs, ... }: {
     security.polkit.enable = true;
 
     systemd.user.services.lxqt-policykit-agent = {

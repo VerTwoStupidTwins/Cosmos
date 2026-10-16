@@ -1,7 +1,6 @@
-# Applications and utilities from our earlier Niri workstation package list.
-# Only installs packages and basic file-manager integrations; no user config.
+# Shared applications and file-manager integrations; no user configuration.
 {
-  flake.modules.nixos."niri-desktop" = { pkgs, ... }: {
+  flake.modules.nixos."base-desktop" = { pkgs, ... }: {
     services = {
       gvfs.enable = true;
       udisks2.enable = true;
