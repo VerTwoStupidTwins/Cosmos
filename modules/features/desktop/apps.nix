@@ -7,7 +7,10 @@
       tumbler.enable = true;
     };
 
-    fonts.packages = [ pkgs.nerd-fonts.monoid ];
+    fonts.packages = [
+      pkgs.nerd-fonts.monoid
+      (pkgs.google-fonts.override { fonts = [ "Rajdhani" ]; })
+    ];
 
     environment.systemPackages = with pkgs; [
       # Files and archives.
