@@ -15,12 +15,18 @@ Agents need separate permission to format, install, deploy, enroll NetBird, or r
 - No desktop, Home Manager, 1Password, container runtime, or Hermes installation.
 
 The [Disko layout](../../disk-layouts/argus.nix) creates unencrypted GPT disks:
-1 GiB FAT32 ESP, 4 GiB swap, and remaining SSD space as ext4 root; the entire HDD
-is a separate ext4 filesystem mounted at `/var/lib/frigate`. Recordings, clips,
+1 GiB FAT32 ESP, 4 GiB swap, and remaining SSD space as Bcachefs root with zstd
+compression; the entire HDD is a separate XFS filesystem mounted at
+`/var/lib/frigate`. Recordings, clips,
 exports, and other Frigate state use the HDD. SQLite lives separately on the SSD
 at `/var/lib/frigate-db/frigate.db`. Neither disk is redundant or backed up by
-this configuration. Swap is not sized or configured for hibernation; sleep targets
-are disabled for this always-on recorder.
+this configuration. Root uses the shared `bcachefs-root` profile and systemd
+initrd, without LUKS, LVM, filesystem encryption, or automatic snapshot rollback.
+The SSD and HDD remain independent filesystems, not a tiered Bcachefs pool.
+XFS uses the pinned formatter's defaults; no custom allocation or video tuning
+is applied. It cannot be shrunk and does not checksum recording contents.
+Swap is not sized or configured for hibernation; sleep targets are disabled for
+this always-on recorder.
 
 The HDD has `nofail` so a missing media disk does not prevent management access.
 Frigate requires that mount and checks it is a mount point before starting; it
@@ -55,6 +61,10 @@ The report includes the attached USB installer, but that is not a Disko target.
 Review hardware identifiers before publishing; never substitute Thoth's report.
 The inspected installer has working `r8169` Ethernet, SATA AHCI, UEFI boot, and
 Secure Boot disabled. Recheck the actual environment before destructive work.
+Verify the live kernel can load Bcachefs and mount a filesystem created with
+Cosmos's pinned Bcachefs tools before formatting physical disks. A module file
+reported by `modinfo bcachefs` alone does not prove it loads or that the on-disk
+format is compatible. Do not reuse another host's kernel modules.
 
 ```bash
 lsblk -d -o NAME,SIZE,MODEL,SERIAL,TRAN
@@ -164,6 +174,25 @@ Use `sudo chown -R twins:users /Cosmos` to restore checkout ownership. Verify
 SSH, sudo, HDD mounting, NetBird enrollment, Frigate auth, and the NVIDIA driver
 on the installed system; the camera-free baseline still does not record video.
 
+### Recovering a failed format or interrupted install
+
+Do not blindly repeat `disko,install`: that can erase successfully prepared
+filesystems again. Inspect the actual mount tree, filesystem signatures, and
+kernel logs first. Repartitioning can expose old filesystem signatures at the
+same offsets. In particular, a stale ZFS label on the media partition can make
+Disko skip creation of the declared filesystem because its generic filesystem
+step detects an existing `TYPE`, then fail when mounting it as the configured type.
+
+Only within explicitly approved erase scope, verify the media partition's parent
+by-id disk and serial, confirm it is unmounted, clear signatures on that specific
+partition, and create the declared filesystem with the pinned formatter. Verify
+the resulting type and mount before continuing. Once all reviewed mounts are
+correct, resume with `--phases install`, omitting `disko`, `kexec`, and `reboot`.
+If the desired layout changed during an interruption, rebuild and review the new
+plan first; existing ext4 filesystems are not converted to Bcachefs root or XFS
+media merely by resuming the install phase. Obtain approval before applying a
+replacement layout.
+
 ## Alternative: manual installation from the Dell console
 
 Run this alternative from a checkout on the Dell, **not** from Thoth and not in
@@ -184,8 +213,8 @@ lsblk -f
 swapon --show
 ```
 
-Stop unless SSD root, SSD ESP, SSD swap, and HDD media mounts match the reviewed
-plan. Then, with separate installation permission:
+Stop unless Bcachefs SSD root, FAT32 SSD ESP, SSD swap, and XFS HDD media mounts
+match the reviewed plan. Then, with separate installation permission:
 
 ```bash
 sudo nixos-install --root /mnt --flake "$flake#argus" --no-root-passwd --max-jobs 1 --cores 2

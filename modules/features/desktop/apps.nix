@@ -27,6 +27,7 @@
       crosspipe
       ffmpeg
       mpv
+      vlc
 
       # QML desktop-shell toolkit; no shell configuration or autostart.
       quickshell
