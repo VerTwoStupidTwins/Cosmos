@@ -1,6 +1,6 @@
 # Working in Cosmos
 
-These rules apply to the entire repository. Read [README.md](README.md) for the flake structure and the relevant host guide ([Thoth](modules/hosts/thoth.md) or [Argus](modules/hosts/argus.md)) before host-specific work.
+These rules apply to the entire repository. Read [README.md](README.md) for the flake structure and the relevant host guide ([Thoth](modules/hosts/thoth.md), [Argus](modules/hosts/argus.md), or [Odin](modules/hosts/odin.md)) before host-specific work.
 
 ## Non-negotiable rules
 
@@ -33,7 +33,7 @@ Do not reuse an existing branch or rewrite history without checking with the use
 - Put reusable features in `modules/features/`; put host composition, user/hardware choices, and `nixosConfigurations.<host>` in `modules/hosts/<host>.nix`.
 - Keep host operations in `modules/hosts/<host>.md`, next to the host module. Keep root README content focused on repository/flake structure; do not create redundant host guides or package inventories.
 - Keep machine-specific Disko layouts in `disk-layouts/<host>.nix` and real Facter reports in `hardware/<host>/facter.json`.
-- Hosts `thoth` and `argus` use `x86_64-linux` and pinned `nixos-unstable`, with `system.stateVersion = "26.05"`. Argus is a headless Dell NVR with native Frigate; its real Facter report, disk IDs, and admin public key are declared, while cameras remain pending. Never substitute another machine's report. Thoth is the workstation. Home Manager is an input, not an activated configuration. greetd/tuigreet discovers installed sessions and remembers each user's selection, without a forced compositor command. `laptop-sleep` declares shared Wayland locking for Niri and Mango; deployment and runtime lock/resume tests remain separate requirements.
+- Hosts `thoth`, `argus`, and `odin` use `x86_64-linux` and pinned `nixos-unstable`, with `system.stateVersion = "26.05"`. Argus is a headless Dell NVR with native Frigate; its real Facter report, disk IDs, and admin public key are declared, while cameras remain pending. Odin is a headless Ryzen server foundation with a real Facter report, one identified NVMe, and three unencrypted ESP/swap/Bcachefs partitions; inference services and GPU compute runtimes are deferred. Never substitute another machine's report. Thoth is the workstation. Home Manager is an input, not an activated configuration. greetd/tuigreet discovers installed sessions and remembers each user's selection, without a forced compositor command. `laptop-sleep` declares shared Wayland locking for Niri and Mango; deployment and runtime lock/resume tests remain separate requirements.
 - Preserve `system.stateVersion` unless a deliberate migration requires changing it; it is not a package-release selector.
 - Prefer focused declarative contributions and normal module merging. Do not introduce `mkForce`, global unfree enablement, overlays, or imperative workarounds without explaining the need.
 - Audit shared assumptions when adding hosts: the base profile enables OpenSSH and NetBird `wt0`, and the 1Password policy names `twins`.
