@@ -15,9 +15,10 @@ that installation or runtime verification has succeeded.
 - No desktop, Home Manager activation, 1Password, or container runtime.
 - The `model-tools` profile supplies the native Hugging Face `hf` CLI. It does
   not download a model or enable an HTTP inference service.
-- SYCL/oneAPI is the selected llama.cpp backend for the Intel B50. Toolchain
-  validation and model serving are separate steps; speech/image services and
-  ROCm remain deferred.
+- The `llama-cpp-sycl` profile provides Intel compute prerequisites. The reusable
+  `llama-cpp-instances` profile declares independent Intel SYCL and AMD Vulkan
+  instances; both are disabled and have no model selected.
+  Speech/image services and ROCm remain deferred.
 - Bluetooth is explicitly disabled, overriding Facter's hardware-based default;
   the BlueZ userspace stack and Bluetooth service are not enabled or installed.
 - SSD trimming and SMART monitoring enabled; sleep/hibernation targets disabled.
@@ -198,7 +199,7 @@ NetBird startup is not enrollment or peer connectivity. With separate enrollment
 approval, use `sudo netbird-wt0 up` interactively and test access from an authorized
 peer before considering tighter SSH rules. Never commit setup keys.
 
-## Hugging Face and Intel GGUF tooling
+## Hugging Face and independent GPU instances
 
 The [model-tools profile](../features/inference/model-tools.nix) uses
 `pkgs.python3Packages.huggingface-hub` for the `hf` command. No pip/uv installation,
@@ -211,18 +212,75 @@ After activating the reviewed configuration, these commands work in Fish or Bash
 ```bash
 hf version
 hf download --help
+llama-server-intel --version
+llama-server-intel --list-devices
+llama-server-amd --version
+llama-server-amd --list-devices
 ```
 
 The pinned CLI was exercised directly from its Nix store path on Odin and
 reported version 1.30.0. It is not installed into the active system profile until
-an approved activation. The backend choice is Intel SYCL/oneAPI, not Vulkan.
-The temporary Vulkan device probe confirmed the B50's identity but did not
-establish SYCL support or model inference; it is not part of the selected profile.
+an approved activation.
 
-A disposable SYCL build/kernel probe runs separately from the system
-configuration before the llama.cpp service is enabled. Intel license allowance
-must remain package-specific; do not enable unfree packages globally or install
-an untracked toolkit into `/opt`. Keep the AMD driver configuration independent.
+The [instance module](../features/inference/llama-cpp-instances.nix) exposes
+`services.llama-cpp-instances.<name>`. Each entry has `enable`, `package`, `host`,
+`port`, `model`, `settings`, `environment`, `renderDevice`, `allowJit`, and
+`openFirewall` options. The module creates `llama-cpp-<name>.service` only for
+enabled entries. A named `llama-server-<name>` launcher remains available for
+diagnostics even when the service is disabled; it applies that entry's backend,
+environment, and CLI settings. Backend packages are referenced by their full
+Nix store paths instead of installing colliding `llama-server` binaries in PATH.
+
+Odin declares:
+
+| Instance | Backend/GPU | Local endpoint | Explicit device |
+| --- | --- | --- | --- |
+| `intel` | Intel oneAPI/SYCL, Arc Pro B50 | `127.0.0.1:8080` | `SYCL0` |
+| `amd` | Vulkan, Radeon 7900 XT | `127.0.0.1:8081` | `Vulkan0` |
+
+Both entries have `enable = false`, `model = null`, and `openFirewall = false`.
+These are declared endpoints, not running servers. The upstream singleton
+`services.llama-cpp` remains disabled. Enabled instances must have distinct ports
+and an absolute model filename; reserve `host`, `port`, and `model` for their
+dedicated options instead of aliases under `settings`.
+
+Each service has its own dynamic user, `/var/lib/llama-cpp-<name>` state and
+`/var/cache/llama-cpp-<name>` cache, supplementary `render` access, and a closed
+device policy allowing only its stable PCI render node. Models under `/home`
+are hidden by service hardening: provision readable weights outside home, such
+as `/var/lib/llama-models`, without making them writable by the services.
+`allowJit` relaxes executable-memory hardening only for the Intel entry, where
+oneDNN may require it. Ports open only when an entry is both enabled and
+explicitly has `openFirewall = true`; defaults remain loopback-only.
+
+The Intel entry selects the [native SYCL package](../../packages/llama-cpp-sycl/default.nix),
+extending pinned nixpkgs llama.cpp with the pinned compiler, oneMKL, oneDNN, and
+Level Zero. Its [prerequisite profile](../features/inference/llama-cpp-sycl.nix)
+permits only `intel-oneapi-toolkit` as unfree; do not enable unfree packages
+globally or install an untracked toolkit into `/opt`.
+
+The package wrappers select `level_zero:gpu` and expose Intel's compute runtime,
+Level Zero loader, and graphics compiler libraries only to those commands. The
+graphics compiler libraries are needed for runtime kernel compilation. No global
+library path or GPU selector is set. The AMD entry uses `pkgs.llama-cpp-vulkan`
+with only Mesa's Radeon ICD exposed through its own `VK_DRIVER_FILES` value.
+Its driver file is taken from the pinned Mesa package, not guessed from a
+global environment. Explicit device selection prevents a silently CPU-only
+service when the requested GPU is absent; CPU helper kernels remain available.
+
+Odin enables the package's `forceThreadGroupPreemption` argument. With the pinned
+kernel/runtime, its B50 HWCONFIG response omits CSR-size tag 62; the runtime then
+aborts on a zero-sized mid-thread preemption buffer. The wrappers set
+`NEOReadDebugKeys=1` and `ForcePreemptionMode=3` (thread-group preemption) for this
+package only. The independent SYCL kernel probe passed with those settings and
+the graphics compiler library path. This is a scoped compatibility workaround,
+not proof that the default runtime path or model inference works. Re-test it
+when updating the kernel or Intel runtime before removing the override.
+
+The package includes a small registration guard for GPU-less Nix sandboxes:
+when no SYCL GPU exists, it declines registration instead of letting the upstream
+default-device selector terminate the CPU test suite. The upstream CPU tests
+remain enabled; actual GPU execution must be tested outside the build sandbox.
 
 Keep weights and Hugging Face caches outside the Nix store. Download a selected
 GGUF file, not an entire repository containing every quantization. Pin its Hub
@@ -231,11 +289,26 @@ if authentication is needed, log in interactively as the operator and never
 commit a token or embed one in a system service/Nix expression. Do not use
 `hf update` to replace a Nix-managed installation.
 
-No HTTP service is enabled by the model-tools profile. Choose the exact Gemma 4
-GGUF, model directory, context/concurrency limits, and network exposure before
-enabling serving. Model download, activation, GPU offload, API health, and real
-generation must each be verified separately. Your brother's account and other
-inference backends remain follow-up work.
+Choose the exact GGUF for each entry, model directory, context/concurrency
+limits, and network exposure before enabling serving. Entries may use different
+models or share one readable GGUF file, but GPU allocations and contexts remain
+separate; this does not pool the cards' VRAM. Model download, activation, GPU
+offload, API health, and real generation must each be verified separately.
+Your brother's account remains follow-up work.
+
+After models are provisioned and activation is separately approved, each server
+can be enabled independently. Then verify the corresponding unit and endpoint:
+
+```bash
+systemctl status llama-cpp-intel.service llama-cpp-amd.service
+curl --fail http://127.0.0.1:8080/health
+curl --fail http://127.0.0.1:8081/health
+```
+
+The module's flake check exercises enabled/disabled instances, isolated state,
+environment/device permissions, opt-in firewall/JIT, invalid configurations, and
+literal CLI argument transport. Its test executable is an argument-printing
+fixture, not simulated model inference.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.

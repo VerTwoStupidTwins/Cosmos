@@ -9,6 +9,8 @@ in
       nixos.base
       nixos."bcachefs-root"
       nixos."model-tools"
+      nixos."llama-cpp-sycl"
+      nixos."llama-cpp-instances"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/odin.nix
     ];
@@ -32,8 +34,38 @@ in
       efi.canTouchEfiVariables = true;
     };
 
-    services.fstrim.enable = true;
-    services.smartd.enable = true;
+    services = {
+      fstrim.enable = true;
+      smartd.enable = true;
+      llama-cpp-instances = {
+        intel = {
+          enable = false;
+          # The B50 omits CSR-size tag 62; avoid the runtime's zero-sized
+          # mid-thread buffer only in this package, not globally or on AMD.
+          package = pkgs.callPackage ../../packages/llama-cpp-sycl {
+            forceThreadGroupPreemption = true;
+          };
+          host = "127.0.0.1";
+          port = 8080;
+          model = null;
+          renderDevice = "/dev/dri/by-path/pci-0000:10:00.0-render";
+          settings.device = "SYCL0";
+          allowJit = true;
+          openFirewall = false;
+        };
+        amd = {
+          enable = false;
+          package = pkgs.llama-cpp-vulkan;
+          host = "127.0.0.1";
+          port = 8081;
+          model = null;
+          renderDevice = "/dev/dri/by-path/pci-0000:0d:00.0-render";
+          settings.device = "Vulkan0";
+          environment.VK_DRIVER_FILES = "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json";
+          openFirewall = false;
+        };
+      };
+    };
 
     # Keep the server reachable; swap is not sized for hibernation.
     systemd.targets = {

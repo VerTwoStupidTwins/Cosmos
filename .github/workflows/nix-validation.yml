@@ -186,6 +186,35 @@ jobs:
             bluetoothUnit = c.systemd.services.bluetooth.enable or false;
             bluezInstalled = builtins.any (p: (p.pname or "") == "bluez") c.environment.systemPackages;
             hfCli = builtins.any (p: (p.pname or "") == "huggingface-hub") c.environment.systemPackages;
+            instances = builtins.attrNames (c.services.llama-cpp-instances or {});
+            intel = let i = c.services.llama-cpp-instances.intel or {}; p = i.package or {}; in {
+              enabled = i.enable or false;
+              package = p.pname or "";
+              sycl = builtins.elem "-DGGML_SYCL:BOOL=TRUE" (p.cmakeFlags or []);
+              device = i.settings.device or "";
+              preemption = p.syclPreemptionMode or null;
+              host = i.host or "";
+              port = i.port or 0;
+              renderDevice = i.renderDevice or "";
+              model = i.model or null;
+              openFirewall = i.openFirewall or false;
+              allowJit = i.allowJit or false;
+            };
+            amd = let i = c.services.llama-cpp-instances.amd or {}; p = i.package or {}; in {
+              enabled = i.enable or false;
+              vulkan = builtins.elem "-DGGML_VULKAN:BOOL=TRUE" (p.cmakeFlags or []);
+              device = i.settings.device or "";
+              icd = i.environment.VK_DRIVER_FILES or "";
+              host = i.host or "";
+              port = i.port or 0;
+              renderDevice = i.renderDevice or "";
+              model = i.model or null;
+              openFirewall = i.openFirewall or false;
+            };
+            intelCompute = builtins.any (p: (p.pname or "") == "intel-compute-runtime") c.hardware.graphics.extraPackages;
+            globalUnfree = c.nixpkgs.config.allowUnfree or false;
+            oneApiAllowed = (c.nixpkgs.config.allowUnfreePredicate or (_: false)) { pname = "intel-oneapi-toolkit"; version = "0"; };
+            unrelatedUnfreeAllowed = (c.nixpkgs.config.allowUnfreePredicate or (_: false)) { pname = "unrelated-unfree-probe"; version = "0"; };
             llamaVulkan = builtins.any (p: (p.pname or "") == "llama-cpp" && builtins.elem "-DGGML_VULKAN:BOOL=TRUE" (p.cmakeFlags or [])) c.environment.systemPackages;
             vulkanTools = builtins.any (p: (p.pname or "") == "vulkan-tools") c.environment.systemPackages;
             graphics = c.hardware.graphics.enable;
@@ -222,6 +251,18 @@ jobs:
             and .systemdInitrd and .systemdBoot and .microcode
             and (.bluetooth | not) and (.bluetoothUnit | not) and (.bluezInstalled | not)
             and .hfCli and .graphics and .renderGroup
+            and .instances == ["amd", "intel"]
+            and .intel.package == "llama-cpp-sycl" and .intel.sycl and .intel.device == "SYCL0"
+            and .intel.preemption == 3 and .intel.allowJit and .intelCompute
+            and .amd.vulkan and .amd.device == "Vulkan0" and (.amd.icd | endswith("/share/vulkan/icd.d/radeon_icd.x86_64.json"))
+            and .intel.host == "127.0.0.1" and .intel.port == 8080
+            and .amd.host == "127.0.0.1" and .amd.port == 8081
+            and .intel.renderDevice == "/dev/dri/by-path/pci-0000:10:00.0-render"
+            and .amd.renderDevice == "/dev/dri/by-path/pci-0000:0d:00.0-render"
+            and (.intel.enabled | not) and (.amd.enabled | not)
+            and .intel.model == null and .amd.model == null
+            and (.intel.openFirewall | not) and (.amd.openFirewall | not)
+            and .oneApiAllowed and (.globalUnfree | not) and (.unrelatedUnfreeAllowed | not)
             and (.llamaVulkan | not) and (.vulkanTools | not)
             and (.llamaServer | not) and (.llamaOpenFirewall | not)
             and (.zram | not) and .lvmGroups == [] and .luks == {}
@@ -231,6 +272,12 @@ jobs:
             and (.hybridSleep | not) and (.suspendThenHibernate | not)
             and .stateVersion == "26.05"
           '
+
+      - name: Test reusable llama.cpp instance module
+        shell: bash
+        run: |
+          check=$(nix build --no-write-lock-file --no-link --print-out-paths '.#checks.x86_64-linux.llama-cpp-instances')
+          "$check/bin/verify-units"
 
       # Mango and Niri must both remain available through the session chooser.
       - name: Verify Thoth desktop sessions
