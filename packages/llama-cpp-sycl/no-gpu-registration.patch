@@ -1,0 +1,14 @@
+--- a/ggml/src/ggml-sycl/ggml-sycl.cpp
++++ b/ggml/src/ggml-sycl/ggml-sycl.cpp
+@@ -7315,6 +7315,11 @@
+         static std::mutex mutex;
+         std::lock_guard<std::mutex> lock(mutex);
+         if (!initialized) {
++            // A GPU-less build sandbox must still run the CPU test suite.
++            // Do not construct dpct's default GPU selector when no GPU exists.
++            if (sycl::device::get_devices(sycl::info::device_type::gpu).empty()) {
++                return nullptr;
++            }
+             ggml_check_sycl();
+             ggml_backend_sycl_reg_context * ctx = new ggml_backend_sycl_reg_context;
+             const int min_batch_size = getenv("GGML_OP_OFFLOAD_MIN_BATCH") ? atoi(getenv("GGML_OP_OFFLOAD_MIN_BATCH")) : 32;
