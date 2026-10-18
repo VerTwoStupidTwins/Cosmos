@@ -157,6 +157,71 @@ jobs:
             and (.sleep | not) and .stateVersion == "26.05"
           '
 
+      - name: Verify Odin headless base and storage
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: {
+            hostname = c.networking.hostName;
+            adminKeys = c.users.users.twins.openssh.authorizedKeys.keys;
+            facter = c.hardware.facter.enable;
+            reportName = if c.hardware.facter.reportPath == null then "" else builtins.baseNameOf c.hardware.facter.reportPath;
+            initrdModules = c.boot.initrd.availableKernelModules;
+            rootType = c.fileSystems."/".fsType;
+            espType = c.fileSystems."/boot".fsType;
+            rootDisk = c.disko.devices.disk.system.device;
+            diskCount = builtins.length (builtins.attrNames c.disko.devices.disk);
+            partitions = builtins.attrNames c.disko.devices.disk.system.content.partitions;
+            espSize = c.disko.devices.disk.system.content.partitions.ESP.size;
+            swapSize = c.disko.devices.disk.system.content.partitions.swap.size;
+            swapCount = builtins.length c.swapDevices;
+            bcachefsSupport = c.boot.supportedFilesystems.bcachefs or false;
+            compression = c.disko.devices.bcachefs_filesystems."odin-root".extraFormatArgs;
+            systemdInitrd = c.boot.initrd.systemd.enable;
+            zram = c.zramSwap.enable;
+            lvmGroups = builtins.attrNames c.disko.devices.lvm_vg;
+            luks = c.boot.initrd.luks.devices;
+            systemdBoot = c.boot.loader.systemd-boot.enable;
+            microcode = c.hardware.cpu.amd.updateMicrocode;
+            bluetooth = c.hardware.bluetooth.enable;
+            bluetoothUnit = c.systemd.services.bluetooth.enable or false;
+            bluezInstalled = builtins.any (p: (p.pname or "") == "bluez") c.environment.systemPackages;
+            netbird = c.services.netbird.clients.wt0.interface;
+            dhcp = c.networking.useDHCP;
+            ssh = c.services.openssh.enable;
+            xserver = c.services.xserver.enable;
+            greetd = c.services.greetd.enable;
+            networkmanager = c.networking.networkmanager.enable;
+            onepassword = c.programs._1password-gui.enable;
+            docker = c.virtualisation.docker.enable;
+            podman = c.virtualisation.podman.enable;
+            ollama = c.services.ollama.enable;
+            frigate = c.services.frigate.enable;
+            sleep = c.systemd.targets.sleep.enable;
+            suspend = c.systemd.targets.suspend.enable;
+            hibernate = c.systemd.targets.hibernate.enable;
+            hybridSleep = c.systemd.targets.hybrid-sleep.enable;
+            suspendThenHibernate = c.systemd.targets.suspend-then-hibernate.enable;
+            stateVersion = c.system.stateVersion;
+          }' '.#nixosConfigurations.odin.config' | jq -e '
+            .hostname == "odin" and .netbird == "wt0" and .dhcp and .ssh
+            and (.adminKeys | index("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMWQySUPlG4H7prC8ftuSz52jQT8v7g7pzCPhB5b7MT") != null)
+            and .facter and .reportName == "facter.json"
+            and (.initrdModules | index("nvme") != null)
+            and .rootType == "bcachefs" and .espType == "vfat"
+            and .rootDisk == "/dev/disk/by-id/nvme-addlink_M.2_PCIE_G5x4_NVMe_A4D01953036200206341"
+            and .diskCount == 1 and .partitions == ["ESP", "root", "swap"]
+            and .espSize == "1G" and .swapSize == "4G" and .swapCount == 1
+            and .bcachefsSupport and (.compression | index("--compression=zstd") != null)
+            and .systemdInitrd and .systemdBoot and .microcode
+            and (.bluetooth | not) and (.bluetoothUnit | not) and (.bluezInstalled | not)
+            and (.zram | not) and .lvmGroups == [] and .luks == {}
+            and (.xserver | not) and (.greetd | not) and (.networkmanager | not) and (.onepassword | not)
+            and (.docker | not) and (.podman | not) and (.ollama | not) and (.frigate | not)
+            and (.sleep | not) and (.suspend | not) and (.hibernate | not)
+            and (.hybridSleep | not) and (.suspendThenHibernate | not)
+            and .stateVersion == "26.05"
+          '
+
       # Mango and Niri must both remain available through the session chooser.
       - name: Verify Thoth desktop sessions
         shell: bash
