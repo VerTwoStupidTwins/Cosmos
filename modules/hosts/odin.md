@@ -12,9 +12,12 @@ that installation or runtime verification has succeeded.
 - One 1 TB addlink PCIe NVMe, serial `A4D01953036200206341`.
 - Headless `x86_64-linux`, wired DHCP, hostname `odin`, admin `twins` with Fish.
 - Shared `base`: OpenSSH, resolved, firewall, NetBird client/interface `wt0`.
-- No desktop, Home Manager activation, 1Password, container runtime, inference
-  engine, speech/image services, or model downloads. GPU compute libraries,
-  service device permissions, and acceleration tests are deferred.
+- No desktop, Home Manager activation, 1Password, or container runtime.
+- The `model-tools` profile supplies the native Hugging Face `hf` CLI. It does
+  not download a model or enable an HTTP inference service.
+- SYCL/oneAPI is the selected llama.cpp backend for the Intel B50. Toolchain
+  validation and model serving are separate steps; speech/image services and
+  ROCm remain deferred.
 - Bluetooth is explicitly disabled, overriding Facter's hardware-based default;
   the BlueZ userspace stack and Bluetooth service are not enabled or installed.
 - SSD trimming and SMART monitoring enabled; sleep/hibernation targets disabled.
@@ -195,9 +198,44 @@ NetBird startup is not enrollment or peer connectivity. With separate enrollment
 approval, use `sudo netbird-wt0 up` interactively and test access from an authorized
 peer before considering tighter SSH rules. Never commit setup keys.
 
-Your brother's account, inference stack, ROCm/Intel compute runtimes, models, and
-resource/concurrency policy remain separate follow-up work. PCI detection or
-kernel driver binding alone does not establish GPU inference support.
+## Hugging Face and Intel GGUF tooling
+
+The [model-tools profile](../features/inference/model-tools.nix) uses
+`pkgs.python3Packages.huggingface-hub` for the `hf` command. No pip/uv installation,
+overlay, or new flake input is needed for that CLI. The configuration adds
+`twins` to `render` for render-node access; start a fresh login after an approved
+activation to pick up changed supplementary groups.
+
+After activating the reviewed configuration, these commands work in Fish or Bash:
+
+```bash
+hf version
+hf download --help
+```
+
+The pinned CLI was exercised directly from its Nix store path on Odin and
+reported version 1.30.0. It is not installed into the active system profile until
+an approved activation. The backend choice is Intel SYCL/oneAPI, not Vulkan.
+The temporary Vulkan device probe confirmed the B50's identity but did not
+establish SYCL support or model inference; it is not part of the selected profile.
+
+A disposable SYCL build/kernel probe runs separately from the system
+configuration before the llama.cpp service is enabled. Intel license allowance
+must remain package-specific; do not enable unfree packages globally or install
+an untracked toolkit into `/opt`. Keep the AMD driver configuration independent.
+
+Keep weights and Hugging Face caches outside the Nix store. Download a selected
+GGUF file, not an entire repository containing every quantization. Pin its Hub
+revision for reproducibility. Public ungated models do not require an account;
+if authentication is needed, log in interactively as the operator and never
+commit a token or embed one in a system service/Nix expression. Do not use
+`hf update` to replace a Nix-managed installation.
+
+No HTTP service is enabled by the model-tools profile. Choose the exact Gemma 4
+GGUF, model directory, context/concurrency limits, and network exposure before
+enabling serving. Model download, activation, GPU offload, API health, and real
+generation must each be verified separately. Your brother's account and other
+inference backends remain follow-up work.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.

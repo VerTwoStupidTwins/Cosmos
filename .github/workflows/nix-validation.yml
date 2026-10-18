@@ -185,6 +185,13 @@ jobs:
             bluetooth = c.hardware.bluetooth.enable;
             bluetoothUnit = c.systemd.services.bluetooth.enable or false;
             bluezInstalled = builtins.any (p: (p.pname or "") == "bluez") c.environment.systemPackages;
+            hfCli = builtins.any (p: (p.pname or "") == "huggingface-hub") c.environment.systemPackages;
+            llamaVulkan = builtins.any (p: (p.pname or "") == "llama-cpp" && builtins.elem "-DGGML_VULKAN:BOOL=TRUE" (p.cmakeFlags or [])) c.environment.systemPackages;
+            vulkanTools = builtins.any (p: (p.pname or "") == "vulkan-tools") c.environment.systemPackages;
+            graphics = c.hardware.graphics.enable;
+            renderGroup = builtins.elem "render" c.users.users.twins.extraGroups;
+            llamaServer = c.services.llama-cpp.enable;
+            llamaOpenFirewall = c.services.llama-cpp.openFirewall;
             netbird = c.services.netbird.clients.wt0.interface;
             dhcp = c.networking.useDHCP;
             ssh = c.services.openssh.enable;
@@ -214,6 +221,9 @@ jobs:
             and .bcachefsSupport and (.compression | index("--compression=zstd") != null)
             and .systemdInitrd and .systemdBoot and .microcode
             and (.bluetooth | not) and (.bluetoothUnit | not) and (.bluezInstalled | not)
+            and .hfCli and .graphics and .renderGroup
+            and (.llamaVulkan | not) and (.vulkanTools | not)
+            and (.llamaServer | not) and (.llamaOpenFirewall | not)
             and (.zram | not) and .lvmGroups == [] and .luks == {}
             and (.xserver | not) and (.greetd | not) and (.networkmanager | not) and (.onepassword | not)
             and (.docker | not) and (.podman | not) and (.ollama | not) and (.frigate | not)

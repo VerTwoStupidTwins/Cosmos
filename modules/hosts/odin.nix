@@ -8,6 +8,7 @@ in
     imports = [
       nixos.base
       nixos."bcachefs-root"
+      nixos."model-tools"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/odin.nix
     ];
@@ -47,7 +48,10 @@ in
     users.users.twins = {
       isNormalUser = true;
       createHome = true;
-      extraGroups = [ "wheel" ];
+      extraGroups = [
+        "wheel"
+        "render"
+      ];
       shell = pkgs.fish;
       # The private Cosmos Admin key stays in the client's 1Password agent.
       openssh.authorizedKeys.keys = [
