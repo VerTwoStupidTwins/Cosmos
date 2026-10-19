@@ -279,6 +279,12 @@ jobs:
           check=$(nix build --no-write-lock-file --no-link --print-out-paths '.#checks.x86_64-linux.llama-cpp-instances')
           "$check/bin/verify-units"
 
+      - name: Test Odin llama-swap model routing and units
+        shell: bash
+        run: |
+          check=$(nix build --no-write-lock-file --no-link --print-out-paths '.#checks.x86_64-linux.odin-llama-swap')
+          "$check/bin/verify-units"
+
       # Mango and Niri must both remain available through the session chooser.
       - name: Verify Thoth desktop sessions
         shell: bash
