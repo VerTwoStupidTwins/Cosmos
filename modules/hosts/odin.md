@@ -1,6 +1,7 @@
 # Odin: headless model-server foundation
 
-This guide covers [odin.nix](odin.nix). Follow [AGENTS.md](../../AGENTS.md)
+This guide covers [odin.nix](odin.nix) and the on-demand model roster in
+[odin-inference.nix](odin-inference.nix). Follow [AGENTS.md](../../AGENTS.md)
 for repository rules and separate approval for hardware reports, formatting,
 installation, enrollment, and reboot. Commands are Bash procedures, not evidence
 that installation or runtime verification has succeeded.
@@ -238,9 +239,13 @@ Odin declares:
 | `intel` | Intel oneAPI/SYCL, Arc Pro B50 | `127.0.0.1:8080` | `SYCL0` |
 | `amd` | Vulkan, Radeon 7900 XT | `127.0.0.1:8081` | `Vulkan0` |
 
-Both entries have `enable = false`, `model = null`, and `openFirewall = false`.
-These are declared endpoints, not running servers. The upstream singleton
-`services.llama-cpp` remains disabled. Enabled instances must have distinct ports
+Both standalone entries have `enable = false`, `model = null`, and
+`openFirewall = false`. They supply backend packages and diagnostic launchers;
+Odin instead enables the [native llama-swap profile](../features/inference/llama-swap.nix)
+to own the on-demand AMD children. Do not also enable the standalone AMD server:
+it would compete with llama-swap for VRAM. These declarations are not proof of
+activation. The upstream singleton `services.llama-cpp` remains disabled.
+Enabled standalone instances must have distinct ports
 and an absolute model filename; reserve `host`, `port`, and `model` for their
 dedicated options instead of aliases under `settings`.
 
@@ -309,6 +314,83 @@ The module's flake check exercises enabled/disabled instances, isolated state,
 environment/device permissions, opt-in firewall/JIT, invalid configurations, and
 literal CLI argument transport. Its test executable is an argument-printing
 fixture, not simulated model inference.
+
+## On-demand Vulkan testing with llama-swap
+
+[odin-inference.nix](odin-inference.nix) configures the pinned native
+`services.llama-swap`, not Docker or a second always-running AMD server.
+After activation the testing endpoint is `http://127.0.0.1:8081/v1`, with the
+built-in playground at `http://127.0.0.1:8081/ui/`. No firewall port opens.
+Child servers bind loopback on automatically assigned ports starting at 18081.
+The default exclusive scheduler loads only one model at a time; two users can
+share the loaded model's two slots, but choosing different models causes swaps.
+
+| API model ID | Context per slot | Slots | Expert offload / decoding | Status |
+| --- | --- | --- | --- | --- |
+| `lfm25-heretic-q4` (alias `lfm`) | 131072 | 2 | Full GPU, no speculative draft | Public SHA-256 verified; repeated 120K-input retrieval probes failed |
+| `qwen36-apex-balanced-unverified` | 32768 | 2 | First 16 MoE layers on CPU, native MTP up to 2 draft tokens | Explicitly approved UNVERIFIED testing file; publisher checksum mismatch remains unresolved |
+
+Context includes formatted input, reasoning and output. Slot allocation does
+not establish useful retrieval quality at the advertised limit. Neither model
+is a validated primary executor. The shared proxy disables request/response
+body capture; changing that setting requires considering both users' privacy.
+
+### Runtime artifacts and activation
+
+The `odin-inference-models.service` oneshot runs before llama-swap and copies
+only the two selected, already downloaded artifacts into revision-specific
+paths under `/var/lib/llama-models`. It requests reflinks where supported,
+checks copied bytes, publishes files atomically with mode `0444`, and never
+downloads weights. Existing destination files are checked, not overwritten.
+The dynamic proxy user cannot modify these root-owned files; `ProtectHome`
+remains enabled. Once valid destination copies exist, the source cache is not
+needed on later starts. Model files stay outside the Nix store.
+
+LFM is pinned against its public SHA-256:
+`ee5faa7526b18bf7a8b72a6813a73bc8b2d5b76c4e638bc7858d9106df9487ef`.
+Qwen's approved local bytes have SHA-256
+`d4f7590f002c46f8d1acedf117d247a91aa4760ea92d60fc966867eac79cf02c`,
+not the publisher's expected
+`782636c45124fd40bf55254f802aba3b6c14e53d36f7a60f724f332761e9aa89`.
+Pinning those local bytes prevents accidental changes; it does not verify
+Qwen's integrity or provenance. The model ID, description and provisioning log
+retain the warning. Missing or changed source artifacts fail provisioning;
+do not replace hashes merely to make startup pass.
+
+Run Nix evaluations, validation, and builds on Odin, not on Thoth. Thoth may
+edit/stage the changes and drive strict SSH; first transfer the exact pending
+files onto a clean, matching feature branch in Odin's `/Cosmos` checkout and
+verify their contents. Do not write directly onto Odin's `main` or discard
+remote changes. Build completion is not activation permission.
+
+Only after review and activation approval, on Odin:
+
+```bash
+sudo nixos-rebuild switch --flake path:/Cosmos#odin
+systemctl status odin-inference-models.service llama-swap.service
+curl --fail http://127.0.0.1:8081/health
+curl --fail http://127.0.0.1:8081/v1/models
+```
+
+An idle healthy proxy does not prove backend loading. Request each model,
+verify real generation and native tool calls, inspect `/running`, then switch
+back and check that the previous child exited. Check both slots and Vulkan
+device selection from the child, not just the proxy health response.
+The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
+available. Models unload after 600 idle seconds. Intel remains independent
+and disabled; SYCL environment/workarounds are not applied to Vulkan children.
+
+For remote testing without exposing the unauthenticated UI/API, forward the
+loopback endpoint from a client with an authorized SSH key:
+
+```bash
+ssh -N -L 8081:127.0.0.1:8081 twins@192.168.1.120
+```
+
+Then use `http://127.0.0.1:8081/v1` and `/ui/` on that client. Brother-specific
+SSH authorization and direct LAN/NetBird serving remain separately approved
+work. Do not bind `0.0.0.0` or open a firewall port as an implicit consequence
+of model testing.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.

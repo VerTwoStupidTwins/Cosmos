@@ -53,6 +53,7 @@ Multiple feature files can extend the same profile:
 | `model-tools` | Hugging Face `hf` CLI from pinned nixpkgs, without an imperative Python environment |
 | `llama-cpp-sycl` | Intel compute-runtime prerequisites and narrowly scoped oneAPI licensing |
 | `llama-cpp-instances` | Independent named llama.cpp services, GPU environments, state/cache, and CLI launchers; disabled by default |
+| `llama-swap` | Native on-demand model proxy, loopback defaults, shared-user payload capture disabled; hosts supply backend/model choices |
 | `frigate-nvr` | Native Frigate, SSD database, required media mount, NetBird web access; camera setup pending |
 | `nvidia-headless` | NVIDIA open kernel modules and headless driver support, without a desktop or AI detector |
 
@@ -75,7 +76,7 @@ Hosts are named after figures from mythology across pantheons:
 
 - [Thoth](modules/hosts/thoth.md): ThinkPad T490 workstation, composed in [thoth.nix](modules/hosts/thoth.nix).
 - [Argus](modules/hosts/argus.md): Dell OptiPlex 3060 Mini Tower, dedicated headless Frigate NVR, composed in [argus.nix](modules/hosts/argus.nix). Its real hardware report, SATA disk IDs, and admin public key are declared; camera configuration remains pending. The host guide covers an explicitly approved fresh install over SSH with pinned `nixos-anywhere`, without an automatic reboot.
-- [Odin](modules/hosts/odin.md): headless Ryzen model-server foundation, composed in [odin.nix](modules/hosts/odin.nix). One NVMe holds an unencrypted ESP, small swap, and Bcachefs root. Native Hugging Face tooling and separate Intel B50 SYCL / Radeon 7900 XT Vulkan instances are declared; models and service activation remain separate steps.
+- [Odin](modules/hosts/odin.md): headless Ryzen model-server foundation, composed in [odin.nix](modules/hosts/odin.nix). One NVMe holds an unencrypted ESP, small swap, and Bcachefs root. Native model tools, separate Intel B50 SYCL / Radeon 7900 XT Vulkan launchers, and an on-demand Vulkan llama-swap roster are declared; runtime verification and activation remain separate from configuration.
 
 When adding hosts, audit shared-profile assumptions: `base` enables SSH/NetBird and the 1Password workstation policy currently names `twins`. Argus and Odin import `base`, not workstation/desktop profiles.
 
