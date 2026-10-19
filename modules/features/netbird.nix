@@ -9,6 +9,9 @@
       hardened = true;
       autoStart = true;
 
+      # Use OpenSSH over the VPN, not NetBird's embedded JWT-authenticated server.
+      config.ServerSSHAllowed = false;
+
       openFirewall = true;
       openInternalFirewall = true;
     };

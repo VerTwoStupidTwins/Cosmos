@@ -100,6 +100,26 @@ jobs:
             exit 1
           fi
 
+      # NetBird supplies transport; OpenSSH, not NetBird's JWT server, owns SSH.
+      - name: Verify OpenSSH over NetBird on every host
+        shell: bash
+        run: |
+          hosts_json="$(nix eval --no-write-lock-file --json --apply builtins.attrNames '.#nixosConfigurations')"
+          mapfile -t hosts < <(jq -r '.[]' <<< "$hosts_json")
+          (( ${#hosts[@]} > 0 )) || exit 1
+          for host in "${hosts[@]}"; do
+            nix eval --no-write-lock-file --json --apply 'c: {
+              openssh = c.services.openssh.enable;
+              interface = c.services.netbird.clients.wt0.interface;
+              hardened = c.services.netbird.clients.wt0.hardened;
+              embeddedSSH = c.services.netbird.clients.wt0.config.ServerSSHAllowed or null;
+              generated = builtins.fromJSON c.environment.etc."netbird-wt0/config.d/50-nixos.json".text;
+            }' ".#nixosConfigurations.\"$host\".config" | jq -e '
+              .openssh and .hardened and .interface == "wt0"
+              and .embeddedSSH == false and .generated.ServerSSHAllowed == false
+            '
+          done
+
       - name: Verify Argus headless NVR baseline
         shell: bash
         run: |
