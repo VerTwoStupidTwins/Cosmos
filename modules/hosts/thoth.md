@@ -38,6 +38,12 @@ Optional packages do not necessarily autostart. Mango starts the packaged Waybar
 
 NetBird's named client and interface are both `wt0`, with UDP port `58120`, autostart, hardened mode, and firewall options enabled. Startup alone does not prove enrollment or peer connectivity. OpenSSH uses `openFirewall = true` and is **not restricted to NetBird**. Establish and test NetBird access before tightening SSH exposure.
 
+The shared profile disables NetBird's embedded SSH server with
+`config.ServerSSHAllowed = false`; use normal `ssh` over the VPN with OpenSSH
+authentication. NetBird SSH's JWT/password prompt does not accept the Linux user
+password. See [Odin's migration procedure](odin.md#migrating-from-embedded-netbird-ssh)
+for existing peers and host-key verification when replacing the embedded server.
+
 1Password provides SSH identities at `~/.1password/agent.sock`; the OpenSSH client sets `IdentityAgent` system-wide and the built-in SSH agent is disabled. The GUI must be running with Settings → Developer → Use the SSH agent enabled. A refused connection can mean the agent has no socket listener. Its unfree allowance is narrowly declared in the workstation security feature.
 
 ## Login and desktop selection

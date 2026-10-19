@@ -196,9 +196,44 @@ standard input: `twins` uses Fish, so unwrapped Bash conditionals are not valid
 remote shell commands.
 
 SSH opens its port broadly through the shared profile; it is not NetBird-only.
+The shared NetBird profile sets `config.ServerSSHAllowed = false`: NetBird is
+the VPN transport, while OpenSSH handles SSH keys and local-user authentication.
+Do not enable the embedded NetBird SSH server or use `--disable-ssh-auth` as a
+password-login fix; its JWT authentication is separate from Linux passwords.
 NetBird startup is not enrollment or peer connectivity. With separate enrollment
 approval, use `sudo netbird-wt0 up` interactively and test access from an authorized
 peer before considering tighter SSH rules. Never commit setup keys.
+
+### Migrating from embedded NetBird SSH
+
+Keep a verified LAN/console session open while applying this change. Follow the
+normal review, validation, and separate activation approval requirements; no
+disk, password, or enrollment changes are needed. The NixOS NetBird pre-start
+script merges the declared setting when `netbird-wt0.service` starts. After
+activation, check the generated setting and, with approval for the brief VPN
+interruption, restart the service if the running client still serves embedded
+SSH. Run these commands on Odin through LAN/console, not through the VPN session
+being restarted:
+
+```bash
+jq -e '.ServerSSHAllowed == false' /etc/netbird-wt0/config.d/50-nixos.json
+sudo systemctl restart netbird-wt0.service
+systemctl is-active netbird-wt0.service sshd.service
+sudo netbird-wt0 status
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Disable Odin's embedded SSH Access toggle in the NetBird dashboard as well, and
+retain a normal **TCP port 22** access policy from the authorized client/group
+to Odin. A `NetBird SSH` policy is for the embedded server, not OpenSSH.
+
+The NetBird SSH host key and OpenSSH host key are different. A client that
+previously trusted the embedded server will report a changed host key. Verify
+the OpenSSH fingerprint through the trusted LAN/console connection first, then
+replace only the affected NetBird IP/hostname entries in `known_hosts`. Never
+disable host-key checking or remove unrelated entries. From Thoth, test both
+`ssh twins@<odin-netbird-ip>` and the actual remote-network connection, confirming
+the SSH server is OpenSSH and login works with the Cosmos Admin key.
 
 ## Hugging Face and independent GPU instances
 
