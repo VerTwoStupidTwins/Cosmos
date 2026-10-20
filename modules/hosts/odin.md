@@ -350,47 +350,85 @@ environment/device permissions, opt-in firewall/JIT, invalid configurations, and
 literal CLI argument transport. Its test executable is an argument-printing
 fixture, not simulated model inference.
 
-## On-demand Vulkan testing with llama-swap
+## On-demand Radeon inference with llama-swap
 
 [odin-inference.nix](odin-inference.nix) configures the pinned native
 `services.llama-swap`, not Docker or a second always-running AMD server.
-After activation the testing endpoint is `http://127.0.0.1:8081/v1`, with the
+After activation the endpoint remains `http://127.0.0.1:8081/v1`, with the
 built-in playground at `http://127.0.0.1:8081/ui/`. No firewall port opens.
-Child servers bind loopback on automatically assigned ports starting at 18081.
-The default exclusive scheduler loads only one model at a time; two users can
-share the loaded model's two slots, but choosing different models causes swaps.
+Child servers bind loopback on automatically assigned ports starting at 18081;
+the temporary experiment's NetBird listeners on 8090/8091 are not promoted into
+this configuration.
 
-| API model ID | Context per slot | Slots | Expert offload / decoding | Status |
-| --- | --- | --- | --- | --- |
-| `lfm25-heretic-q4` (alias `lfm`) | 131072 | 2 | Full GPU, no speculative draft | Public SHA-256 verified; repeated 120K-input retrieval probes failed |
-| `qwen36-apex-balanced-unverified` | 32768 | 2 | First 16 MoE layers on CPU, native MTP up to 2 draft tokens | Explicitly approved UNVERIFIED testing file; publisher checksum mismatch remains unresolved |
+| API model ID | Context | Slots | Weights / expert offload / decoding |
+| --- | --- | --- | --- |
+| `barozp-reap-q6` | 131072 total tokens | 1 | Q6_K; first 11 MoE layers on CPU; native MTP up to 3 draft tokens |
 
-Context includes formatted input, reasoning and output. Slot allocation does
-not establish useful retrieval quality at the advertised limit. Neither model
-is a validated primary executor. The shared proxy disables request/response
-body capture; changing that setting requires considering both users' privacy.
+The `rx-7900xt` group uses `swap = true`, so future models added to that group
+replace one another rather than share the card. `exclusive = false` leaves
+other groups untouched; `persistent = true` prevents other groups from evicting
+this one. Neither setting preloads a model. Future B50 models still need their
+own backend environment, render-device permission, and group; this change does
+not enable Intel serving or pool VRAM.
 
-### Runtime artifacts and activation
+The declared arguments preserve the tested single-slot configuration:
+
+- `Vulkan0`, 99 GPU layers, 11 CPU MoE layers on both main and MTP paths, fit off.
+- One 131072-token context, parallel 1, no unified KV cache.
+- 12 generation/prefill threads; batch/microbatch 1024/256; flash attention on.
+- `q8_0` K/V caches for both main and draft; MTP maximum 3, minimum 0, p-min 0.
+- `--cache-prompt --cache-ram 32768 --cache-idle-slots` for host RAM snapshots.
+- `--load-mode mmap+mlock --lazy-mode off --sleep-idle-seconds -1`.
+- Jinja, DeepSeek reasoning format, temperature 0.6, top-p 0.95, top-k 20;
+  metrics and slot endpoints enabled. Unsupported `--cache-reuse` stays absent.
+
+The proxy service declares `LimitMEMLOCK=infinity`, inherited by its children;
+no runtime user-manager `prlimit` adjustment is needed for this system service.
+Mapped locking pins CPU-resident model allocations, not a duplicate of all GPU
+weights in RAM. Standalone `--load-mode mlock` crashed the tested build and is
+not selected. Verify actual locked memory after activation rather than assuming
+that a flag establishes residency.
+
+Model `ttl = 0` disables the proxy's inherited 600-second idle unload. Once
+requested, the model and its RAM prompt cache remain until an explicit unload,
+a same-group model swap, or process/service termination. Cache RAM is a 32768 MiB
+budget, not an immediate allocation. The model's response-header timeout is
+1800 seconds to accommodate long non-streaming prefills.
+
+Context includes formatted input, reasoning and output. Cold retrieval passed
+through 65554 input tokens, and prefix/conversation-switch caching was exercised.
+Full near-capacity 128K operation and coding/planning executor quality remain
+unvalidated. The shared proxy keeps request/response body capture disabled.
+
+### Runtime artifact and activation
+
+The selected publisher is
+[`barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF`](https://huggingface.co/barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF),
+pinned at Hub revision `f11f37b9ad21038478066fc1e532dfb92165fccf`.
+The selected file is `Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf`,
+23795817760 bytes, with publisher SHA-256:
+
+```text
+27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae
+```
+
+The source file under
+`/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/`
+was rehashed against that pinned publisher metadata. It must exist for initial
+provisioning; the service does not download weights.
 
 The `odin-inference-models.service` oneshot runs before llama-swap and copies
-only the two selected, already downloaded artifacts into revision-specific
-paths under `/var/lib/llama-models`. It requests reflinks where supported,
-checks copied bytes, publishes files atomically with mode `0444`, and never
-downloads weights. Existing destination files are checked, not overwritten.
-The dynamic proxy user cannot modify these root-owned files; `ProtectHome`
-remains enabled. Once valid destination copies exist, the source cache is not
-needed on later starts. Model files stay outside the Nix store.
+only this selected artifact into
+`/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/`. It requests reflinks
+where supported, checks copied bytes, and publishes atomically with mode `0444`.
+Existing destination files are checked, not overwritten. The dynamic proxy
+user cannot modify these root-owned files; `ProtectHome` remains enabled. Once
+a valid destination copy exists, the source cache is not needed on later starts.
+Model files stay outside the Nix store.
 
-LFM is pinned against its public SHA-256:
-`ee5faa7526b18bf7a8b72a6813a73bc8b2d5b76c4e638bc7858d9106df9487ef`.
-Qwen's approved local bytes have SHA-256
-`d4f7590f002c46f8d1acedf117d247a91aa4760ea92d60fc966867eac79cf02c`,
-not the publisher's expected
-`782636c45124fd40bf55254f802aba3b6c14e53d36f7a60f724f332761e9aa89`.
-Pinning those local bytes prevents accidental changes; it does not verify
-Qwen's integrity or provenance. The model ID, description and provisioning log
-retain the warning. Missing or changed source artifacts fail provisioning;
-do not replace hashes merely to make startup pass.
+The retired LFM and checksum-mismatched APEX entries are no longer served or
+required by provisioning. Their cached/provisioned files are not deleted, and
+removing the APEX entry does not resolve its publisher-checksum mismatch.
 
 Run Nix evaluations, validation, and builds on Odin, not on Thoth. Thoth may
 edit/stage the changes and drive strict SSH; first transfer the exact pending
@@ -398,34 +436,43 @@ files onto a clean, matching feature branch in Odin's `/Cosmos` checkout and
 verify their contents. Do not write directly onto Odin's `main` or discard
 remote changes. Build completion is not activation permission.
 
-Only after review and activation approval, on Odin:
+Before first activation, obtain separate approval to stop the temporary backend
+and test proxy: leaving the old backend resident would compete for Radeon VRAM.
+Only after that approval, on Odin:
 
 ```bash
+systemctl --user stop barozp-test-swap.service \
+  barozp-reap-q6-q8-cpu11-ram32-single128k-test.service
 sudo nixos-rebuild switch --flake path:/Cosmos#odin
 systemctl status odin-inference-models.service llama-swap.service
+systemctl show llama-swap.service -p LimitMEMLOCK
 curl --fail http://127.0.0.1:8081/health
 curl --fail http://127.0.0.1:8081/v1/models
 ```
 
-An idle healthy proxy does not prove backend loading. Request each model,
-verify real generation and native tool calls, inspect `/running`, then switch
-back and check that the previous child exited. Check both slots and Vulkan
-device selection from the child, not just the proxy health response.
-The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
-available. Models unload after 600 idle seconds. Intel remains independent
-and disabled; SYCL environment/workarounds are not applied to Vulkan children.
+An idle healthy proxy does not prove backend loading. Request `barozp-reap-q6`,
+verify real generation and native tool calls, and inspect `/running`. Check the
+child's single 131072-token slot, Vulkan device, effective arguments, locked
+memory and swap usage. Check prompt-cache reuse and that an idle model is not
+unloaded after 600 seconds. These are post-activation checks, not claims that
+system-service inference has already passed. The flake check verifies arguments,
+GPU-specific routing, model paths, service dependencies and unit syntax; it is
+not GPU inference.
 
-For remote testing without exposing the unauthenticated UI/API, forward the
-loopback endpoint from a client with an authorized SSH key:
+The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
+available. Intel remains independent and disabled; SYCL environment/workarounds
+are not applied to Vulkan children.
+
+For remote use without exposing the unauthenticated UI/API, forward the loopback
+endpoint from a client with an authorized SSH key:
 
 ```bash
 ssh -N -L 8081:127.0.0.1:8081 twins@192.168.1.120
 ```
 
 Then use `http://127.0.0.1:8081/v1` and `/ui/` on that client. Brother-specific
-SSH authorization and direct LAN/NetBird serving remain separately approved
-work. Do not bind `0.0.0.0` or open a firewall port as an implicit consequence
-of model testing.
+SSH authorization and direct LAN/NetBird serving remain separate work. Do not
+bind `0.0.0.0` or open a firewall port as an implicit consequence of this change.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.
