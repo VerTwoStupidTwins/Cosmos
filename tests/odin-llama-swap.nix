@@ -5,11 +5,22 @@ let
   swap = odin.services.llama-swap;
   models = swap.settings.models or { };
   qwen = models.barozp-reap-q6 or { };
+  swift = models.swift15-iq3s or { };
+  swiftCommand = swift.cmd or "";
   command = qwen.cmd or "";
   group = swap.settings.routing.router.settings.groups.rx-7900xt or { };
   proxyUnit = odin.systemd.services.llama-swap;
   provision = odin.systemd.services.odin-inference-models or { };
   modelPath = "/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
+  swiftPath = "/var/lib/llama-models/swift15-qwen38-27b-gsq-rco-d74895bbe5db/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
+  hasSwiftArgument =
+    flag: value:
+    lib.hasInfix " ${
+       lib.escapeShellArgs [
+         flag
+         value
+       ]
+     } " " ${swiftCommand} ";
   hasArgument =
     flag: value:
     lib.hasInfix (lib.escapeShellArgs [
@@ -21,7 +32,99 @@ let
       builtins.elem "odin-inference-models.service" proxyUnit.requires
       && builtins.elem "odin-inference-models.service" proxyUnit.after
       && (provision.serviceConfig.Type or "") == "oneshot";
-    exactQwenRoster = builtins.attrNames models == [ "barozp-reap-q6" ];
+    exactRadeonRoster =
+      builtins.attrNames models == [
+        "barozp-reap-q6"
+        "swift15-iq3s"
+      ];
+    swift128kAndBatch =
+      builtins.all (pair: hasSwiftArgument (builtins.elemAt pair 0) (builtins.elemAt pair 1)) [
+        [
+          "--ctx-size"
+          "131072"
+        ]
+        [
+          "--parallel"
+          "1"
+        ]
+        [
+          "--threads"
+          "12"
+        ]
+        [
+          "--threads-batch"
+          "12"
+        ]
+        [
+          "--batch-size"
+          "1024"
+        ]
+        [
+          "--ubatch-size"
+          "256"
+        ]
+      ]
+      && lib.hasInfix "--no-kv-unified" swiftCommand;
+    swiftDenseVulkan =
+      hasSwiftArgument "--device" "Vulkan0"
+      && hasSwiftArgument "--gpu-layers" "99"
+      && hasSwiftArgument "--fit" "off"
+      && (swift.env or [ ]) == qwen.env
+      && !(lib.hasInfix "cpu-moe" swiftCommand);
+    swiftMappedNotLocked =
+      hasSwiftArgument "--load-mode" "mmap"
+      && hasSwiftArgument "--lazy-mode" "off"
+      && hasSwiftArgument "--sleep-idle-seconds" "-1"
+      && !(lib.hasInfix "mlock" swiftCommand);
+    swiftMtpAndQ8 =
+      hasSwiftArgument "--spec-type" "draft-mtp"
+      && hasSwiftArgument "--spec-draft-n-max" "3"
+      && hasSwiftArgument "--spec-draft-n-min" "0"
+      && hasSwiftArgument "--spec-draft-p-min" "0"
+      && hasSwiftArgument "--flash-attn" "on"
+      && builtins.all (flag: hasSwiftArgument flag "q8_0") [
+        "--cache-type-k"
+        "--cache-type-v"
+        "--cache-type-k-draft"
+        "--cache-type-v-draft"
+      ];
+    swiftPromptReuse =
+      hasSwiftArgument "--slot-prompt-similarity" "0.9"
+      && hasSwiftArgument "--cache-ram" "32768"
+      && lib.hasInfix "--cache-prompt" swiftCommand
+      && lib.hasInfix "--cache-idle-slots" swiftCommand
+      && !(lib.hasInfix "--cache-reuse" swiftCommand)
+      && !(lib.hasInfix "--ctx-checkpoints" swiftCommand)
+      && !(lib.hasInfix "--checkpoint-min-step" swiftCommand);
+    swiftSamplingAndReasoning =
+      hasSwiftArgument "--temp" "1.0"
+      && hasSwiftArgument "--top-p" "0.95"
+      && hasSwiftArgument "--top-k" "20"
+      && hasSwiftArgument "--min-p" "0.0"
+      && hasSwiftArgument "--presence-penalty" "0.0"
+      && hasSwiftArgument "--repeat-penalty" "1.0"
+      && hasSwiftArgument "--reasoning-format" "deepseek"
+      && builtins.all (flag: lib.hasInfix flag swiftCommand) [
+        "--jinja"
+        "--metrics"
+        "--slots"
+      ]
+      && !(lib.hasInfix "--reasoning-effort" swiftCommand);
+    swiftManagedRuntime =
+      hasSwiftArgument "--model" swiftPath
+      && !(lib.hasInfix "/home/" swiftCommand)
+      && hasSwiftArgument "--host" "127.0.0.1"
+      && hasSwiftArgument "--port" "\${PORT}"
+      && hasSwiftArgument "--alias" "\${MODEL_ID}"
+      && (swift.proxy or "") == "http://127.0.0.1:\${PORT}"
+      && (swift.useModelName or "") == "\${MODEL_ID}"
+      && (swift.checkEndpoint or "") == "/health"
+      && (swift.ttl or (-1)) == 0
+      && (swift.timeouts.responseHeader or 0) == 1800;
+    swiftValidationLabel =
+      lib.hasInfix "IQ3_S" (swift.name or "")
+      && lib.hasInfix "129994" (swift.description or "")
+      && lib.hasInfix "unvalidated" (swift.description or "");
     loopbackOnly =
       swap.listenAddress == "127.0.0.1"
       && swap.port == 8081
@@ -97,7 +200,11 @@ let
     gpuSpecificSwapGroup =
       (swap.settings.routing.router.use or "") == "group"
       && builtins.attrNames (swap.settings.routing.router.settings.groups or { }) == [ "rx-7900xt" ]
-      && (group.members or [ ]) == [ "barozp-reap-q6" ]
+      &&
+        (group.members or [ ]) == [
+          "barozp-reap-q6"
+          "swift15-iq3s"
+        ]
       && (group.swap or false)
       && !(group.exclusive or true)
       && (group.persistent or false)
@@ -141,6 +248,8 @@ pkgs.runCommand "odin-llama-swap-check" { } ''
   ${pkgs.bash}/bin/bash -n ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '${modelPath}' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '${swiftPath}' ${provision.serviceConfig.ExecStart}
   if ${pkgs.gnugrep}/bin/grep -E -- 'lfm25-heretic|qwen36-apex|UNVERIFIED' ${provision.serviceConfig.ExecStart}; then
     printf 'Retired artifacts must not block Qwen provisioning\n' >&2
     exit 1
