@@ -15,21 +15,14 @@ in
       backend = config.services.llama-cpp-instances.amd;
       server = lib.getExe' backend.package "llama-server";
       modelRoot = "/var/lib/llama-models";
-      lfmModel = "${modelRoot}/lfm25-heretic-b7ee8c913ca1/LFM2.5-24B-A2B-Uncensored-Heretic.Q4_K_M.gguf";
-      qwenModel = "${modelRoot}/qwen36-apex-unverified-313e55f61a04/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-APEX-I-Balanced.gguf";
+      qwenModel = "${modelRoot}/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
       artifacts = [
         {
-          source = "/home/twins/.local/share/cosmos-models/lfm25-heretic/b7ee8c913ca1aaa7ecf12e6290f8310497a55fef/LFM2.5-24B-A2B-Uncensored-Heretic.Q4_K_M.gguf";
-          destination = lfmModel;
-          contentHash = "ee5faa7526b18bf7a8b72a6813a73bc8b2d5b76c4e638bc7858d9106df9487ef";
-          warning = "";
-        }
-        {
-          source = "/home/twins/.local/share/cosmos-models/qwen36-apex/313e55f61a045dd18ac023d28fe845ee35988a5d/Qwen3.6-35B-A3B-uncensored-heretic-Native-MTP-Preserved-APEX-I-Balanced.gguf";
+          source = "/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
           destination = qwenModel;
-          # Pin the explicitly approved local bytes, NOT the publisher hash.
-          contentHash = "d4f7590f002c46f8d1acedf117d247a91aa4760ea92d60fc966867eac79cf02c";
-          warning = "UNVERIFIED Qwen: publisher SHA-256 782636c45124fd40bf55254f802aba3b6c14e53d36f7a60f724f332761e9aa89 does not match the approved testing file d4f7590f002c46f8d1acedf117d247a91aa4760ea92d60fc966867eac79cf02c.";
+          # Matches the publisher's SHA-256 at the pinned Hub revision.
+          contentHash = "27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae";
+          warning = "";
         }
       ];
       provisionModels = pkgs.writeShellApplication {
@@ -83,7 +76,7 @@ in
           '') artifacts}
         '';
       };
-      commonArguments = [
+      qwenArguments = [
         "--host"
         "127.0.0.1"
         "--port"
@@ -94,84 +87,106 @@ in
         backend.settings.device
         "--gpu-layers"
         "99"
+        "--n-cpu-moe"
+        "11"
         "--fit"
         "off"
+        # Standalone mlock crashes this build; mapped locking was verified.
+        "--load-mode"
+        "mmap+mlock"
+        "--lazy-mode"
+        "off"
+        "--sleep-idle-seconds"
+        "-1"
         "--threads"
         "12"
         "--threads-batch"
         "12"
+        "--ctx-size"
+        "131072"
+        "--parallel"
+        "1"
+        "--no-kv-unified"
         "--batch-size"
-        "512"
+        "1024"
         "--ubatch-size"
-        "128"
+        "256"
         "--cache-type-k"
-        "f16"
+        "q8_0"
         "--cache-type-v"
-        "f16"
+        "q8_0"
+        "--flash-attn"
+        "on"
+        "--spec-type"
+        "draft-mtp"
+        "--spec-draft-n-max"
+        "3"
+        "--spec-draft-n-min"
+        "0"
+        "--spec-draft-p-min"
+        "0"
+        "--spec-draft-n-cpu-moe"
+        "11"
+        "--cache-type-k-draft"
+        "q8_0"
+        "--cache-type-v-draft"
+        "q8_0"
+        "--cache-prompt"
+        "--cache-ram"
+        "32768"
+        "--cache-idle-slots"
         "--jinja"
-        "--metrics"
         "--reasoning-format"
         "deepseek"
+        "--temp"
+        "0.6"
+        "--top-p"
+        "0.95"
+        "--top-k"
+        "20"
+        "--metrics"
+        "--slots"
       ];
-      model = path: arguments: {
-        cmd = lib.escapeShellArgs (
-          [
-            server
-            "--model"
-            path
-          ]
-          ++ commonArguments
-          ++ arguments
-        );
-        env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
-        proxy = "http://127.0.0.1:\${PORT}";
-        useModelName = "\${MODEL_ID}";
-        checkEndpoint = "/health";
-      };
     in
     {
       imports = [ nixos."llama-swap" ];
 
       services.llama-swap.settings = {
         startPort = 18081;
-        # The default scheduler permits one resident model. Do not add a set
-        # allowing these two AMD models to remain loaded together.
-        models = {
-          lfm25-heretic-q4 =
-            (model lfmModel [
-              "--ctx-size"
-              "262144"
-              "--parallel"
-              "2"
-              "--n-cpu-moe"
-              "0"
-              "--spec-type"
-              "none"
-            ])
-            // {
-              name = "LFM2.5 Heretic Q4_K_M";
-              description = "Verified weights; two 128K slots. Experimental: 120K-input retrieval failed in repeated testing.";
-              aliases = [ "lfm" ];
-            };
-          qwen36-apex-balanced-unverified =
-            (model qwenModel [
-              "--ctx-size"
-              "65536"
-              "--parallel"
-              "2"
-              "--n-cpu-moe"
-              "16"
-              "--spec-type"
-              "draft-mtp"
-              "--spec-draft-n-max"
-              "2"
-              "--spec-draft-n-cpu-moe"
-              "16"
-            ])
-            // {
-              name = "Qwen3.6 APEX-I-Balanced (UNVERIFIED)";
-              description = "UNVERIFIED: downloaded weights fail the publisher SHA-256. Explicitly approved for further testing only; two 32K slots, CPU expert offload and MTP.";
-            };
+        routing.router = {
+          use = "group";
+          settings.groups.rx-7900xt = {
+            # One AMD model at a time, without evicting future B50 groups.
+            swap = true;
+            exclusive = false;
+            persistent = true;
+            members = [ "barozp-reap-q6" ];
+          };
+        };
+        models.barozp-reap-q6 = {
+          name = "Qwen3.6 REAP Opus Reasoning Distill MTP Q6_K";
+          description = "Verified weights; one 128K slot, 11 CPU MoE layers, q8 KV and MTP. Retrieval tested through 64K input; full 128K and executor quality remain unvalidated.";
+          cmd = lib.escapeShellArgs (
+            [
+              server
+              "--model"
+              qwenModel
+            ]
+            ++ qwenArguments
+          );
+          env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
+          proxy = "http://127.0.0.1:\${PORT}";
+          useModelName = "\${MODEL_ID}";
+          checkEndpoint = "/health";
+          # Keep weights and RAM prompt snapshots until an explicit unload/swap.
+          ttl = 0;
+          timeouts = {
+            connect = 30;
+            keepalive = 30;
+            responseHeader = 1800;
+            tlsHandshake = 10;
+            idleConn = 90;
+          };
         };
       };
 
@@ -205,6 +220,8 @@ in
           serviceConfig = {
             DevicePolicy = "closed";
             DeviceAllow = [ "${backend.renderDevice} rw" ];
+            # Child servers inherit this, avoiding a user-manager prlimit hack.
+            LimitMEMLOCK = "infinity";
           };
         };
       };
