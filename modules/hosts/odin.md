@@ -363,15 +363,16 @@ this configuration.
 | API model ID | Context | Slots | Weights / expert offload / decoding |
 | --- | --- | --- | --- |
 | `barozp-reap-q6` | 131072 total tokens | 1 | Q6_K; first 11 MoE layers on CPU; native MTP up to 3 draft tokens |
+| `swift15-iq3s` | 131072 total tokens | 1 | Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S; dense GPU offload; native MTP up to 3 draft tokens |
 
-The `rx-7900xt` group uses `swap = true`, so future models added to that group
-replace one another rather than share the card. `exclusive = false` leaves
+Both models belong to `rx-7900xt` with `swap = true`: requesting Swift unloads
+REAP and vice versa, rather than keeping both on the card. `exclusive = false` leaves
 other groups untouched; `persistent = true` prevents other groups from evicting
 this one. Neither setting preloads a model. Future B50 models still need their
 own backend environment, render-device permission, and group; this change does
 not enable Intel serving or pool VRAM.
 
-The declared arguments preserve the tested single-slot configuration:
+REAP retains its tested single-slot arguments unchanged:
 
 - `Vulkan0`, 99 GPU layers, 11 CPU MoE layers on both main and MTP paths, fit off.
 - One 131072-token context, parallel 1, no unified KV cache.
@@ -382,25 +383,54 @@ The declared arguments preserve the tested single-slot configuration:
 - Jinja, DeepSeek reasoning format, temperature 0.6, top-p 0.95, top-k 20;
   metrics and slot endpoints enabled. Unsupported `--cache-reuse` stays absent.
 
+Swift preserves its separately tested dense-model configuration:
+
+- One 131072-token slot, `Vulkan0`, 99 GPU layers, fit off, and no CPU-MoE
+  overrides. It uses `--load-mode mmap`, not REAP's mapped locking.
+- The same 12 threads, 1024/256 batch/microbatch, flash attention, q8 main/draft
+  KV caches, and MTP draft maximum 3/minimum 0/p-min 0.
+- `--cache-prompt --cache-ram 32768 --cache-idle-slots` plus
+  `--slot-prompt-similarity 0.9`. The higher threshold improved restoration of
+  related saved prompts from RAM; it is not a universal speed setting.
+- Temperature 1.0, top-p 0.95, top-k 20, min-p 0.0, presence penalty 0.0,
+  repeat penalty 1.0; Jinja, DeepSeek reasoning format, metrics and slots.
+- No idle sleep or lazy loading. Ineffective checkpoint-spacing changes and
+  `--cache-reuse` are not included.
+
+Swift's synthetic tests used request-level
+`chat_template_kwargs = { "reasoning_effort": "low" }`; the CLI does not force
+this effort level. Keep effort, system instructions, tool definitions and old
+turns stable for prefix reuse, and preserve reasoning content when constructing
+subsequent turns. Clients must not disable caching with `cache_prompt: false`.
+Changing earlier prompt text can still require substantial recomputation.
+
 The proxy service declares `LimitMEMLOCK=infinity`, inherited by its children;
 no runtime user-manager `prlimit` adjustment is needed for this system service.
-Mapped locking pins CPU-resident model allocations, not a duplicate of all GPU
+For REAP, mapped locking pins CPU-resident allocations, not a duplicate of all GPU
 weights in RAM. Standalone `--load-mode mlock` crashed the tested build and is
-not selected. Verify actual locked memory after activation rather than assuming
-that a flag establishes residency.
+not selected. Swift's `mmap` mode does not request locking, despite inheriting
+the allowance. Verify actual memory behavior after activation rather than
+assuming that an allowance establishes residency.
 
-Model `ttl = 0` disables the proxy's inherited 600-second idle unload. Once
+Both models use `ttl = 0`, disabling the proxy's inherited 600-second idle unload. Once
 requested, the model and its RAM prompt cache remain until an explicit unload,
 a same-group model swap, or process/service termination. Cache RAM is a 32768 MiB
-budget, not an immediate allocation. The model's response-header timeout is
+budget per backend, not an immediate allocation or a cache shared between models.
+Swapping models discards the unloaded backend's RAM prompt cache; group persistence
+does not prevent same-group swaps. Each model's response-header timeout is
 1800 seconds to accommodate long non-streaming prefills.
 
-Context includes formatted input, reasoning and output. Cold retrieval passed
-through 65554 input tokens, and prefix/conversation-switch caching was exercised.
-Full near-capacity 128K operation and coding/planning executor quality remain
-unvalidated. The shared proxy keeps request/response body capture disabled.
+Context includes formatted input, reasoning and output. REAP's cold retrieval
+passed through 65554 input tokens; its full near-capacity 128K behavior remains
+unvalidated. Swift passed a cold 129994-input-token retrieval with five facts
+correct, MTP active, 17.78 GiB sampled peak VRAM and no process swap. This
+near-capacity probe preceded the similarity-threshold change. Subsequent 32K
+reuse tests validated the retained threshold, including appended turns and
+return visits to saved prompts. Neither model's broad coding/planning executor
+quality is established by those synthetic checks. The shared proxy keeps
+request/response body capture disabled.
 
-### Runtime artifact and activation
+### Runtime artifacts and activation
 
 The selected publisher is
 [`barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF`](https://huggingface.co/barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF),
@@ -417,8 +447,27 @@ The source file under
 was rehashed against that pinned publisher metadata. It must exist for initial
 provisioning; the service does not download weights.
 
+Swift is from
+[`ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF`](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF),
+pinned at revision `d74895bbe5db4bec1e0024e7cc87d59c02d7631a`. Its selected file
+is `Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf`, 12120016896 bytes. The
+downloaded file was rehashed against the pinned publisher SHA-256:
+
+```text
+9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5
+```
+
+Its initial source directory is
+`/home/twins/.local/share/cosmos-models/swift15-qwen38-27b-gsq-rco/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/`;
+its service-readable destination directory is
+`/var/lib/llama-models/swift15-qwen38-27b-gsq-rco-d74895bbe5db/`.
+Swift's adapted weights use the
+[Swift Open License v1.0](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF/blob/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/LICENSE),
+not an Apache-only grant; review its terms for redistribution or commercial use.
+
 The `odin-inference-models.service` oneshot runs before llama-swap and copies
-only this selected artifact into
+both selected artifacts into their revision-specific directories under
+`/var/lib/llama-models`; REAP retains
 `/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/`. It requests reflinks
 where supported, checks copied bytes, and publishes atomically with mode `0444`.
 Existing destination files are checked, not overwritten. The dynamic proxy
@@ -436,13 +485,12 @@ files onto a clean, matching feature branch in Odin's `/Cosmos` checkout and
 verify their contents. Do not write directly onto Odin's `main` or discard
 remote changes. Build completion is not activation permission.
 
-Before first activation, obtain separate approval to stop the temporary backend
-and test proxy: leaving the old backend resident would compete for Radeon VRAM.
-Only after that approval, on Odin:
+Before activation, obtain separate approval to stop any active temporary backend
+and test proxy: an experimental process outside this group still competes for
+Radeon VRAM. For the current Swift experiment, only after that approval, on Odin:
 
 ```bash
-systemctl --user stop barozp-test-swap.service \
-  barozp-reap-q6-q8-cpu11-ram32-single128k-test.service
+systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service
 sudo nixos-rebuild switch --flake path:/Cosmos#odin
 systemctl status odin-inference-models.service llama-swap.service
 systemctl show llama-swap.service -p LimitMEMLOCK
@@ -451,9 +499,11 @@ curl --fail http://127.0.0.1:8081/v1/models
 ```
 
 An idle healthy proxy does not prove backend loading. Request `barozp-reap-q6`,
-verify real generation and native tool calls, and inspect `/running`. Check the
-child's single 131072-token slot, Vulkan device, effective arguments, locked
-memory and swap usage. Check prompt-cache reuse and that an idle model is not
+then `swift15-iq3s`, and switch back; verify that each previous child exits before
+the other loads. Verify real generation and native tool calls, and inspect
+`/running`. Check each child's single 131072-token slot, Vulkan device, effective
+arguments, model-specific memory behavior and swap usage. Check prompt-cache
+reuse within a loaded model and that an idle model is not
 unloaded after 600 seconds. These are post-activation checks, not claims that
 system-service inference has already passed. The flake check verifies arguments,
 GPU-specific routing, model paths, service dependencies and unit syntax; it is

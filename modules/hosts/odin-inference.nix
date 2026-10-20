@@ -16,12 +16,19 @@ in
       server = lib.getExe' backend.package "llama-server";
       modelRoot = "/var/lib/llama-models";
       qwenModel = "${modelRoot}/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
+      swiftModel = "${modelRoot}/swift15-qwen38-27b-gsq-rco-d74895bbe5db/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
       artifacts = [
         {
           source = "/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
           destination = qwenModel;
           # Matches the publisher's SHA-256 at the pinned Hub revision.
           contentHash = "27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae";
+          warning = "";
+        }
+        {
+          source = "/home/twins/.local/share/cosmos-models/swift15-qwen38-27b-gsq-rco/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
+          destination = swiftModel;
+          contentHash = "9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5";
           warning = "";
         }
       ];
@@ -147,6 +154,81 @@ in
         "--metrics"
         "--slots"
       ];
+      # Preserve Swift's tested dense-model flags separately from REAP's MoE tuning.
+      swiftArguments = [
+        "--host"
+        "127.0.0.1"
+        "--port"
+        "\${PORT}"
+        "--alias"
+        "\${MODEL_ID}"
+        "--device"
+        backend.settings.device
+        "--gpu-layers"
+        "99"
+        "--fit"
+        "off"
+        "--load-mode"
+        "mmap"
+        "--lazy-mode"
+        "off"
+        "--sleep-idle-seconds"
+        "-1"
+        "--threads"
+        "12"
+        "--threads-batch"
+        "12"
+        "--ctx-size"
+        "131072"
+        "--parallel"
+        "1"
+        "--no-kv-unified"
+        "--batch-size"
+        "1024"
+        "--ubatch-size"
+        "256"
+        "--cache-type-k"
+        "q8_0"
+        "--cache-type-v"
+        "q8_0"
+        "--flash-attn"
+        "on"
+        "--spec-type"
+        "draft-mtp"
+        "--spec-draft-n-max"
+        "3"
+        "--spec-draft-n-min"
+        "0"
+        "--spec-draft-p-min"
+        "0"
+        "--cache-type-k-draft"
+        "q8_0"
+        "--cache-type-v-draft"
+        "q8_0"
+        "--cache-prompt"
+        "--cache-ram"
+        "32768"
+        "--cache-idle-slots"
+        "--slot-prompt-similarity"
+        "0.9"
+        "--jinja"
+        "--reasoning-format"
+        "deepseek"
+        "--temp"
+        "1.0"
+        "--top-p"
+        "0.95"
+        "--top-k"
+        "20"
+        "--min-p"
+        "0.0"
+        "--presence-penalty"
+        "0.0"
+        "--repeat-penalty"
+        "1.0"
+        "--metrics"
+        "--slots"
+      ];
     in
     {
       imports = [ nixos."llama-swap" ];
@@ -160,7 +242,10 @@ in
             swap = true;
             exclusive = false;
             persistent = true;
-            members = [ "barozp-reap-q6" ];
+            members = [
+              "barozp-reap-q6"
+              "swift15-iq3s"
+            ];
           };
         };
         models.barozp-reap-q6 = {
@@ -179,6 +264,31 @@ in
           useModelName = "\${MODEL_ID}";
           checkEndpoint = "/health";
           # Keep weights and RAM prompt snapshots until an explicit unload/swap.
+          ttl = 0;
+          timeouts = {
+            connect = 30;
+            keepalive = 30;
+            responseHeader = 1800;
+            tlsHandshake = 10;
+            idleConn = 90;
+          };
+        };
+        models.swift15-iq3s = {
+          name = "Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S MTP";
+          description = "Verified weights; one 128K slot, dense GPU offload, q8 KV, MTP and tuned prompt reuse. Cold synthetic retrieval passed at 129994 input tokens; broad executor quality remains unvalidated.";
+          cmd = lib.escapeShellArgs (
+            [
+              server
+              "--model"
+              swiftModel
+            ]
+            ++ swiftArguments
+          );
+          env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
+          proxy = "http://127.0.0.1:\${PORT}";
+          useModelName = "\${MODEL_ID}";
+          checkEndpoint = "/health";
+          # A same-group swap still unloads this model and its RAM prompt cache.
           ttl = 0;
           timeouts = {
             connect = 30;
