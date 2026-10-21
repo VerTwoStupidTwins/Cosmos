@@ -6,6 +6,17 @@ let
   models = swap.settings.models or { };
   qwen = models.barozp-reap-q6 or { };
   swift = models.swift15-iq3s or { };
+  embedding = models.embeddinggemma2 or { };
+  embeddingCommand = embedding.cmd or "";
+  hasEmbeddingArgument =
+    flag: value:
+    # Regex patterns cannot carry a derivation context; keep it on the command.
+    lib.hasInfix (builtins.unsafeDiscardStringContext " ${
+      lib.escapeShellArgs [
+        flag
+        value
+      ]
+    } ") " ${embeddingCommand} ";
   swiftCommand = swift.cmd or "";
   command = qwen.cmd or "";
   group = swap.settings.routing.router.settings.groups.rx-7900xt or { };
@@ -28,13 +39,145 @@ let
       value
     ]) command;
   checks = {
+    embeddingPinnedRuntime =
+      let
+        runtime = odin.services.llama-cpp-instances.intel.package;
+      in
+      runtime.version == "4fbc76dec51d0add466f0210855c0596589b60d4"
+      && runtime.outputs == [ "out" ]
+      && runtime.preConfigure == ""
+      && runtime.syclPreemptionMode == 3
+      && builtins.elem (lib.cmakeBool "GGML_SYCL_F16" false) runtime.cmakeFlags
+      && !(builtins.elem (lib.cmakeBool "GGML_SYCL_F16" true) runtime.cmakeFlags)
+      && builtins.all (flag: builtins.elem flag runtime.hardeningDisable) [
+        "fortify"
+        "fortify3"
+      ]
+      && lib.hasInfix "llama-cpp-embeddinggemma2-sycl-f32" embeddingCommand;
+    embeddingManagedProxy =
+      (embedding.proxy or "") == "http://127.0.0.1:\${PORT}"
+      && (embedding.useModelName or "") == "\${MODEL_ID}"
+      && (embedding.checkEndpoint or "") == "/health"
+      && (embedding.timeouts.responseHeader or 0) == 1800
+      && lib.hasInfix "unvalidated" (embedding.description or "")
+      && !(builtins.any (entry: lib.hasPrefix "VK_DRIVER_FILES=" entry) (embedding.env or [ ]));
+    embeddingConservativeBaseline =
+      builtins.all (pair: hasEmbeddingArgument (builtins.elemAt pair 0) (builtins.elemAt pair 1)) [
+        [
+          "--device"
+          "SYCL0"
+        ]
+        [
+          "--mmproj-device"
+          "SYCL0"
+        ]
+        [
+          "--n-gpu-layers"
+          "99"
+        ]
+        [
+          "--fit"
+          "off"
+        ]
+        [
+          "--pooling"
+          "mean"
+        ]
+        [
+          "--ctx-size"
+          "8192"
+        ]
+        [
+          "--parallel"
+          "1"
+        ]
+        [
+          "--batch-size"
+          "8192"
+        ]
+        [
+          "--ubatch-size"
+          "8192"
+        ]
+        [
+          "--threads"
+          "4"
+        ]
+        [
+          "--threads-batch"
+          "4"
+        ]
+        [
+          "--cache-type-k"
+          "f32"
+        ]
+        [
+          "--cache-type-v"
+          "f32"
+        ]
+        [
+          "--flash-attn"
+          "off"
+        ]
+        [
+          "--video-ffmpeg-dir"
+          "${pkgs.ffmpeg}/bin"
+        ]
+        [
+          "--sleep-idle-seconds"
+          "-1"
+        ]
+        [
+          "--model"
+          "/var/lib/llama-models/embeddinggemma2-031f0d4b3553/embeddinggemma-2-Q8_0.gguf"
+        ]
+        [
+          "--mmproj"
+          "/var/lib/llama-models/embeddinggemma2-031f0d4b3553/mmproj-BF16.gguf"
+        ]
+        [
+          "--host"
+          "127.0.0.1"
+        ]
+        [
+          "--port"
+          "\${PORT}"
+        ]
+        [
+          "--alias"
+          "\${MODEL_ID}"
+        ]
+      ]
+      && builtins.all (flag: lib.hasInfix " ${lib.escapeShellArg flag} " " ${embeddingCommand} ") [
+        "--embedding"
+        "--mmproj-offload"
+        "--slots"
+        "--metrics"
+      ]
+      && !(lib.hasInfix "/home/" embeddingCommand)
+      && !(lib.hasInfix "--image-max-tokens" embeddingCommand)
+      && !(lib.hasInfix "--video-fps" embeddingCommand)
+      && (embedding.ttl or (-1)) == 0
+      && builtins.elem "ONEDNN_DEFAULT_FPMATH_MODE=STRICT" (embedding.env or [ ])
+      && builtins.elem "DNNL_DEFAULT_FPMATH_MODE=STRICT" (embedding.env or [ ]);
+    b50ResidentGroup =
+      let
+        b50 = swap.settings.routing.router.settings.groups.intel-b50 or { };
+      in
+      (b50.members or [ ]) == [ "embeddinggemma2" ]
+      && !(b50.swap or true)
+      && !(b50.exclusive or true)
+      && (b50.persistent or false)
+      && (swap.settings.hooks.on_startup.preload or [ ]) == [ "embeddinggemma2" ]
+      && !(swap.settings ? preload);
     provisionBeforeProxy =
       builtins.elem "odin-inference-models.service" proxyUnit.requires
       && builtins.elem "odin-inference-models.service" proxyUnit.after
       && (provision.serviceConfig.Type or "") == "oneshot";
-    exactRadeonRoster =
+    exactModelRoster =
       builtins.attrNames models == [
         "barozp-reap-q6"
+        "embeddinggemma2"
         "swift15-iq3s"
       ];
     swift128kAndBatch =
@@ -199,7 +342,11 @@ let
     runtimePaths = hasArgument "--model" modelPath && !(lib.hasInfix "/home/" command);
     gpuSpecificSwapGroup =
       (swap.settings.routing.router.use or "") == "group"
-      && builtins.attrNames (swap.settings.routing.router.settings.groups or { }) == [ "rx-7900xt" ]
+      &&
+        builtins.attrNames (swap.settings.routing.router.settings.groups or { }) == [
+          "intel-b50"
+          "rx-7900xt"
+        ]
       &&
         (group.members or [ ]) == [
           "barozp-reap-q6"
@@ -210,13 +357,18 @@ let
       && (group.persistent or false)
       && !(swap.settings ? groups)
       && !(swap.settings ? matrix)
-      && !(swap.settings ? hooks);
+      && builtins.attrNames (swap.settings.hooks or { }) == [ "on_startup" ];
     noPayloadCapture = swap.settings.captureBuffer == 0;
     gpuSandbox =
       proxyUnit.serviceConfig.ProtectHome
       && proxyUnit.serviceConfig.DynamicUser
       && proxyUnit.serviceConfig.DevicePolicy == "closed"
-      && proxyUnit.serviceConfig.DeviceAllow == [ "/dev/dri/by-path/pci-0000:0d:00.0-render rw" ]
+      &&
+        proxyUnit.serviceConfig.DeviceAllow == [
+          "/dev/dri/by-path/pci-0000:0d:00.0-render rw"
+          "/dev/dri/by-path/pci-0000:10:00.0-render rw"
+        ]
+      && !proxyUnit.serviceConfig.MemoryDenyWriteExecute
       && builtins.elem "render" proxyUnit.serviceConfig.SupplementaryGroups
       && proxyUnit.serviceConfig.KillMode == "control-group";
     rootProvisioningIsOffline =
@@ -250,6 +402,10 @@ pkgs.runCommand "odin-llama-swap-check" { } ''
   ${pkgs.gnugrep}/bin/grep -F -- '${modelPath}' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '${swiftPath}' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '6f1bd4ac6c5df7444f9cca7ca36cafe6cfa34cd6f49fefb1e0b4be8143aed8bc' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '995aaa56e88b9b631f651861d659b728a625ccc02a238be37cff56cf11dc0032' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '/var/lib/llama-models/embeddinggemma2-031f0d4b3553/embeddinggemma-2-Q8_0.gguf' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '/var/lib/llama-models/embeddinggemma2-031f0d4b3553/mmproj-BF16.gguf' ${provision.serviceConfig.ExecStart}
   if ${pkgs.gnugrep}/bin/grep -E -- 'lfm25-heretic|qwen36-apex|UNVERIFIED' ${provision.serviceConfig.ExecStart}; then
     printf 'Retired artifacts must not block Qwen provisioning\n' >&2
     exit 1

@@ -1,4 +1,4 @@
-# Odin's on-demand Vulkan model roster; the standalone GPU instances stay off.
+# Odin's Vulkan reasoning / SYCL embedding roster; standalone instances stay off.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -14,10 +14,26 @@ in
     let
       backend = config.services.llama-cpp-instances.amd;
       server = lib.getExe' backend.package "llama-server";
+      intelBackend = config.services.llama-cpp-instances.intel;
+      embeddingServer = lib.getExe' intelBackend.package "llama-server";
       modelRoot = "/var/lib/llama-models";
+      embeddingRoot = "${modelRoot}/embeddinggemma2-031f0d4b3553";
+      embeddingSource = "/home/twins/.local/share/cosmos-models/embeddinggemma2/031f0d4b35536f69ab3509d4893c923264fcf253";
       qwenModel = "${modelRoot}/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
       swiftModel = "${modelRoot}/swift15-qwen38-27b-gsq-rco-d74895bbe5db/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
       artifacts = [
+        {
+          source = "${embeddingSource}/embeddinggemma-2-Q8_0.gguf";
+          destination = "${embeddingRoot}/embeddinggemma-2-Q8_0.gguf";
+          contentHash = "6f1bd4ac6c5df7444f9cca7ca36cafe6cfa34cd6f49fefb1e0b4be8143aed8bc";
+          warning = "";
+        }
+        {
+          source = "${embeddingSource}/mmproj-BF16.gguf";
+          destination = "${embeddingRoot}/mmproj-BF16.gguf";
+          contentHash = "995aaa56e88b9b631f651861d659b728a625ccc02a238be37cff56cf11dc0032";
+          warning = "";
+        }
         {
           source = "/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
           destination = qwenModel;
@@ -83,6 +99,54 @@ in
           '') artifacts}
         '';
       };
+      embeddingArguments = [
+        "--host"
+        "127.0.0.1"
+        "--port"
+        "\${PORT}"
+        "--alias"
+        "\${MODEL_ID}"
+        "--model"
+        "${embeddingRoot}/embeddinggemma-2-Q8_0.gguf"
+        "--mmproj"
+        "${embeddingRoot}/mmproj-BF16.gguf"
+        "--device"
+        intelBackend.settings.device
+        "--mmproj-device"
+        intelBackend.settings.device
+        "--mmproj-offload"
+        "--n-gpu-layers"
+        "99"
+        "--fit"
+        "off"
+        "--embedding"
+        "--pooling"
+        "mean"
+        "--ctx-size"
+        "8192"
+        "--parallel"
+        "1"
+        "--batch-size"
+        "8192"
+        "--ubatch-size"
+        "8192"
+        "--threads"
+        "4"
+        "--threads-batch"
+        "4"
+        "--cache-type-k"
+        "f32"
+        "--cache-type-v"
+        "f32"
+        "--flash-attn"
+        "off"
+        "--video-ffmpeg-dir"
+        "${pkgs.ffmpeg}/bin"
+        "--sleep-idle-seconds"
+        "-1"
+        "--slots"
+        "--metrics"
+      ];
       qwenArguments = [
         "--host"
         "127.0.0.1"
@@ -235,8 +299,15 @@ in
 
       services.llama-swap.settings = {
         startPort = 18081;
+        hooks.on_startup.preload = [ "embeddinggemma2" ];
         routing.router = {
           use = "group";
+          settings.groups.intel-b50 = {
+            swap = false;
+            exclusive = false;
+            persistent = true;
+            members = [ "embeddinggemma2" ];
+          };
           settings.groups.rx-7900xt = {
             # One AMD model at a time, without evicting future B50 groups.
             swap = true;
@@ -248,54 +319,79 @@ in
             ];
           };
         };
-        models.barozp-reap-q6 = {
-          name = "Qwen3.6 REAP Opus Reasoning Distill MTP Q6_K";
-          description = "Verified weights; one 128K slot, 11 CPU MoE layers, q8 KV and MTP. Retrieval tested through 64K input; full 128K and executor quality remain unvalidated.";
-          cmd = lib.escapeShellArgs (
-            [
-              server
-              "--model"
-              qwenModel
-            ]
-            ++ qwenArguments
-          );
-          env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
-          proxy = "http://127.0.0.1:\${PORT}";
-          useModelName = "\${MODEL_ID}";
-          checkEndpoint = "/health";
-          # Keep weights and RAM prompt snapshots until an explicit unload/swap.
-          ttl = 0;
-          timeouts = {
-            connect = 30;
-            keepalive = 30;
-            responseHeader = 1800;
-            tlsHandshake = 10;
-            idleConn = 90;
+        models = {
+          embeddinggemma2 = {
+            name = "EmbeddingGemma 2 Q8_0 + BF16 media projector";
+            description = "B50 SYCL embeddings; one 8K slot, 768 dimensions, mean pooling, f32 KV and attention off. Text retrieval and synthetic image/audio controls tested; real-media retrieval and native video remain unvalidated.";
+            cmd = lib.escapeShellArgs ([ embeddingServer ] ++ embeddingArguments);
+            env = lib.mapAttrsToList (key: value: "${key}=${value}") (
+              intelBackend.environment
+              // {
+                ONEDNN_DEFAULT_FPMATH_MODE = "STRICT";
+                DNNL_DEFAULT_FPMATH_MODE = "STRICT";
+              }
+            );
+            proxy = "http://127.0.0.1:\${PORT}";
+            useModelName = "\${MODEL_ID}";
+            checkEndpoint = "/health";
+            ttl = 0;
+            timeouts = {
+              connect = 30;
+              keepalive = 30;
+              responseHeader = 1800;
+              tlsHandshake = 10;
+              idleConn = 90;
+            };
           };
-        };
-        models.swift15-iq3s = {
-          name = "Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S MTP";
-          description = "Verified weights; one 128K slot, dense GPU offload, q8 KV, MTP and tuned prompt reuse. Cold synthetic retrieval passed at 129994 input tokens; broad executor quality remains unvalidated.";
-          cmd = lib.escapeShellArgs (
-            [
-              server
-              "--model"
-              swiftModel
-            ]
-            ++ swiftArguments
-          );
-          env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
-          proxy = "http://127.0.0.1:\${PORT}";
-          useModelName = "\${MODEL_ID}";
-          checkEndpoint = "/health";
-          # A same-group swap still unloads this model and its RAM prompt cache.
-          ttl = 0;
-          timeouts = {
-            connect = 30;
-            keepalive = 30;
-            responseHeader = 1800;
-            tlsHandshake = 10;
-            idleConn = 90;
+          barozp-reap-q6 = {
+            name = "Qwen3.6 REAP Opus Reasoning Distill MTP Q6_K";
+            description = "Verified weights; one 128K slot, 11 CPU MoE layers, q8 KV and MTP. Retrieval tested through 64K input; full 128K and executor quality remain unvalidated.";
+            cmd = lib.escapeShellArgs (
+              [
+                server
+                "--model"
+                qwenModel
+              ]
+              ++ qwenArguments
+            );
+            env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
+            proxy = "http://127.0.0.1:\${PORT}";
+            useModelName = "\${MODEL_ID}";
+            checkEndpoint = "/health";
+            # Keep weights and RAM prompt snapshots until an explicit unload/swap.
+            ttl = 0;
+            timeouts = {
+              connect = 30;
+              keepalive = 30;
+              responseHeader = 1800;
+              tlsHandshake = 10;
+              idleConn = 90;
+            };
+          };
+          swift15-iq3s = {
+            name = "Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S MTP";
+            description = "Verified weights; one 128K slot, dense GPU offload, q8 KV, MTP and tuned prompt reuse. Cold synthetic retrieval passed at 129994 input tokens; broad executor quality remains unvalidated.";
+            cmd = lib.escapeShellArgs (
+              [
+                server
+                "--model"
+                swiftModel
+              ]
+              ++ swiftArguments
+            );
+            env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
+            proxy = "http://127.0.0.1:\${PORT}";
+            useModelName = "\${MODEL_ID}";
+            checkEndpoint = "/health";
+            # A same-group swap still unloads this model and its RAM prompt cache.
+            ttl = 0;
+            timeouts = {
+              connect = 30;
+              keepalive = 30;
+              responseHeader = 1800;
+              tlsHandshake = 10;
+              idleConn = 90;
+            };
           };
         };
       };
@@ -329,7 +425,13 @@ in
           after = [ "odin-inference-models.service" ];
           serviceConfig = {
             DevicePolicy = "closed";
-            DeviceAllow = [ "${backend.renderDevice} rw" ];
+            DeviceAllow = [
+              "${backend.renderDevice} rw"
+              "${intelBackend.renderDevice} rw"
+            ];
+            # Override upstream's non-default true: oneDNN needs JIT, and the
+            # proxy and its children necessarily share this sandbox setting.
+            MemoryDenyWriteExecute = lib.mkForce false;
             # Child servers inherit this, avoiding a user-manager prlimit hack.
             LimitMEMLOCK = "infinity";
           };
