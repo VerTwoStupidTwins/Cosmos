@@ -12,11 +12,11 @@ let
     flag: value:
     # Regex patterns cannot carry a derivation context; keep it on the command.
     lib.hasInfix (builtins.unsafeDiscardStringContext " ${
-      lib.escapeShellArgs [
-        flag
-        value
-      ]
-    } ") " ${embeddingCommand} ";
+       lib.escapeShellArgs [
+         flag
+         value
+       ]
+     } ") " ${embeddingCommand} ";
   swiftCommand = swift.cmd or "";
   command = qwen.cmd or "";
   group = swap.settings.routing.router.settings.groups.rx-7900xt or { };
