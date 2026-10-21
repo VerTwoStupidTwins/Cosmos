@@ -382,11 +382,22 @@ let
       && !odin.services.llama-cpp-instances.intel.enable;
   };
   failures = builtins.attrNames (lib.filterAttrs (_: result: !result) checks);
-  settingsJson = pkgs.writeText "odin-llama-swap-settings.json" (builtins.toJSON swap.settings);
-  settingsYaml = (pkgs.formats.yaml { }).generate "odin-llama-swap.yaml" swap.settings;
-  proxyService = odin.systemd.units."llama-swap.service".unit;
-  provisionService = odin.systemd.units."odin-inference-models.service".unit;
+  # Assert against the real config above, but do not realise GPU toolchains just
+  # to serialize test fixtures. Production units/config retain their contexts.
+  fixtureSettings = builtins.fromJSON (
+    builtins.unsafeDiscardStringContext (builtins.toJSON swap.settings)
+  );
+  settingsJson = pkgs.writeText "odin-llama-swap-settings.json" (builtins.toJSON fixtureSettings);
+  settingsYaml = (pkgs.formats.yaml { }).generate "odin-llama-swap.yaml" fixtureSettings;
+  proxyService = pkgs.writeTextDir "llama-swap.service" (
+    builtins.unsafeDiscardStringContext odin.systemd.units."llama-swap.service".text
+  );
+  provisionService = pkgs.writeTextDir "odin-inference-models.service" (
+    builtins.unsafeDiscardStringContext odin.systemd.units."odin-inference-models.service".text
+  );
   unitVerifier = pkgs.writeShellScript "verify-odin-llama-swap-units" ''
+    # Keep the unit's executable available without pulling its GPU backend config.
+    test -x ${lib.getExe swap.package}
     export SYSTEMD_LOG_TARGET=console
     export SYSTEMD_UNIT_PATH=${pkgs.systemd}/example/systemd/system
     exec ${pkgs.systemd}/bin/systemd-analyze verify --man=no \
