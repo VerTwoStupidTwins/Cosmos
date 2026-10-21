@@ -210,7 +210,9 @@ jobs:
             intel = let i = c.services.llama-cpp-instances.intel or {}; p = i.package or {}; in {
               enabled = i.enable or false;
               package = p.pname or "";
+              version = p.version or "";
               sycl = builtins.elem "-DGGML_SYCL:BOOL=TRUE" (p.cmakeFlags or []);
+              f32 = builtins.elem "-DGGML_SYCL_F16:BOOL=FALSE" (p.cmakeFlags or []);
               device = i.settings.device or "";
               preemption = p.syclPreemptionMode or null;
               host = i.host or "";
@@ -272,7 +274,9 @@ jobs:
             and (.bluetooth | not) and (.bluetoothUnit | not) and (.bluezInstalled | not)
             and .hfCli and .graphics and .renderGroup
             and .instances == ["amd", "intel"]
-            and .intel.package == "llama-cpp-sycl" and .intel.sycl and .intel.device == "SYCL0"
+            and .intel.package == "llama-cpp-embeddinggemma2-sycl-f32"
+            and .intel.version == "4fbc76dec51d0add466f0210855c0596589b60d4"
+            and .intel.sycl and .intel.f32 and .intel.device == "SYCL0"
             and .intel.preemption == 3 and .intel.allowJit and .intelCompute
             and .amd.vulkan and .amd.device == "Vulkan0" and (.amd.icd | endswith("/share/vulkan/icd.d/radeon_icd.x86_64.json"))
             and .intel.host == "127.0.0.1" and .intel.port == 8080

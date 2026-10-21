@@ -42,7 +42,7 @@ in
           enable = false;
           # The B50 omits CSR-size tag 62; avoid the runtime's zero-sized
           # mid-thread buffer only in this package, not globally or on AMD.
-          package = pkgs.callPackage ../../packages/llama-cpp-sycl {
+          package = pkgs.callPackage ../../packages/llama-cpp-sycl/embeddinggemma2.nix {
             forceThreadGroupPreemption = true;
           };
           host = "127.0.0.1";

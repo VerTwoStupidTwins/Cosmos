@@ -19,7 +19,8 @@ that installation or runtime verification has succeeded.
 - The `llama-cpp-sycl` profile provides Intel compute prerequisites. The reusable
   `llama-cpp-instances` profile declares independent Intel SYCL and AMD Vulkan
   instances; both are disabled and have no model selected.
-  Speech/image services and ROCm remain deferred.
+  Speech/image generation services and ROCm remain deferred; the proxy roster
+  below adds multimodal embeddings on the B50.
 - Bluetooth is explicitly disabled, overriding Facter's hardware-based default;
   the BlueZ userspace stack and Bluetooth service are not enabled or installed.
 - SSD trimming and SMART monitoring enabled; sleep/hibernation targets disabled.
@@ -277,8 +278,8 @@ Odin declares:
 Both standalone entries have `enable = false`, `model = null`, and
 `openFirewall = false`. They supply backend packages and diagnostic launchers;
 Odin instead enables the [native llama-swap profile](../features/inference/llama-swap.nix)
-to own the on-demand AMD children. Do not also enable the standalone AMD server:
-it would compete with llama-swap for VRAM. These declarations are not proof of
+to own AMD reasoning children and a resident B50 embedder. Do not also enable
+either standalone server: it would compete for that GPU's VRAM. These declarations are not proof of
 activation. The upstream singleton `services.llama-cpp` remains disabled.
 Enabled standalone instances must have distinct ports
 and an absolute model filename; reserve `host`, `port`, and `model` for their
@@ -319,8 +320,16 @@ when updating the kernel or Intel runtime before removing the override.
 
 The package includes a small registration guard for GPU-less Nix sandboxes:
 when no SYCL GPU exists, it declines registration instead of letting the upstream
-default-device selector terminate the CPU test suite. The upstream CPU tests
-remain enabled; actual GPU execution must be tested outside the build sandbox.
+default-device selector terminate the CPU test suite. The default package keeps
+upstream CPU tests enabled; actual GPU execution must be tested outside the build
+sandbox. Odin selects the
+[EmbeddingGemma2 override](../../packages/llama-cpp-sycl/embeddinggemma2.nix)
+for Intel: it pins llama.cpp `4fbc76dec51d0add466f0210855c0596589b60d4`, disables
+`GGML_SYCL_F16`, and builds the HTTP API without the bundled UI or upstream test
+suite, matching the auditioned runtime. A single output avoids the newer CMake
+exports' `out -> dev -> out` cycle. Only this override disables `fortify` and
+`fortify3`: host fortification otherwise leaks the unresolved `__memcpy_chk`
+symbol into SYCL device code. Other hardening and the Radeon build are unchanged.
 
 Keep weights and Hugging Face caches outside the Nix store. Download a selected
 GGUF file, not an entire repository containing every quantization. Pin its Hub
@@ -350,7 +359,7 @@ environment/device permissions, opt-in firewall/JIT, invalid configurations, and
 literal CLI argument transport. Its test executable is an argument-printing
 fixture, not simulated model inference.
 
-## On-demand Radeon inference with llama-swap
+## GPU-separated inference with llama-swap
 
 [odin-inference.nix](odin-inference.nix) configures the pinned native
 `services.llama-swap`, not Docker or a second always-running AMD server.
@@ -364,13 +373,19 @@ this configuration.
 | --- | --- | --- | --- |
 | `barozp-reap-q6` | 131072 total tokens | 1 | Q6_K; first 11 MoE layers on CPU; native MTP up to 3 draft tokens |
 | `swift15-iq3s` | 131072 total tokens | 1 | Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S; dense GPU offload; native MTP up to 3 draft tokens |
+| `embeddinggemma2` | 8192 input tokens | 1 | B50 SYCL; Q8_0 text model plus combined BF16 vision/audio projector; 768-dimensional mean-pooled embeddings |
 
-Both models belong to `rx-7900xt` with `swap = true`: requesting Swift unloads
+The reasoning models belong to `rx-7900xt` with `swap = true`: requesting Swift unloads
 REAP and vice versa, rather than keeping both on the card. `exclusive = false` leaves
 other groups untouched; `persistent = true` prevents other groups from evicting
-this one. Neither setting preloads a model. Future B50 models still need their
-own backend environment, render-device permission, and group; this change does
-not enable Intel serving or pool VRAM.
+this one. Neither group setting alone preloads a model. The separate `intel-b50`
+group contains only `embeddinggemma2`, with `swap = false`, `exclusive = false`,
+and `persistent = true`; Radeon swaps leave it alone.
+`hooks.on_startup.preload = [ "embeddinggemma2" ]` requests startup loading, and
+`ttl = 0` prevents idle unloading. This does not prevent explicit unloads or
+service termination, guarantee recovery of a failed preload, or pool GPU memory.
+No Humanizer or KittenTTS model is added. Future B50 co-residency still requires
+its own memory and correctness validation.
 
 REAP retains its tested single-slot arguments unchanged:
 
@@ -430,6 +445,66 @@ return visits to saved prompts. Neither model's broad coding/planning executor
 quality is established by those synthetic checks. The shared proxy keeps
 request/response body capture disabled.
 
+### Resident B50 embeddings
+
+The retained configuration is the conservative audition baseline:
+
+- Model and combined vision/audio projector explicitly offloaded to `SYCL0`.
+- One 8192-token slot; batch and microbatch both 8192. Non-causal embeddings
+  require a whole input to fit the microbatch; chat-style microbatch reductions
+  are not interchangeable with this configuration.
+- Mean pooling, four generation/prefill threads, f32 K/V, flash attention off,
+  and `--sleep-idle-seconds -1`. Image token limits remain model defaults.
+- `ONEDNN_DEFAULT_FPMATH_MODE=STRICT` and `DNNL_DEFAULT_FPMATH_MODE=STRICT` apply
+  only to this model; Intel driver/preemption settings stay in its package
+  wrapper, never in the Radeon environment.
+- Explicit Nix-managed `--video-ffmpeg-dir` supplies native video decoding tools;
+  no frame-rate change is promoted. The pinned helper defaults to 4 fps and has
+  no per-request frame cap, so callers must bound clips to the 8K input budget.
+  Video samples visual frames; its soundtrack requires a separate audio part.
+- The proxy sandbox permits both stable render nodes and allows executable
+  writable memory for oneDNN JIT. This relaxation necessarily applies to the
+  shared proxy/children; dynamic user, `ProtectHome`, closed device policy,
+  read-only model files, and disabled payload capture remain in force.
+- Proxy-assigned ports/model IDs replace experimental port 8093; normal service
+  logging replaces home-directory debug logs. The experiment's CPU quota is not
+  applied to the shared Radeon proxy.
+
+Text retrieval and synthetic image/audio controls passed on the transient B50
+service. Real-media retrieval, native video inference, system-service loading,
+and co-residency with another B50 model remain unvalidated. Further benchmarking
+and tuning were deferred by the operator; the Flash Attention control trial is
+not the retained configuration.
+
+The files come from
+[`unsloth/embeddinggemma-2-GGUF`](https://huggingface.co/unsloth/embeddinggemma-2-GGUF)
+at revision `031f0d4b35536f69ab3509d4893c923264fcf253`:
+
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `embeddinggemma-2-Q8_0.gguf` | 309855520 | `6f1bd4ac6c5df7444f9cca7ca36cafe6cfa34cd6f49fefb1e0b4be8143aed8bc` |
+| `mmproj-BF16.gguf` | 982074880 | `995aaa56e88b9b631f651861d659b728a625ccc02a238be37cff56cf11dc0032` |
+
+Initial source directory:
+`/home/twins/.local/share/cosmos-models/embeddinggemma2/031f0d4b35536f69ab3509d4893c923264fcf253/`.
+Provisioned runtime directory:
+`/var/lib/llama-models/embeddinggemma2-031f0d4b3553/`. The downloaded Q8 projector
+is not required or promoted.
+
+After separately approved activation, a basic text request is:
+
+```bash
+curl --fail http://127.0.0.1:8081/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"embeddinggemma2","input":["task: search result | query: Find the Odin inference configuration"],"encoding_format":"float"}'
+```
+
+Media uses nested content, for example
+`"input":[{"content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}]}]`.
+Audio uses `input_audio` parts and video uses `input_video` parts containing real
+media bytes, not filenames or a transcription substitute. API shape support is
+not evidence of representative multimodal retrieval quality.
+
 ### Runtime artifacts and activation
 
 The selected publisher is
@@ -466,7 +541,7 @@ Swift's adapted weights use the
 not an Apache-only grant; review its terms for redistribution or commercial use.
 
 The `odin-inference-models.service` oneshot runs before llama-swap and copies
-both selected artifacts into their revision-specific directories under
+all four selected model/projector files into their revision-specific directories under
 `/var/lib/llama-models`; REAP retains
 `/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/`. It requests reflinks
 where supported, checks copied bytes, and publishes atomically with mode `0444`.
@@ -486,11 +561,12 @@ verify their contents. Do not write directly onto Odin's `main` or discard
 remote changes. Build completion is not activation permission.
 
 Before activation, obtain separate approval to stop any active temporary backend
-and test proxy: an experimental process outside this group still competes for
-Radeon VRAM. For the current Swift experiment, only after that approval, on Odin:
+and test proxy: experimental processes outside these groups still compete for
+GPU memory. The B50 embedder preloads on proxy startup, so stop its temporary
+service before activating. Only after that approval, on Odin:
 
 ```bash
-systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service
+systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service embeddinggemma2-b50-test.service
 sudo nixos-rebuild switch --flake path:/Cosmos#odin
 systemctl status odin-inference-models.service llama-swap.service
 systemctl show llama-swap.service -p LimitMEMLOCK
@@ -510,8 +586,11 @@ GPU-specific routing, model paths, service dependencies and unit syntax; it is
 not GPU inference.
 
 The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
-available. Intel remains independent and disabled; SYCL environment/workarounds
-are not applied to Vulkan children.
+available. Both standalone instances remain disabled. The B50 group is independent;
+SYCL environment/workarounds are not applied to Vulkan children. After activation,
+verify that the embedder appears in `/running`, returns valid 768-dimensional
+text embeddings, and stays loaded while swapping Radeon models. These checks
+are post-activation work, not completed benchmark results.
 
 For remote use without exposing the unauthenticated UI/API, forward the loopback
 endpoint from a client with an authorized SSH key:
