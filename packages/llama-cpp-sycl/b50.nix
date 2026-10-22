@@ -1,4 +1,4 @@
-# Match the auditioned EmbeddingGemma2 runtime without changing the Radeon build.
+# Shared, auditioned FP16 runtime for B50 embeddings and native decisions.
 {
   lib,
   callPackage,
@@ -11,7 +11,7 @@ let
   base = callPackage ./default.nix { inherit forceThreadGroupPreemption; };
 in
 base.overrideAttrs (old: rec {
-  pname = "llama-cpp-embeddinggemma2-sycl-f32";
+  pname = "llama-cpp-b50-sycl-fp16";
   version = "4fbc76dec51d0add466f0210855c0596589b60d4";
   src = fetchFromGitHub {
     owner = "ggml-org";
@@ -45,7 +45,7 @@ base.overrideAttrs (old: rec {
       && !(lib.hasPrefix "-DLLAMA_BUILD_TESTS:" flag)
     ) old.cmakeFlags
     ++ [
-      (lib.cmakeBool "GGML_SYCL_F16" false)
+      (lib.cmakeBool "GGML_SYCL_F16" true)
       (lib.cmakeBool "LLAMA_BUILD_TESTS" false)
       (lib.cmakeBool "LLAMA_BUILD_UI" false)
       (lib.cmakeBool "LLAMA_USE_PREBUILT_UI" false)

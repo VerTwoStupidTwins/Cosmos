@@ -7,6 +7,17 @@ let
   qwen = models.barozp-reap-q6 or { };
   swift = models.swift15-iq3s or { };
   embedding = models.embeddinggemma2 or { };
+  clef = models.clef-flash-q8 or { };
+  clefCommand = clef.cmd or "";
+  clefPath = "/var/lib/llama-models/clef-flash-8aa35d1cc7e1/Clef-Flash-Q8_0.gguf";
+  hasClefArgument =
+    flag: value:
+    lib.hasInfix (builtins.unsafeDiscardStringContext " ${
+       lib.escapeShellArgs [
+         flag
+         value
+       ]
+     } ") " ${clefCommand} ";
   embeddingCommand = embedding.cmd or "";
   hasEmbeddingArgument =
     flag: value:
@@ -47,13 +58,102 @@ let
       && runtime.outputs == [ "out" ]
       && runtime.preConfigure == ""
       && runtime.syclPreemptionMode == 3
-      && builtins.elem (lib.cmakeBool "GGML_SYCL_F16" false) runtime.cmakeFlags
-      && !(builtins.elem (lib.cmakeBool "GGML_SYCL_F16" true) runtime.cmakeFlags)
+      && builtins.elem (lib.cmakeBool "GGML_SYCL_F16" true) runtime.cmakeFlags
+      && !(builtins.elem (lib.cmakeBool "GGML_SYCL_F16" false) runtime.cmakeFlags)
       && builtins.all (flag: builtins.elem flag runtime.hardeningDisable) [
         "fortify"
         "fortify3"
       ]
-      && lib.hasInfix "llama-cpp-embeddinggemma2-sycl-f32" embeddingCommand;
+      && runtime.pname == "llama-cpp-b50-sycl-fp16"
+      && lib.hasPrefix "${lib.escapeShellArg (lib.getExe' runtime "llama-server")} " embeddingCommand
+      && lib.hasPrefix "${lib.escapeShellArg (lib.getExe' runtime "llama-server")} " clefCommand;
+    clefTestedBaseline =
+      builtins.all (pair: hasClefArgument (builtins.elemAt pair 0) (builtins.elemAt pair 1)) [
+        [
+          "--host"
+          "127.0.0.1"
+        ]
+        [
+          "--port"
+          "\${PORT}"
+        ]
+        [
+          "--alias"
+          "\${MODEL_ID}"
+        ]
+        [
+          "--model"
+          clefPath
+        ]
+        [
+          "--device"
+          "SYCL0"
+        ]
+        [
+          "--n-gpu-layers"
+          "99"
+        ]
+        [
+          "--fit"
+          "off"
+        ]
+        [
+          "--ctx-size"
+          "4096"
+        ]
+        [
+          "--parallel"
+          "1"
+        ]
+        [
+          "--batch-size"
+          "4096"
+        ]
+        [
+          "--ubatch-size"
+          "4096"
+        ]
+        [
+          "--threads"
+          "4"
+        ]
+        [
+          "--threads-batch"
+          "4"
+        ]
+        [
+          "--cache-type-k"
+          "f32"
+        ]
+        [
+          "--cache-type-v"
+          "f32"
+        ]
+        [
+          "--flash-attn"
+          "off"
+        ]
+        [
+          "--sleep-idle-seconds"
+          "-1"
+        ]
+      ]
+      && builtins.all (flag: lib.hasInfix " ${lib.escapeShellArg flag} " " ${clefCommand} ") [
+        "--slots"
+        "--metrics"
+      ]
+      && !(lib.hasInfix "/home/" clefCommand)
+      && !(lib.hasInfix "--mmproj" clefCommand);
+    clefManagedDecision =
+      (clef.proxy or "") == "http://127.0.0.1:\${PORT}"
+      && (clef.useModelName or "") == "\${MODEL_ID}"
+      && (clef.checkEndpoint or "") == "/health"
+      && (clef.ttl or (-1)) == 0
+      && (clef.timeouts.responseHeader or 0) == 1800
+      && (clef.env or [ ]) == (embedding.env or [ ])
+      && builtins.elem "ONEDNN_DEFAULT_FPMATH_MODE=STRICT" (clef.env or [ ])
+      && builtins.elem "DNNL_DEFAULT_FPMATH_MODE=STRICT" (clef.env or [ ])
+      && lib.hasInfix "unvalidated" (clef.description or "");
     embeddingManagedProxy =
       (embedding.proxy or "") == "http://127.0.0.1:\${PORT}"
       && (embedding.useModelName or "") == "\${MODEL_ID}"
@@ -164,11 +264,18 @@ let
       let
         b50 = swap.settings.routing.router.settings.groups.intel-b50 or { };
       in
-      (b50.members or [ ]) == [ "embeddinggemma2" ]
+      (b50.members or [ ]) == [
+        "embeddinggemma2"
+        "clef-flash-q8"
+      ]
       && !(b50.swap or true)
       && !(b50.exclusive or true)
       && (b50.persistent or false)
-      && (swap.settings.hooks.on_startup.preload or [ ]) == [ "embeddinggemma2" ]
+      &&
+        (swap.settings.hooks.on_startup.preload or [ ]) == [
+          "embeddinggemma2"
+          "clef-flash-q8"
+        ]
       && !(swap.settings ? preload);
     provisionBeforeProxy =
       builtins.elem "odin-inference-models.service" proxyUnit.requires
@@ -177,6 +284,7 @@ let
     exactModelRoster =
       builtins.attrNames models == [
         "barozp-reap-q6"
+        "clef-flash-q8"
         "embeddinggemma2"
         "swift15-iq3s"
       ];
@@ -413,6 +521,8 @@ pkgs.runCommand "odin-llama-swap-check" { } ''
   ${pkgs.gnugrep}/bin/grep -F -- '${modelPath}' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '${swiftPath}' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '87a232aa1f7495cfc90ce22f08bb3779655e1b05c991c84b21afa4c1c8c4e0f5' ${provision.serviceConfig.ExecStart}
+  ${pkgs.gnugrep}/bin/grep -F -- '${clefPath}' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '6f1bd4ac6c5df7444f9cca7ca36cafe6cfa34cd6f49fefb1e0b4be8143aed8bc' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '995aaa56e88b9b631f651861d659b728a625ccc02a238be37cff56cf11dc0032' ${provision.serviceConfig.ExecStart}
   ${pkgs.gnugrep}/bin/grep -F -- '/var/lib/llama-models/embeddinggemma2-031f0d4b3553/embeddinggemma-2-Q8_0.gguf' ${provision.serviceConfig.ExecStart}
