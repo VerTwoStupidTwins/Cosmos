@@ -364,11 +364,15 @@ fixture, not simulated model inference.
 
 [odin-inference.nix](odin-inference.nix) configures the pinned native
 `services.llama-swap`, not Docker or a second always-running AMD server.
-After activation the endpoint remains `http://127.0.0.1:8081/v1`, with the
-built-in playground at `http://127.0.0.1:8081/ui/`. No firewall port opens.
-Child servers bind loopback on automatically assigned ports starting at 18081;
-the temporary experiment's NetBird listeners on 8090/8091 are not promoted into
-this configuration.
+After activation the local endpoint remains `http://127.0.0.1:8081/v1`, with the
+built-in playground at `http://127.0.0.1:8081/ui/`. Odin overrides the shared
+loopback-only frontend default with an IPv4 wildcard listener. The enabled host
+firewall allows TCP 8081 only through NetBird's `wt0` interface (localhost still
+works); `openFirewall` remains false, so the port is not opened globally or on
+the LAN. There is no dependency on the NetBird address being assigned before
+the proxy starts. Child servers remain loopback-only on automatically assigned
+ports starting at 18081; their listeners and GPU settings are unchanged. The
+temporary experiment's listeners on 8090/8091 are not promoted.
 
 | API model ID | Context | Slots | Weights / expert offload / decoding |
 | --- | --- | --- | --- |
@@ -638,16 +642,50 @@ verify that both B50 models appear in `/running`, the embedder returns valid
 passthrough URL. Verify both stay loaded while swapping Radeon models. These
 system-service checks are post-activation work, not completed benchmark results.
 
-For remote use without exposing the unauthenticated UI/API, forward the loopback
-endpoint from a client with an authorized SSH key:
+### Client access after activation
+
+From an authorized NetBird peer, use Odin's current NetBird IPv4 address:
+
+- Playground: `http://100.94.82.252:8081/ui/`
+- OpenAI-compatible base URL: `http://100.94.82.252:8081/v1`
+- Clef native decisions: `http://100.94.82.252:8081/upstream/clef-flash-q8/v1/systemone`
+
+Check the current address on Odin with `ip -br address show wt0`; the address is
+not hardcoded into the service binding. NetBird policies must also allow TCP
+8081 from the intended clients to Odin. The Nix configuration does not modify
+those management-plane policies. No SSH tunnel is required for this path.
+
+The UI/API has no application authentication, including model-management and
+log endpoints. Restrict NetBird access to trusted clients; do not expose the
+port publicly, disable the host firewall, or trust the whole VPN interface as
+a substitute for the port-scoped rule. NetBird supplies encrypted transport,
+not per-user application authentication.
+
+After manual activation, confirm the frontend listener and localhost health on
+Odin, then test from Thoth (not through SSH):
 
 ```bash
-ssh -N -L 8081:127.0.0.1:8081 twins@192.168.1.120
+# On Odin:
+ss -ltn 'sport = :8081'
+curl --fail http://127.0.0.1:8081/health
+# On Thoth, connected to NetBird:
+curl --fail http://100.94.82.252:8081/health
+curl --fail --output /dev/null http://100.94.82.252:8081/ui/
+```
+
+The listener should be `0.0.0.0:8081`, both health requests should succeed, and
+the playground should return HTTP 200. Verify a new connection to the LAN
+address is still blocked from a LAN client. These are post-activation checks,
+not results implied by evaluation or a build.
+
+An SSH tunnel remains optional for clients with an authorized SSH key:
+
+```bash
+ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:8081:127.0.0.1:8081 twins@100.94.82.252
 ```
 
 Then use `http://127.0.0.1:8081/v1` and `/ui/` on that client. Brother-specific
-SSH authorization and direct LAN/NetBird serving remain separate work. Do not
-bind `0.0.0.0` or open a firewall port as an implicit consequence of this change.
+SSH authorization remains separate work.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.
