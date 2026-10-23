@@ -349,6 +349,10 @@ in
     {
       imports = [ nixos."llama-swap" ];
 
+      # Keep localhost usable; remote ingress is allowed only through NetBird.
+      services.llama-swap.listenAddress = "0.0.0.0";
+      networking.firewall.interfaces.wt0.allowedTCPPorts = [ config.services.llama-swap.port ];
+
       services.llama-swap.settings = {
         startPort = 18081;
         hooks.on_startup.preload = [

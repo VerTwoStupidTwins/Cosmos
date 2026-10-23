@@ -376,11 +376,26 @@ let
       lib.hasInfix "IQ3_S" (swift.name or "")
       && lib.hasInfix "129994" (swift.description or "")
       && lib.hasInfix "unvalidated" (swift.description or "");
-    loopbackOnly =
-      swap.listenAddress == "127.0.0.1"
+    netbirdOnlyFrontend =
+      let
+        firewall = odin.networking.firewall;
+        allowsPort =
+          rules:
+          builtins.elem swap.port rules.allowedTCPPorts
+          || builtins.any (
+            range: range.from <= swap.port && swap.port <= range.to
+          ) rules.allowedTCPPortRanges;
+      in
+      swap.listenAddress == "0.0.0.0"
       && swap.port == 8081
       && !swap.openFirewall
-      && !(builtins.elem 8081 odin.networking.firewall.allowedTCPPorts);
+      && firewall.enable
+      && !(allowsPort firewall)
+      && builtins.elem swap.port (firewall.interfaces.wt0.allowedTCPPorts or [ ])
+      && builtins.all (name: name == "wt0" || !(allowsPort firewall.interfaces.${name})) (
+        builtins.attrNames firewall.interfaces
+      )
+      && builtins.all (name: name == "lo") firewall.trustedInterfaces;
     honestValidationLabel =
       lib.hasInfix "Q6_K" (qwen.name or "")
       && lib.hasInfix "64K" (qwen.description or "")
