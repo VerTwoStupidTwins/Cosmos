@@ -323,10 +323,11 @@ when no SYCL GPU exists, it declines registration instead of letting the upstrea
 default-device selector terminate the CPU test suite. The default package keeps
 upstream CPU tests enabled; actual GPU execution must be tested outside the build
 sandbox. Odin selects the
-[EmbeddingGemma2 override](../../packages/llama-cpp-sycl/embeddinggemma2.nix)
-for Intel: it pins llama.cpp `4fbc76dec51d0add466f0210855c0596589b60d4`, disables
+[shared B50 override](../../packages/llama-cpp-sycl/b50.nix)
+for Intel: it pins llama.cpp `4fbc76dec51d0add466f0210855c0596589b60d4`, enables
 `GGML_SYCL_F16`, and builds the HTTP API without the bundled UI or upstream test
-suite, matching the auditioned runtime. A single output avoids the newer CMake
+suite. EmbeddingGemma2 and Clef use this one package, not separate precision
+variants or additional standalone servers. A single output avoids the newer CMake
 exports' `out -> dev -> out` cycle. Only this override disables `fortify` and
 `fortify3`: host fortification otherwise leaks the unresolved `__memcpy_chk`
 symbol into SYCL device code. Other hardening and the Radeon build are unchanged.
@@ -374,18 +375,22 @@ this configuration.
 | `barozp-reap-q6` | 131072 total tokens | 1 | Q6_K; first 11 MoE layers on CPU; native MTP up to 3 draft tokens |
 | `swift15-iq3s` | 131072 total tokens | 1 | Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S; dense GPU offload; native MTP up to 3 draft tokens |
 | `embeddinggemma2` | 8192 input tokens | 1 | B50 SYCL; Q8_0 text model plus combined BF16 vision/audio projector; 768-dimensional mean-pooled embeddings |
+| `clef-flash-q8` | 4096 formatted input tokens | 1 | B50 SYCL; Clef-Flash 9B Q8_0 text-only native decisions, not chat generation |
 
 The reasoning models belong to `rx-7900xt` with `swap = true`: requesting Swift unloads
 REAP and vice versa, rather than keeping both on the card. `exclusive = false` leaves
 other groups untouched; `persistent = true` prevents other groups from evicting
 this one. Neither group setting alone preloads a model. The separate `intel-b50`
-group contains only `embeddinggemma2`, with `swap = false`, `exclusive = false`,
-and `persistent = true`; Radeon swaps leave it alone.
-`hooks.on_startup.preload = [ "embeddinggemma2" ]` requests startup loading, and
+group contains `embeddinggemma2` and `clef-flash-q8`, with `swap = false`,
+`exclusive = false`, and `persistent = true`; neither B50 model evicts the other,
+and Radeon swaps leave both alone. The startup hook preloads both model IDs, and
 `ttl = 0` prevents idle unloading. This does not prevent explicit unloads or
 service termination, guarantee recovery of a failed preload, or pool GPU memory.
-No Humanizer or KittenTTS model is added. Future B50 co-residency still requires
-its own memory and correctness validation.
+No Humanizer or KittenTTS model is added. The short shared-runtime audition
+observed 13.33 GiB combined process-attributed B50 residency without process swap.
+This is not a sustained-load or maximum-capacity guarantee: during mixed requests,
+embedding median latency rose from about 12 ms alone to 241 ms, with an 823 ms
+maximum. Residency isolation does not provide compute or bandwidth isolation.
 
 REAP retains its tested single-slot arguments unchanged:
 
@@ -447,7 +452,8 @@ request/response body capture disabled.
 
 ### Resident B50 embeddings
 
-The retained configuration is the conservative audition baseline:
+The retained model arguments match the conservative audition baseline, with
+the shared runtime's FP16 arithmetic enabled:
 
 - Model and combined vision/audio projector explicitly offloaded to `SYCL0`.
 - One 8192-token slot; batch and microbatch both 8192. Non-causal embeddings
@@ -470,11 +476,13 @@ The retained configuration is the conservative audition baseline:
   logging replaces home-directory debug logs. The experiment's CPU quota is not
   applied to the shared Radeon proxy.
 
-Text retrieval and synthetic image/audio controls passed on the transient B50
-service. Real-media retrieval, native video inference, system-service loading,
-and co-residency with another B50 model remain unvalidated. Further benchmarking
-and tuning were deferred by the operator; the Flash Attention control trial is
-not the retained configuration.
+The shared FP16 audition preserved top-1/top-3/top-5 counts of 11/16/16 out of 20
+frozen Cosmos questions over 187 chunks. Minimum FP32-reference cosine was
+0.9999994 for document vectors and 0.9999891 across the synthetic media controls.
+One low-ranked relevant result moved from rank 83 to 84; rankings are not
+bit-identical. Existing-index FP32 documents with FP16 query vectors retained the
+same top-k counts in this test. Real-media semantic retrieval, native video and
+system-service activation remain unvalidated. Flash Attention stays off.
 
 The files come from
 [`unsloth/embeddinggemma-2-GGUF`](https://huggingface.co/unsloth/embeddinggemma-2-GGUF)
@@ -504,6 +512,41 @@ Media uses nested content, for example
 Audio uses `input_audio` parts and video uses `input_video` parts containing real
 media bytes, not filenames or a transcription substitute. API shape support is
 not evidence of representative multimodal retrieval quality.
+
+### Resident B50 decisions
+
+Clef retains the tested one-slot 4096-token context, 4096 batch/microbatch,
+four generation/prefill threads, full `SYCL0` offload, fit off, attention off,
+f32 K/V arguments and no idle sleep. The native decision implementation has no
+persistent KV memory; those K/V arguments do not change its FP16 matrix path.
+Bound the entire formatted state, questions and options to the input budget.
+No vision projector or multimodal Clef serving is promoted.
+
+The shared FP16 build reduced total time for 24 authored decision cases from
+51.13 s to 18.47 s, with unchanged 22/24 label agreement and no confidence-gate
+changes. Probabilities are not calibrated correctness guarantees. GPT-subscription
+workflow savings, sustained mixed load and real agent-task quality remain
+unvalidated; deterministic checks and user approvals stay authoritative.
+
+llama-swap's ordinary OpenAI routes do not dispatch `/v1/systemone`. Use its
+model-specific passthrough after separately approved activation:
+
+```bash
+curl --fail http://127.0.0.1:8081/upstream/clef-flash-q8/v1/systemone \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"clef-flash-q8","state":"A customer asks for a refund after being billed twice.","questions":{"team":{"type":"choice","instructions":"Select the handling team.","criteria":{"billing":"Charges, invoices and refunds","technical":"Software faults"}}}}'
+```
+
+Expect typed `answers` and zero generated output tokens, not a chat explanation.
+This adds a serving endpoint, not an integration into the operator's GPT client.
+
+Clef comes from [`ggml-org/Clef-Flash-GGUF`](https://huggingface.co/ggml-org/Clef-Flash-GGUF)
+at revision `8aa35d1cc7e141f3771e564eeb630a501597c681`.
+`Clef-Flash-Q8_0.gguf` is 9657260192 bytes, with verified SHA-256
+`87a232aa1f7495cfc90ce22f08bb3779655e1b05c991c84b21afa4c1c8c4e0f5`.
+Its initial source directory is
+`/home/twins/.local/share/cosmos-models/clef-flash/8aa35d1cc7e141f3771e564eeb630a501597c681/`;
+offline provisioning publishes it under `/var/lib/llama-models/clef-flash-8aa35d1cc7e1/`.
 
 ### Runtime artifacts and activation
 
@@ -541,7 +584,7 @@ Swift's adapted weights use the
 not an Apache-only grant; review its terms for redistribution or commercial use.
 
 The `odin-inference-models.service` oneshot runs before llama-swap and copies
-all four selected model/projector files into their revision-specific directories under
+all five selected model/projector files into their revision-specific directories under
 `/var/lib/llama-models`; REAP retains
 `/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/`. It requests reflinks
 where supported, checks copied bytes, and publishes atomically with mode `0444`.
@@ -563,10 +606,12 @@ remote changes. Build completion is not activation permission.
 Before activation, obtain separate approval to stop any active temporary backend
 and test proxy: experimental processes outside these groups still compete for
 GPU memory. The B50 embedder preloads on proxy startup, so stop its temporary
-service before activating. Only after that approval, on Odin:
+service before activating. Stop the temporary Clef service too; otherwise the
+preloaded B50 children compete with a second copy outside the proxy. Only after
+that approval, on Odin:
 
 ```bash
-systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service embeddinggemma2-b50-test.service
+systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service embeddinggemma2-b50-test.service clef-flash-b50-test.service
 sudo nixos-rebuild switch --flake path:/Cosmos#odin
 systemctl status odin-inference-models.service llama-swap.service
 systemctl show llama-swap.service -p LimitMEMLOCK
@@ -588,9 +633,10 @@ not GPU inference.
 The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
 available. Both standalone instances remain disabled. The B50 group is independent;
 SYCL environment/workarounds are not applied to Vulkan children. After activation,
-verify that the embedder appears in `/running`, returns valid 768-dimensional
-text embeddings, and stays loaded while swapping Radeon models. These checks
-are post-activation work, not completed benchmark results.
+verify that both B50 models appear in `/running`, the embedder returns valid
+768-dimensional text embeddings, and Clef returns typed decisions through the
+passthrough URL. Verify both stay loaded while swapping Radeon models. These
+system-service checks are post-activation work, not completed benchmark results.
 
 For remote use without exposing the unauthenticated UI/API, forward the loopback
 endpoint from a client with an authorized SSH key:

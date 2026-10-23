@@ -1,4 +1,4 @@
-# Odin's Vulkan reasoning / SYCL embedding roster; standalone instances stay off.
+# Odin's Vulkan reasoning / shared SYCL B50 roster; standalone instances stay off.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -15,13 +15,27 @@ in
       backend = config.services.llama-cpp-instances.amd;
       server = lib.getExe' backend.package "llama-server";
       intelBackend = config.services.llama-cpp-instances.intel;
-      embeddingServer = lib.getExe' intelBackend.package "llama-server";
+      intelServer = lib.getExe' intelBackend.package "llama-server";
+      intelEnvironment = lib.mapAttrsToList (key: value: "${key}=${value}") (
+        intelBackend.environment
+        // {
+          ONEDNN_DEFAULT_FPMATH_MODE = "STRICT";
+          DNNL_DEFAULT_FPMATH_MODE = "STRICT";
+        }
+      );
       modelRoot = "/var/lib/llama-models";
       embeddingRoot = "${modelRoot}/embeddinggemma2-031f0d4b3553";
       embeddingSource = "/home/twins/.local/share/cosmos-models/embeddinggemma2/031f0d4b35536f69ab3509d4893c923264fcf253";
       qwenModel = "${modelRoot}/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
       swiftModel = "${modelRoot}/swift15-qwen38-27b-gsq-rco-d74895bbe5db/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
+      clefModel = "${modelRoot}/clef-flash-8aa35d1cc7e1/Clef-Flash-Q8_0.gguf";
       artifacts = [
+        {
+          source = "/home/twins/.local/share/cosmos-models/clef-flash/8aa35d1cc7e141f3771e564eeb630a501597c681/Clef-Flash-Q8_0.gguf";
+          destination = clefModel;
+          contentHash = "87a232aa1f7495cfc90ce22f08bb3779655e1b05c991c84b21afa4c1c8c4e0f5";
+          warning = "";
+        }
         {
           source = "${embeddingSource}/embeddinggemma-2-Q8_0.gguf";
           destination = "${embeddingRoot}/embeddinggemma-2-Q8_0.gguf";
@@ -99,6 +113,44 @@ in
           '') artifacts}
         '';
       };
+      clefArguments = [
+        "--host"
+        "127.0.0.1"
+        "--port"
+        "\${PORT}"
+        "--alias"
+        "\${MODEL_ID}"
+        "--model"
+        clefModel
+        "--device"
+        intelBackend.settings.device
+        "--n-gpu-layers"
+        "99"
+        "--fit"
+        "off"
+        "--ctx-size"
+        "4096"
+        "--parallel"
+        "1"
+        "--batch-size"
+        "4096"
+        "--ubatch-size"
+        "4096"
+        "--threads"
+        "4"
+        "--threads-batch"
+        "4"
+        "--cache-type-k"
+        "f32"
+        "--cache-type-v"
+        "f32"
+        "--flash-attn"
+        "off"
+        "--sleep-idle-seconds"
+        "-1"
+        "--slots"
+        "--metrics"
+      ];
       embeddingArguments = [
         "--host"
         "127.0.0.1"
@@ -299,14 +351,20 @@ in
 
       services.llama-swap.settings = {
         startPort = 18081;
-        hooks.on_startup.preload = [ "embeddinggemma2" ];
+        hooks.on_startup.preload = [
+          "embeddinggemma2"
+          "clef-flash-q8"
+        ];
         routing.router = {
           use = "group";
           settings.groups.intel-b50 = {
             swap = false;
             exclusive = false;
             persistent = true;
-            members = [ "embeddinggemma2" ];
+            members = [
+              "embeddinggemma2"
+              "clef-flash-q8"
+            ];
           };
           settings.groups.rx-7900xt = {
             # One AMD model at a time, without evicting future B50 groups.
@@ -320,17 +378,28 @@ in
           };
         };
         models = {
+          clef-flash-q8 = {
+            name = "Clef-Flash 9B Q8_0 decisions";
+            description = "B50 FP16 SYCL native decisions; one 4K input slot, full GPU offload and attention off. Text-only audition and short embedding co-residency test passed; GPT workflow savings and production confidence calibration remain unvalidated.";
+            cmd = lib.escapeShellArgs ([ intelServer ] ++ clefArguments);
+            env = intelEnvironment;
+            proxy = "http://127.0.0.1:\${PORT}";
+            useModelName = "\${MODEL_ID}";
+            checkEndpoint = "/health";
+            ttl = 0;
+            timeouts = {
+              connect = 30;
+              keepalive = 30;
+              responseHeader = 1800;
+              tlsHandshake = 10;
+              idleConn = 90;
+            };
+          };
           embeddinggemma2 = {
             name = "EmbeddingGemma 2 Q8_0 + BF16 media projector";
-            description = "B50 SYCL embeddings; one 8K slot, 768 dimensions, mean pooling, f32 KV and attention off. Text retrieval and synthetic image/audio controls tested; real-media retrieval and native video remain unvalidated.";
-            cmd = lib.escapeShellArgs ([ embeddingServer ] ++ embeddingArguments);
-            env = lib.mapAttrsToList (key: value: "${key}=${value}") (
-              intelBackend.environment
-              // {
-                ONEDNN_DEFAULT_FPMATH_MODE = "STRICT";
-                DNNL_DEFAULT_FPMATH_MODE = "STRICT";
-              }
-            );
+            description = "B50 shared FP16 SYCL embeddings; one 8K slot, 768 dimensions, mean pooling, f32 KV and attention off. Text retrieval, numerical media controls and short Clef co-residency tested; real-media retrieval and native video remain unvalidated.";
+            cmd = lib.escapeShellArgs ([ intelServer ] ++ embeddingArguments);
+            env = intelEnvironment;
             proxy = "http://127.0.0.1:\${PORT}";
             useModelName = "\${MODEL_ID}";
             checkEndpoint = "/health";
