@@ -508,85 +508,79 @@ the proxy starts. Child servers remain loopback-only on automatically assigned
 ports starting at 18081; their listeners and GPU settings are unchanged. The
 temporary experiment's listeners on 8090/8091 are not promoted.
 
-| API model ID | Context | Slots | Weights / expert offload / decoding |
+The target roster replaces both former Qwen entries with one Radeon Gemma
+backend. Configuration review and activation remain separate: the old live proxy
+and provisioner still use Qwen until the reviewed replacement is activated.
+
+| API model ID | Context | Slots | Weights / GPU / decoding |
 | --- | --- | --- | --- |
-| `barozp-reap-q6` | 131072 total tokens | 1 | Q6_K; first 11 MoE layers on CPU; native MTP up to 3 draft tokens |
-| `swift15-iq3s` | 131072 total tokens | 1 | Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S; dense GPU offload; native MTP up to 3 draft tokens |
+| `gemma4-balanced-q4` | 131072 total tokens | 1 | HauhauCS Balanced Q4_K_M; full Radeon Vulkan offload, BF16 GPU projector and separate MTP draft model; up to 3 draft tokens |
 | `embeddinggemma2` | 8192 input tokens | 1 | B50 SYCL; Q8_0 text model plus combined BF16 vision/audio projector; 768-dimensional mean-pooled embeddings |
 | `clef-flash-q8` | 4096 formatted input tokens | 1 | B50 SYCL; Clef-Flash 9B Q8_0 text-only native decisions, not chat generation |
 
-The reasoning models belong to `rx-7900xt` with `swap = true`: requesting Swift unloads
-REAP and vice versa, rather than keeping both on the card. `exclusive = false` leaves
-other groups untouched; `persistent = true` prevents other groups from evicting
-this one. Neither group setting alone preloads a model. The separate `intel-b50`
+`gemma4-balanced-q4` is the sole member of `rx-7900xt`, retaining `swap = true`,
+`exclusive = false`, and `persistent = true`. It loads on demand, not at startup;
+`ttl = 0` disables idle unloading. Group persistence protects it from eviction
+by other groups, not explicit unloads or process/service termination. There is
+no second Radeon model or separate CPU-vision alias. The separate `intel-b50`
 group contains `embeddinggemma2` and `clef-flash-q8`, with `swap = false`,
 `exclusive = false`, and `persistent = true`; neither B50 model evicts the other,
-and Radeon swaps leave both alone. The startup hook preloads both model IDs, and
-`ttl = 0` prevents idle unloading. This does not prevent explicit unloads or
-service termination, guarantee recovery of a failed preload, or pool GPU memory.
-No Humanizer or KittenTTS model is added. The short shared-runtime audition
-observed 13.33 GiB combined process-attributed B50 residency without process swap.
-This is not a sustained-load or maximum-capacity guarantee: during mixed requests,
-embedding median latency rose from about 12 ms alone to 241 ms, with an 823 ms
-maximum. Residency isolation does not provide compute or bandwidth isolation.
+and Radeon load/unload operations leave both alone. The startup hook preloads
+both B50 model IDs, and `ttl = 0` prevents idle unloading. This does not prevent
+explicit unloads or service termination, guarantee recovery of a failed preload,
+or pool GPU memory. No Humanizer or KittenTTS model is added. The short
+shared-runtime audition observed 13.33 GiB combined process-attributed B50
+residency without process swap. This is not a sustained-load or maximum-capacity
+guarantee: during mixed requests, embedding median latency rose from about 12 ms
+alone to 241 ms, with an 823 ms maximum. Residency isolation does not provide
+compute or bandwidth isolation.
 
-REAP retains its tested single-slot arguments unchanged:
+### On-demand Radeon Gemma
 
-- `Vulkan0`, 99 GPU layers, 11 CPU MoE layers on both main and MTP paths, fit off.
-- One 131072-token context, parallel 1, no unified KV cache.
-- 12 generation/prefill threads; batch/microbatch 1024/256; flash attention on.
-- `q8_0` K/V caches for both main and draft; MTP maximum 3, minimum 0, p-min 0.
-- `--cache-prompt --cache-ram 32768 --cache-idle-slots` for host RAM snapshots.
-- `--load-mode mmap+mlock --lazy-mode off --sleep-idle-seconds -1`.
-- Jinja, DeepSeek reasoning format, temperature 0.6, top-p 0.95, top-k 20;
-  metrics and slot endpoints enabled. Unsupported `--cache-reuse` stays absent.
+The selected configuration follows the native Gemma audition:
 
-Swift preserves its separately tested dense-model configuration:
+- Main model on `Vulkan0`, 99 GPU layers (full offload), fit off, `--load-mode mmap`.
+- One 131072-token context, parallel 1; 12 generation/prefill threads;
+  batch/microbatch 512/256; flash attention on.
+- `q8_0` K/V caches for both main and draft. Native `draft-mtp` uses a separate
+  draft GGUF on `Vulkan0`, with a maximum of 3 draft tokens.
+- BF16 multimodal projector offloaded to `Vulkan0`. The effective production
+  image budget is **256 tokens**: native non-causal image attention is capped by
+  the microbatch. Do not advertise a 1120-token image budget for these settings;
+  raising that budget requires a separately tested configuration and VRAM review.
+- Jinja with `--chat-template-kwargs '{"enable_thinking":true}'`; temperature
+  0.6, top-k 64, top-p 0.9, min-p 0.05, repeat penalty 1.1; metrics and slots.
+- `--cache-prompt --cache-ram 8192 --cache-idle-slots` for host RAM prompt
+  snapshots. This is an 8192 MiB budget, not an immediate allocation or a cache
+  shared with the B50 models. Explicit unload or process/service termination
+  discards the backend's RAM cache.
+- No CPU-MoE overrides, forced DeepSeek reasoning format, prompt-similarity,
+  lazy-loading or idle-sleep overrides are carried over from the retired models.
 
-- One 131072-token slot, `Vulkan0`, 99 GPU layers, fit off, and no CPU-MoE
-  overrides. It uses `--load-mode mmap`, not REAP's mapped locking.
-- The same 12 threads, 1024/256 batch/microbatch, flash attention, q8 main/draft
-  KV caches, and MTP draft maximum 3/minimum 0/p-min 0.
-- `--cache-prompt --cache-ram 32768 --cache-idle-slots` plus
-  `--slot-prompt-similarity 0.9`. The higher threshold improved restoration of
-  related saved prompts from RAM; it is not a universal speed setting.
-- Temperature 1.0, top-p 0.95, top-k 20, min-p 0.0, presence penalty 0.0,
-  repeat penalty 1.0; Jinja, DeepSeek reasoning format, metrics and slots.
-- No idle sleep or lazy loading. Ineffective checkpoint-spacing changes and
-  `--cache-reuse` are not included.
-
-Swift's synthetic tests used request-level
-`chat_template_kwargs = { "reasoning_effort": "low" }`; the CLI does not force
-this effort level. Keep effort, system instructions, tool definitions and old
-turns stable for prefix reuse, and preserve reasoning content when constructing
+Keep system instructions, tool definitions, thinking settings and earlier turns
+stable for prefix reuse, and preserve reasoning content when constructing
 subsequent turns. Clients must not disable caching with `cache_prompt: false`.
-Changing earlier prompt text can still require substantial recomputation.
+Changing earlier prompt text can still require substantial recomputation. The
+response-header timeout remains 1800 seconds for long non-streaming prefills;
+context includes formatted input, image tokens, reasoning and output.
 
-The proxy service declares `LimitMEMLOCK=infinity`, inherited by its children;
-no runtime user-manager `prlimit` adjustment is needed for this system service.
-For REAP, mapped locking pins CPU-resident allocations, not a duplicate of all GPU
-weights in RAM. Standalone `--load-mode mlock` crashed the tested build and is
-not selected. Swift's `mmap` mode does not request locking, despite inheriting
-the allowance. Verify actual memory behavior after activation rather than
-assuming that an allowance establishes residency.
-
-Both models use `ttl = 0`, disabling the proxy's inherited 600-second idle unload. Once
-requested, the model and its RAM prompt cache remain until an explicit unload,
-a same-group model swap, or process/service termination. Cache RAM is a 32768 MiB
-budget per backend, not an immediate allocation or a cache shared between models.
-Swapping models discards the unloaded backend's RAM prompt cache; group persistence
-does not prevent same-group swaps. Each model's response-header timeout is
-1800 seconds to accommodate long non-streaming prefills.
-
-Context includes formatted input, reasoning and output. REAP's cold retrieval
-passed through 65554 input tokens; its full near-capacity 128K behavior remains
-unvalidated. Swift passed a cold 129994-input-token retrieval with five facts
-correct, MTP active, 17.78 GiB sampled peak VRAM and no process swap. This
-near-capacity probe preceded the similarity-threshold change. Subsequent 32K
-reuse tests validated the retained threshold, including appended turns and
-return visits to saved prompts. Neither model's broad coding/planning executor
-quality is established by those synthetic checks. The shared proxy keeps
+The proxy service retains `LimitMEMLOCK=infinity`, inherited by its children;
+Gemma's `mmap` mode does not request locking. An allowance is not proof of
+residency. Verify actual memory behavior after activation. The shared proxy keeps
 request/response body capture disabled.
+
+A native near-full mixed screenshot/text audition passed at 125879 input tokens,
+with zero model-process swap. Sampled peak VRAM was 19.761 GiB out of 19.984 GiB,
+leaving only 0.223 GiB: this is a narrow tested margin, not a production safety
+guarantee. The 512/256 configuration reduced the measured 16K prefill from 9.62 s
+to 7.55 s versus microbatch 128; all OCR fixtures passed, with no demonstrated
+OCR-quality improvement. In a matched short-text screen using a CPU projector,
+MTP maximum 3 measured 133.3 tokens/s, versus 128.1 for maximum 5 and 111.5 without
+MTP. Those small synthetic results are not a universal speed claim or a GPU
+projector throughput measurement. A long cached follow-up took 8.17 s for 89 new
+tokens, and a return after another conversation took 4.47 s for 5 new tokens.
+Broad coding/planning and production executor quality remain unvalidated; native
+auditions do not establish system-service activation or sustained-load behavior.
 
 ### Resident B50 embeddings
 
@@ -688,52 +682,45 @@ offline provisioning publishes it under `/var/lib/llama-models/clef-flash-8aa35d
 
 ### Runtime artifacts and activation
 
-The selected publisher is
-[`barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF`](https://huggingface.co/barozp/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-GGUF),
-pinned at Hub revision `f11f37b9ad21038478066fc1e532dfb92165fccf`.
-The selected file is `Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf`,
-23795817760 bytes, with publisher SHA-256:
+Gemma's main model, BF16 projector and separate MTP draft model come from
+[`HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP`](https://huggingface.co/HauhauCS/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-MTP),
+pinned at Hub revision `f9093662a2e7ae0503f637088bc96f77a1a70c83`.
+The selected artifacts and verified hashes are:
 
-```text
-27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae
-```
+| File | Bytes | SHA-256 |
+| --- | --- | --- |
+| `Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf` | 16796015520 | `3c13133469e431312fffb8b1d9c85ae42199e6bb5746ea1da84e8ddf2097d73c` |
+| `mmproj-Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf` | 1194827776 | `b5346e5bfd906f5e16878c2d0b8243e948ca7410fa28ea35be9b0c54a0ac10b7` |
+| `mtp-gemma-4-26B-A4B-it.gguf` | 251937728 | `62bd3af7f66c9308de9a5454233852f8c7324c93767e8dfb824ed45b9179864a` |
 
-The source file under
-`/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/`
-was rehashed against that pinned publisher metadata. It must exist for initial
-provisioning; the service does not download weights.
+Initial source directory:
+`/home/twins/.local/share/cosmos-models/gemma4-hauhau-balanced-mtp/f9093662a2e7ae0503f637088bc96f77a1a70c83/`.
+Canonical service-readable runtime directory:
+`/var/lib/llama-models/gemma4-hauhau-balanced-mtp-f9093662a2e7/`.
+A source file must exist for initial provisioning unless its verified destination
+already exists; the service does not download weights. Clef and EmbeddingGemma2
+retain the pinned artifacts and runtime package documented above.
 
-Swift is from
-[`ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF`](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF),
-pinned at revision `d74895bbe5db4bec1e0024e7cc87d59c02d7631a`. Its selected file
-is `Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf`, 12120016896 bytes. The
-downloaded file was rehashed against the pinned publisher SHA-256:
+The `odin-inference-models.service` oneshot runs before llama-swap and provisions
+six selected files: Gemma's three artifacts, Clef's text model, and the embedder's
+text model and projector. Destinations are revision-specific directories under
+`/var/lib/llama-models`. It requests reflinks where supported, checks copied bytes,
+and publishes atomically with mode `0444`. Existing destination files are checked,
+not overwritten. The dynamic proxy user cannot modify these root-owned files;
+`ProtectHome` remains enabled. Once a valid destination copy exists, the source
+cache is not needed on later starts. Model files stay outside the Nix store.
 
-```text
-9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5
-```
-
-Its initial source directory is
-`/home/twins/.local/share/cosmos-models/swift15-qwen38-27b-gsq-rco/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/`;
-its service-readable destination directory is
-`/var/lib/llama-models/swift15-qwen38-27b-gsq-rco-d74895bbe5db/`.
-Swift's adapted weights use the
-[Swift Open License v1.0](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27B-GSQ-RCO-GGUF/blob/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/LICENSE),
-not an Apache-only grant; review its terms for redistribution or commercial use.
-
-The `odin-inference-models.service` oneshot runs before llama-swap and copies
-all five selected model/projector files into their revision-specific directories under
-`/var/lib/llama-models`; REAP retains
-`/var/lib/llama-models/qwen36-reap-opus-mtp-f11f37b9ad21/`. It requests reflinks
-where supported, checks copied bytes, and publishes atomically with mode `0444`.
-Existing destination files are checked, not overwritten. The dynamic proxy
-user cannot modify these root-owned files; `ProtectHome` remains enabled. Once
-a valid destination copy exists, the source cache is not needed on later starts.
-Model files stay outside the Nix store.
-
-The retired LFM and checksum-mismatched APEX entries are no longer served or
-required by provisioning. Their cached/provisioned files are not deleted, and
-removing the APEX entry does not resolve its publisher-checksum mismatch.
+Qwen cleanup includes the retired REAP, Swift and checksum-mismatched APEX
+weights. Their three user-owned source GGUFs were checksum-checked against the
+matching serving copies and removed during preparation (57.629 GiB logical
+file size). The three root-owned serving copies remain pending cleanup; copies
+may share reflink extents, so logical sizes are not reclaimed-space guarantees.
+Do not remove those root copies while the old live proxy or provisioner still
+references them: activate and verify the Gemma configuration first. Use a
+separately reviewed exact-path inventory, not a broad wildcard removal command.
+Root-owned files need root privileges; noninteractive sudo is unavailable.
+Removing APEX does not resolve its historical publisher-checksum mismatch.
+Unrelated LFM, Humanizer and Kitten files are outside the Qwen cleanup scope.
 
 Run Nix evaluations, validation, and builds on Odin, not on Thoth. Thoth may
 edit/stage the changes and drive strict SSH; first transfer the exact pending
@@ -743,13 +730,19 @@ remote changes. Build completion is not activation permission.
 
 Before activation, obtain separate approval to stop any active temporary backend
 and test proxy: experimental processes outside these groups still compete for
-GPU memory. The B50 embedder preloads on proxy startup, so stop its temporary
-service before activating. Stop the temporary Clef service too; otherwise the
-preloaded B50 children compete with a second copy outside the proxy. Only after
-that approval, on Odin:
+GPU memory. The native Gemma audition server listens on port 18110 as `twins`;
+its active metadata is
+`/home/twins/.cache/cosmos-specialist-tests/gemma4-main-audition/active-audition.json`
+on Odin. Before stopping it, validate the recorded PID against the actual
+executable and model arguments; do not trust a stale PID or kill by port/name
+alone. Stop the verified audition process only with explicit approval, and
+confirm that its GPU allocation is released before production activation.
+The startup hook preloads both B50 children, so any temporary embedding or Clef
+service must also be stopped with approval to avoid duplicate GPU allocations.
+Do not infer permission to stop processes or activate from permission to edit,
+validate or commit. After those approvals and collision checks, on Odin:
 
 ```bash
-systemctl --user stop swift15-test-swap.service swift15-iq3s-mtp-test.service embeddinggemma2-b50-test.service clef-flash-b50-test.service
 sudo nixos-rebuild switch --flake path:/Cosmos#odin
 systemctl status odin-inference-models.service llama-swap.service
 systemctl show llama-swap.service -p LimitMEMLOCK
@@ -757,24 +750,28 @@ curl --fail http://127.0.0.1:8081/health
 curl --fail http://127.0.0.1:8081/v1/models
 ```
 
-An idle healthy proxy does not prove backend loading. Request `barozp-reap-q6`,
-then `swift15-iq3s`, and switch back; verify that each previous child exits before
-the other loads. Verify real generation and native tool calls, and inspect
-`/running`. Check each child's single 131072-token slot, Vulkan device, effective
-arguments, model-specific memory behavior and swap usage. Check prompt-cache
-reuse within a loaded model and that an idle model is not
-unloaded after 600 seconds. These are post-activation checks, not claims that
-system-service inference has already passed. The flake check verifies arguments,
-GPU-specific routing, model paths, service dependencies and unit syntax; it is
-not GPU inference.
+An idle healthy proxy does not prove backend loading. Confirm `/v1/models`
+advertises exactly `gemma4-balanced-q4`, `embeddinggemma2` and `clef-flash-q8`,
+with no former Qwen IDs. Before a Gemma request, `/running` should show the two
+preloaded B50 children, not an automatically loaded Radeon model. Request
+`gemma4-balanced-q4`; verify real text/image generation and native tool calls,
+and inspect `/running`. Check its single 131072-token slot, full Vulkan offload,
+GPU projector, separate draft model, effective 256-token image budget, memory
+behavior and swap usage. Check prompt reuse for appended turns and return visits,
+and that an idle model is not unloaded after 600 seconds. These are
+post-activation checks, not claims that system-service inference has passed.
+The flake check verifies arguments, GPU-specific routing, model paths, service
+dependencies and unit syntax; it is not GPU inference.
 
 The proxy's `/api/models/unload` endpoint unloads models but leaves the proxy
 available. Both standalone instances remain disabled. The B50 group is independent;
 SYCL environment/workarounds are not applied to Vulkan children. After activation,
 verify that both B50 models appear in `/running`, the embedder returns valid
 768-dimensional text embeddings, and Clef returns typed decisions through the
-passthrough URL. Verify both stay loaded while swapping Radeon models. These
-system-service checks are post-activation work, not completed benchmark results.
+passthrough URL. Verify both stay loaded while loading, explicitly unloading and
+reloading Gemma, and that unloading Gemma discards only its own RAM prompt cache.
+These system-service checks are post-activation work, not completed benchmark
+results.
 
 ### Client access after activation
 
