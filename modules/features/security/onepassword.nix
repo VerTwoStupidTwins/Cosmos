@@ -1,12 +1,10 @@
 {
-  flake.modules.nixos.workstation = { lib, ... }: {
-    nixpkgs.config.allowUnfreePredicate =
-      pkg:
-      builtins.elem (lib.getName pkg) [
-        "1password"
-        "1password-cli"
-        "1password-gui"
-      ];
+  flake.modules.nixos.workstation = {
+    cosmos.allowedUnfreePackages = [
+      "1password"
+      "1password-cli"
+      "1password-gui"
+    ];
 
     programs = {
       _1password.enable = true;

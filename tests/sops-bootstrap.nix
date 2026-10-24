@@ -42,7 +42,11 @@ let
           && probe.key == "bootstrap_validation"
           && probe.format == "yaml"
           && probe.sopsFile == host.sops.defaultSopsFile
-          && builtins.attrNames host.sops.secrets == [ "bootstrap-validation" ]
+          &&
+            builtins.attrNames host.sops.secrets == (
+              [ "bootstrap-validation" ]
+              ++ lib.optional (host.networking.hostName == "odin") "onepassword-service-account-token"
+            )
         )
         [
           odin

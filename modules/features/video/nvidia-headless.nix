@@ -1,7 +1,7 @@
 {
-  flake.modules.nixos."nvidia-headless" = { lib, pkgs, ... }: {
+  flake.modules.nixos."nvidia-headless" = { pkgs, ... }: {
     # Narrow exception for NVIDIA userspace; no global allowUnfree/CUDA rebuilds.
-    nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [ "nvidia-x11" ];
+    cosmos.allowedUnfreePackages = [ "nvidia-x11" ];
 
     hardware = {
       graphics.enable = true;

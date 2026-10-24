@@ -366,10 +366,10 @@ Odin imports the reusable `sops-secrets` profile. The pinned sops-nix input
 follows Cosmos's root nixpkgs. It converts the existing root-only
 `/etc/ssh/ssh_host_ed25519_key` during secret installation; no host private key
 is exported and no additional age key is generated. GPG/RSA key imports are
-disabled. This bootstrap declares no application secrets and installs no Hermes
+disabled. This profile installs no Hermes
 account or service yet; a successful build does not prove host decryption.
 
-The only declared secret is a non-secret activation probe from
+A non-secret activation probe is declared by
 [`sops-bootstrap.nix`](sops-bootstrap.nix). After approved activation,
 `/run/secrets/bootstrap-validation` must be owned by `root:root`, mode `0400`,
 and contain `public-cosmos-sops-bootstrap`. It is deliberately not a
@@ -447,6 +447,52 @@ not decrypted Nix values. Do not grant Hermes the operator identity, host key,
 backup secure, retain the operator key in 1Password, and re-encrypt with
 `sops updatekeys` before removing or replacing a recipient. Host decryption and
 file-permission checks remain post-activation work, with separate approval.
+
+## 1Password service-account bootstrap
+
+Odin's `onepassword-service-account` profile includes `sops-secrets` and declares
+one additional SOPS entry, `onepassword_service_account_token`, in the same
+repository-wide `secrets.yaml`. The saved token remains in the operator's private
+1Password vault; the repository contains only its encrypted deployment copy.
+The runtime file is `/run/secrets/onepassword-service-account-token`, root:root
+`0400`. As with all entries in this shared file, root on Thoth can also decrypt
+it, even though Thoth does not install the token or verification unit.
+
+`onepassword-service-account-verify.service` is a network-dependent oneshot on
+Odin, not a GUI integration or a general-purpose application-secret fetcher.
+It uses the pinned headless CLI to verify a `SERVICE_ACCOUNT` identity and read
+item metadata from `Cosmos Runtime`. Confirm the account has only read-item
+access to that dedicated vault in 1Password; the authentication check does not
+prove that write permissions are absent. The vault must not contain the operator
+private key or the service-account token itself.
+
+Systemd passes the token through `LoadCredential` to a dynamic, unprivileged
+user. The unit hides `/etc/ssh`, `/run/secrets` and home directories, uses a
+private ephemeral CLI configuration directory, disables caching/debugging/app
+integration, and exposes no plaintext token in the unit environment or Nix
+store. The helper suppresses provider output, fails on wrong identities or
+invalid tokens, and reports only a generic success/failure message. No Hermes
+account or agent receives this token.
+
+A network outage, revoked/expired token or inaccessible vault fails the check;
+there is no personal-account fallback or persisted-credential fallback. Its
+startup timeout is 90 seconds after network ordering. Existing inference
+services do not depend on this verifier. Updating the SOPS token restarts the
+verification unit during activation; rotating the account remains an explicit
+operator task.
+
+The shared unfree-package allowlist composes only the existing NVIDIA,
+workstation 1Password and Intel toolkit exceptions, plus `1password-cli` on
+Odin. This avoids replacing the Intel exception or enabling all unfree packages.
+CI checks preserve each host's license scope and exercise the verifier against
+public synthetic fixtures, never the real token or 1Password API.
+
+Activation remains manual and separate. After activating this change, inspect
+`systemctl status onepassword-service-account-verify.service`; a successful
+oneshot may be inactive with a successful exit status. Do not print the token
+file, credential directory or provider debug output. Application-specific
+secret fetching will be added only when its consumer and required entries are
+specified. No service account is created, modified or rotated by this profile.
 
 ## GPU-separated inference with llama-swap
 

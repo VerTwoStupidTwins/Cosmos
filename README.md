@@ -51,6 +51,7 @@ Multiple feature files can extend the same profile:
 | `laptop-sleep` | Lid handling, timed hibernation, UPower, shared Wayland sleep/logind locking |
 | `local-tts` | nixpkgs Piper CPU speech CLI and timing tools; Hermes packages remain unchanged |
 | `sops-secrets` | Pinned sops-nix with root-only host-key age decryption; hosts declare encrypted secrets explicitly |
+| `onepassword-service-account` | SOPS-provisioned token and isolated headless 1Password authentication/vault-access check; no GUI or agent token access |
 | `model-tools` | Hugging Face `hf` CLI from pinned nixpkgs, without an imperative Python environment |
 | `llama-cpp-sycl` | Intel compute-runtime prerequisites and narrowly scoped oneAPI licensing |
 | `llama-cpp-instances` | Independent named llama.cpp services, GPU environments, state/cache, and CLI launchers; disabled by default |
