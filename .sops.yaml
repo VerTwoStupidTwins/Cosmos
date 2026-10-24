@@ -1,0 +1,12 @@
+# Public recipients only. Never add private keys or plaintext secrets here.
+keys:
+  - &cosmos_operator age1gpztvjfd4x03hhq9cj0w4fy576lxr9mgqdzgm9zkldfqduptz3tq4s3vuy
+  - &odin age1uqzduhkwfyg5dgj04222ty620e8lup3wffgs0cv5e7gsxnlk8pcs9p9kw0
+  - &thoth age1cwuzsm66ewem2yry0pejqet0m6hqhruhv7lychvd5e6aaz2uh3ks66qnxc
+creation_rules:
+  - path_regex: ^secrets\.yaml$
+    key_groups:
+      - age:
+          - *cosmos_operator
+          - *odin
+          - *thoth

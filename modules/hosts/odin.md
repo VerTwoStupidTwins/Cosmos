@@ -360,6 +360,94 @@ environment/device permissions, opt-in firewall/JIT, invalid configurations, and
 literal CLI argument transport. Its test executable is an argument-printing
 fixture, not simulated model inference.
 
+## SOPS secret-management bootstrap
+
+Odin imports the reusable `sops-secrets` profile. The pinned sops-nix input
+follows Cosmos's root nixpkgs. It converts the existing root-only
+`/etc/ssh/ssh_host_ed25519_key` during secret installation; no host private key
+is exported and no additional age key is generated. GPG/RSA key imports are
+disabled. This bootstrap declares no application secrets and installs no Hermes
+account or service yet; a successful build does not prove host decryption.
+
+The only declared secret is a non-secret activation probe from
+[`sops-bootstrap.nix`](sops-bootstrap.nix). After approved activation,
+`/run/secrets/bootstrap-validation` must be owned by `root:root`, mode `0400`,
+and contain `public-cosmos-sops-bootstrap`. It is deliberately not a
+password or application credential. Actual host-key decryption and permissions
+must be checked after activation, not inferred from operator decryption.
+
+The single repository-wide encrypted file is [`secrets.yaml`](../../secrets.yaml).
+The policy in [`.sops.yaml`](../../.sops.yaml) has one key group containing the
+Cosmos SOPS Operator, Odin and Thoth: each identity can decrypt independently.
+Consequently, root on either host can decrypt the entire shared file, not just
+that host's entries. Service access is still limited to explicitly declared
+runtime entries and their ownership/mode. Public recipients may be committed, but
+private identities and plaintext credentials must never enter Git, the Nix store,
+or chat. Ordinary editing uses the operator identity via 1Password; system
+activation uses the root-only host key. These are workflow/permission roles,
+not cryptographically distinct read and edit permissions.
+
+Operator editing can happen on any authorized computer with access to the same
+Cosmos SOPS Operator item in 1Password; the operator recipient is tied to that
+key, not to Thoth. A second editing computer does not require a new recipient
+or re-encryption when it uses the same operator key. Each client needs a Cosmos
+checkout, SOPS, ssh-to-age, and an independently authorized 1Password CLI.
+
+The current development shell and Bash helper target `x86_64-linux`, so Thoth
+and a compatible NixOS gaming host can use the same workflow. Each desktop
+needs its own 1Password app/CLI authorization; neither needs a permanently
+exported private key. Merely editing secrets does not require importing the
+`sops-secrets` NixOS profile or adding that desktop's SSH host recipient. If a
+new host later needs its own unattended runtime secrets, add its host recipient
+to the shared-file policy and run `sops updatekeys secrets.yaml`; that grants it
+access to the entire shared file. Automated configuration builds still
+run on Odin, independently of which computer edits the encrypted files.
+
+The development shell supplies pinned SOPS, age and ssh-to-age, and sets
+`SOPS_AGE_KEY_CMD` to a checked helper. That helper pipes `op read` directly
+into `ssh-to-age -private-key`, without a persistent identity file. It is not an
+SSH-agent-only operation: authorized key material enters local process memory.
+Do not invoke `cosmos-sops-identity` directly or enable shell tracing: its stdout
+is a private identity intended only for SOPS.
+
+In 1Password, copy the secret reference for the operator item's **private key**
+field, not its value. Append `?ssh-format=openssh` so the CLI returns OpenSSH
+format. Keep the reference in your local shell, not in the repository. For Bash,
+replace `YOUR_VAULT` with the actual vault/reference and `/path/to/Cosmos` with
+your local checkout:
+
+```bash
+export COSMOS_SOPS_OPERATOR_KEY_REF='op://YOUR_VAULT/Cosmos SOPS Operator/private key?ssh-format=openssh'
+cd /path/to/Cosmos
+nix develop path:. --command sops secrets.yaml
+```
+
+For Fish, set the variable with `set -gx COSMOS_SOPS_OPERATOR_KEY_REF 'op://YOUR_VAULT/Cosmos SOPS Operator/private key?ssh-format=openssh'`.
+Use the encrypted editor for real values; do not put them in shell arguments,
+terminal output, chat or a plaintext file under `/Cosmos`. Before committing,
+verify that the saved file contains encrypted values and SOPS metadata. A
+private check can discard decrypted output:
+
+```bash
+nix develop path:. --command sops decrypt secrets.yaml > /dev/null
+```
+
+These editing commands intentionally run on the 1Password client. Automated
+Nix evaluation, validation and compilation still run on Odin. The bootstrap
+check uses disposable SSH identities and a fake `op` executable to exercise
+piped conversion, SOPS roundtrip, refusal paths, three independent recipients
+and the single-file policy. It does not authenticate to 1Password or test any
+production private key.
+
+The profile sets `sops.defaultSopsFile` to the shared file. Actual secrets must
+subsequently be declared by key with explicit ownership/mode in the consuming
+service module, using runtime paths such as `/run/secrets/...`,
+not decrypted Nix values. Do not grant Hermes the operator identity, host key,
+1Password account/session or a blanket secrets group. Keep Odin's SSH host-key
+backup secure, retain the operator key in 1Password, and re-encrypt with
+`sops updatekeys` before removing or replacing a recipient. Host decryption and
+file-permission checks remain post-activation work, with separate approval.
+
 ## GPU-separated inference with llama-swap
 
 [odin-inference.nix](odin-inference.nix) configures the pinned native

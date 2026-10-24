@@ -298,6 +298,10 @@ jobs:
             and .stateVersion == "26.05"
           '
 
+      - name: Test SOPS bootstrap and operator identity helper
+        shell: bash
+        run: nix build --no-write-lock-file --no-link '.#checks.x86_64-linux.sops-bootstrap'
+
       - name: Test reusable llama.cpp instance module
         shell: bash
         run: |
