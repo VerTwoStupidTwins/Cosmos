@@ -15,6 +15,7 @@ in
       nixos."tuigreet-login"
       nixos."laptop-sleep"
       nixos."local-tts"
+      nixos."sops-secrets"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/thoth.nix
     ];

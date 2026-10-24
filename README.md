@@ -50,6 +50,7 @@ Multiple feature files can extend the same profile:
 | `bcachefs-root` | Bcachefs support, systemd initrd, disabled zram swap |
 | `laptop-sleep` | Lid handling, timed hibernation, UPower, shared Wayland sleep/logind locking |
 | `local-tts` | nixpkgs Piper CPU speech CLI and timing tools; Hermes packages remain unchanged |
+| `sops-secrets` | Pinned sops-nix with root-only host-key age decryption; hosts declare encrypted secrets explicitly |
 | `model-tools` | Hugging Face `hf` CLI from pinned nixpkgs, without an imperative Python environment |
 | `llama-cpp-sycl` | Intel compute-runtime prerequisites and narrowly scoped oneAPI licensing |
 | `llama-cpp-instances` | Independent named llama.cpp services, GPU environments, state/cache, and CLI launchers; disabled by default |
@@ -65,7 +66,7 @@ Compose `base-desktop` with the chosen compositor profile(s) and login profile a
 
 - Supported flake system: `x86_64-linux`.
 - Root `nixpkgs`: `nixos-unstable`, pinned in `flake.lock`.
-- Disko and the root Home Manager input follow the root `nixpkgs`.
+- Disko, sops-nix, and the root Home Manager input follow the root `nixpkgs`.
 - The root Home Manager input tracks upstream's default branch; it remains inactive.
 - Mango uses the root nixpkgs package/module, without an additional upstream flake input.
 - Hermes supplies upstream CLI/Desktop packages and retains its own pinned dependency graph, including a separate nixpkgs input. Do not assume every package uses the root nixpkgs revision.

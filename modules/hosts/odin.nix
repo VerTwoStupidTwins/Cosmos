@@ -9,6 +9,7 @@ in
       nixos.base
       nixos."bcachefs-root"
       nixos."model-tools"
+      nixos."sops-secrets"
       nixos."llama-cpp-sycl"
       nixos."llama-cpp-instances"
       inputs.disko.nixosModules.disko

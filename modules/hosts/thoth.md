@@ -46,6 +46,35 @@ for existing peers and host-key verification when replacing the embedded server.
 
 1Password provides SSH identities at `~/.1password/agent.sock`; the OpenSSH client sets `IdentityAgent` system-wide and the built-in SSH agent is disabled. The GUI must be running with Settings → Developer → Use the SSH agent enabled. A refused connection can mean the agent has no socket listener. Its unfree allowance is narrowly declared in the workstation security feature.
 
+## Host-key secret provisioning
+
+Thoth imports the reusable `sops-secrets` profile. During NixOS activation,
+sops-nix uses the existing root-only `/etc/ssh/ssh_host_ed25519_key`; it does not
+need a logged-in 1Password session and does not generate a replacement key. Nix
+builds contain only encrypted files, not decrypted credentials. Thoth's existing
+encrypted root protects its host key while the volume is locked; this change
+does not change the disk layout or encryption policy.
+
+Both hosts use the same repository-wide [`secrets.yaml`](../../secrets.yaml).
+The policy in [`.sops.yaml`](../../.sops.yaml) permits the Cosmos SOPS Operator,
+Odin's host key and Thoth's host key independently. Root on either host can
+decrypt the entire file; applications receive only their declared runtime
+entries with explicit permissions. An ordinary editing client uses the portable
+1Password-backed operator workflow described in
+[Odin's SOPS guide](odin.md#sops-secret-management-bootstrap).
+Do not copy host private keys to editing clients or give applications access
+to either decryption identity. Root can use its host key with SOPS too; the
+editing/runtime distinction is enforced by permissions and workflow, not a
+cryptographic read-only key.
+
+[`sops-bootstrap.nix`](sops-bootstrap.nix) declares a non-secret activation
+probe, not an application credential. After separately approved activation,
+verify that `/run/secrets/bootstrap-validation` is owned by `root:root` with
+mode `0400` and contains the public marker `public-cosmos-sops-bootstrap`.
+This proves host-side provisioning only when actually checked after activation.
+The local Hermes configuration, credentials and sessions are not migrated or
+changed by this bootstrap.
+
 ## Login and desktop selection
 
 The `tuigreet-login` profile runs greetd on VT1 with an explicit, store-qualified
