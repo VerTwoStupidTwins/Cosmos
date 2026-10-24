@@ -302,6 +302,10 @@ jobs:
         shell: bash
         run: nix build --no-write-lock-file --no-link '.#checks.x86_64-linux.sops-bootstrap'
 
+      - name: Test isolated 1Password service-account verifier
+        shell: bash
+        run: nix build --no-write-lock-file --no-link '.#checks.x86_64-linux.onepassword-service-account'
+
       - name: Test reusable llama.cpp instance module
         shell: bash
         run: |
