@@ -26,8 +26,11 @@ in
       modelRoot = "/var/lib/llama-models";
       embeddingRoot = "${modelRoot}/embeddinggemma2-031f0d4b3553";
       embeddingSource = "/home/twins/.local/share/cosmos-models/embeddinggemma2/031f0d4b35536f69ab3509d4893c923264fcf253";
-      qwenModel = "${modelRoot}/qwen36-reap-opus-mtp-f11f37b9ad21/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
-      swiftModel = "${modelRoot}/swift15-qwen38-27b-gsq-rco-d74895bbe5db/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
+      gemmaRoot = "${modelRoot}/gemma4-hauhau-balanced-mtp-f9093662a2e7";
+      gemmaSource = "/home/twins/.local/share/cosmos-models/gemma4-hauhau-balanced-mtp/f9093662a2e7ae0503f637088bc96f77a1a70c83";
+      gemmaModel = "${gemmaRoot}/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf";
+      gemmaProjector = "${gemmaRoot}/mmproj-Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf";
+      gemmaDraft = "${gemmaRoot}/mtp-gemma-4-26B-A4B-it.gguf";
       clefModel = "${modelRoot}/clef-flash-8aa35d1cc7e1/Clef-Flash-Q8_0.gguf";
       artifacts = [
         {
@@ -49,16 +52,21 @@ in
           warning = "";
         }
         {
-          source = "/home/twins/.local/share/cosmos-models/barozp-qwen36-reap-opus-mtp/f11f37b9ad21038478066fc1e532dfb92165fccf/Qwen3.6-29B-REAP-Opus-Reasoning-Distill-MTP-Q6_K.gguf";
-          destination = qwenModel;
-          # Matches the publisher's SHA-256 at the pinned Hub revision.
-          contentHash = "27b6c065ff4ba02d76dc11116ecebb78b4bc38aaa27637414c8008ba000db4ae";
+          source = "${gemmaSource}/Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-Q4_K_M.gguf";
+          destination = gemmaModel;
+          contentHash = "3c13133469e431312fffb8b1d9c85ae42199e6bb5746ea1da84e8ddf2097d73c";
           warning = "";
         }
         {
-          source = "/home/twins/.local/share/cosmos-models/swift15-qwen38-27b-gsq-rco/d74895bbe5db4bec1e0024e7cc87d59c02d7631a/Swift-1.5-Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf";
-          destination = swiftModel;
-          contentHash = "9aecf1cd41b2cb2f32a74e0d889e33855ebef43b26f43b43feb5720239e677e5";
+          source = "${gemmaSource}/mmproj-Gemma4-26B-A4B-QAT-Uncensored-HauhauCS-Balanced-BF16.gguf";
+          destination = gemmaProjector;
+          contentHash = "b5346e5bfd906f5e16878c2d0b8243e948ca7410fa28ea35be9b0c54a0ac10b7";
+          warning = "";
+        }
+        {
+          source = "${gemmaSource}/mtp-gemma-4-26B-A4B-it.gguf";
+          destination = gemmaDraft;
+          contentHash = "62bd3af7f66c9308de9a5454233852f8c7324c93767e8dfb824ed45b9179864a";
           warning = "";
         }
       ];
@@ -199,85 +207,16 @@ in
         "--slots"
         "--metrics"
       ];
-      qwenArguments = [
+      # Tested GPU-balanced profile; non-causal image input is capped by microbatch.
+      gemmaArguments = [
         "--host"
         "127.0.0.1"
         "--port"
         "\${PORT}"
         "--alias"
         "\${MODEL_ID}"
-        "--device"
-        backend.settings.device
-        "--gpu-layers"
-        "99"
-        "--n-cpu-moe"
-        "11"
-        "--fit"
-        "off"
-        # Standalone mlock crashes this build; mapped locking was verified.
-        "--load-mode"
-        "mmap+mlock"
-        "--lazy-mode"
-        "off"
-        "--sleep-idle-seconds"
-        "-1"
-        "--threads"
-        "12"
-        "--threads-batch"
-        "12"
-        "--ctx-size"
-        "131072"
-        "--parallel"
-        "1"
-        "--no-kv-unified"
-        "--batch-size"
-        "1024"
-        "--ubatch-size"
-        "256"
-        "--cache-type-k"
-        "q8_0"
-        "--cache-type-v"
-        "q8_0"
-        "--flash-attn"
-        "on"
-        "--spec-type"
-        "draft-mtp"
-        "--spec-draft-n-max"
-        "3"
-        "--spec-draft-n-min"
-        "0"
-        "--spec-draft-p-min"
-        "0"
-        "--spec-draft-n-cpu-moe"
-        "11"
-        "--cache-type-k-draft"
-        "q8_0"
-        "--cache-type-v-draft"
-        "q8_0"
-        "--cache-prompt"
-        "--cache-ram"
-        "32768"
-        "--cache-idle-slots"
-        "--jinja"
-        "--reasoning-format"
-        "deepseek"
-        "--temp"
-        "0.6"
-        "--top-p"
-        "0.95"
-        "--top-k"
-        "20"
-        "--metrics"
-        "--slots"
-      ];
-      # Preserve Swift's tested dense-model flags separately from REAP's MoE tuning.
-      swiftArguments = [
-        "--host"
-        "127.0.0.1"
-        "--port"
-        "\${PORT}"
-        "--alias"
-        "\${MODEL_ID}"
+        "--model"
+        gemmaModel
         "--device"
         backend.settings.device
         "--gpu-layers"
@@ -286,64 +225,62 @@ in
         "off"
         "--load-mode"
         "mmap"
-        "--lazy-mode"
-        "off"
-        "--sleep-idle-seconds"
-        "-1"
-        "--threads"
-        "12"
-        "--threads-batch"
-        "12"
         "--ctx-size"
         "131072"
         "--parallel"
         "1"
-        "--no-kv-unified"
         "--batch-size"
-        "1024"
+        "512"
         "--ubatch-size"
         "256"
+        "--threads"
+        "12"
+        "--threads-batch"
+        "12"
         "--cache-type-k"
         "q8_0"
         "--cache-type-v"
         "q8_0"
         "--flash-attn"
         "on"
+        "--model-draft"
+        gemmaDraft
         "--spec-type"
         "draft-mtp"
         "--spec-draft-n-max"
         "3"
-        "--spec-draft-n-min"
-        "0"
-        "--spec-draft-p-min"
-        "0"
+        "--device-draft"
+        backend.settings.device
+        "--spec-draft-ngl"
+        "99"
         "--cache-type-k-draft"
         "q8_0"
         "--cache-type-v-draft"
         "q8_0"
-        "--cache-prompt"
-        "--cache-ram"
-        "32768"
-        "--cache-idle-slots"
-        "--slot-prompt-similarity"
-        "0.9"
         "--jinja"
-        "--reasoning-format"
-        "deepseek"
+        "--chat-template-kwargs"
+        "{\"enable_thinking\":true}"
         "--temp"
-        "1.0"
-        "--top-p"
-        "0.95"
+        "0.6"
         "--top-k"
-        "20"
+        "64"
+        "--top-p"
+        "0.9"
         "--min-p"
-        "0.0"
-        "--presence-penalty"
-        "0.0"
+        "0.05"
         "--repeat-penalty"
-        "1.0"
+        "1.1"
         "--metrics"
         "--slots"
+        "--mmproj"
+        gemmaProjector
+        "--mmproj-device"
+        backend.settings.device
+        "--mmproj-offload"
+        "--cache-prompt"
+        "--cache-ram"
+        "8192"
+        "--cache-idle-slots"
       ];
     in
     {
@@ -371,14 +308,11 @@ in
             ];
           };
           settings.groups.rx-7900xt = {
-            # One AMD model at a time, without evicting future B50 groups.
+            # Keep Radeon reasoning isolated from the resident B50 models.
             swap = true;
             exclusive = false;
             persistent = true;
-            members = [
-              "barozp-reap-q6"
-              "swift15-iq3s"
-            ];
+            members = [ "gemma4-balanced-q4" ];
           };
         };
         models = {
@@ -416,47 +350,14 @@ in
               idleConn = 90;
             };
           };
-          barozp-reap-q6 = {
-            name = "Qwen3.6 REAP Opus Reasoning Distill MTP Q6_K";
-            description = "Verified weights; one 128K slot, 11 CPU MoE layers, q8 KV and MTP. Retrieval tested through 64K input; full 128K and executor quality remain unvalidated.";
-            cmd = lib.escapeShellArgs (
-              [
-                server
-                "--model"
-                qwenModel
-              ]
-              ++ qwenArguments
-            );
+          gemma4-balanced-q4 = {
+            name = "Gemma4 26B A4B HauhauCS Balanced Q4_K_M MTP + vision";
+            description = "Tested GPU-balanced profile: one 128K slot, Q8 KV, MTP max 3 and GPU vision capped to 256 image tokens by microbatch. Synthetic mixed retrieval passed at 125879 input tokens; peak VRAM 19.761 GiB leaves only 0.223 GiB headroom. Broad executor quality and production resilience remain unvalidated.";
+            cmd = lib.escapeShellArgs ([ server ] ++ gemmaArguments);
             env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
             proxy = "http://127.0.0.1:\${PORT}";
             useModelName = "\${MODEL_ID}";
             checkEndpoint = "/health";
-            # Keep weights and RAM prompt snapshots until an explicit unload/swap.
-            ttl = 0;
-            timeouts = {
-              connect = 30;
-              keepalive = 30;
-              responseHeader = 1800;
-              tlsHandshake = 10;
-              idleConn = 90;
-            };
-          };
-          swift15-iq3s = {
-            name = "Swift 1.5 Qwen3.8 27B GSQ-RCO IQ3_S MTP";
-            description = "Verified weights; one 128K slot, dense GPU offload, q8 KV, MTP and tuned prompt reuse. Cold synthetic retrieval passed at 129994 input tokens; broad executor quality remains unvalidated.";
-            cmd = lib.escapeShellArgs (
-              [
-                server
-                "--model"
-                swiftModel
-              ]
-              ++ swiftArguments
-            );
-            env = lib.mapAttrsToList (key: value: "${key}=${value}") backend.environment;
-            proxy = "http://127.0.0.1:\${PORT}";
-            useModelName = "\${MODEL_ID}";
-            checkEndpoint = "/health";
-            # A same-group swap still unloads this model and its RAM prompt cache.
             ttl = 0;
             timeouts = {
               connect = 30;
