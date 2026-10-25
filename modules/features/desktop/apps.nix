@@ -1,6 +1,12 @@
 # Shared applications and file-manager integrations; no user configuration.
 {
   flake.modules.nixos."base-desktop" = { pkgs, ... }: {
+    # The official client has both an FHS wrapper and an unwrapped payload.
+    cosmos.allowedUnfreePackages = [
+      "discord"
+      "discord-unwrapped"
+    ];
+
     services = {
       gvfs.enable = true;
       udisks2.enable = true;
@@ -33,6 +39,7 @@
       quickshell
 
       # General workstation applications.
+      discord
       firefox
       emacs
       libreoffice
