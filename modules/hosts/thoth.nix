@@ -16,6 +16,7 @@ in
       nixos."laptop-sleep"
       nixos."local-tts"
       nixos."sops-secrets"
+      nixos."sops-operator"
       inputs.disko.nixosModules.disko
       ../../disk-layouts/thoth.nix
     ];
