@@ -16,6 +16,7 @@
       bat
       jq
       yq
+      sops
       lazygit
       yazi
     ];
