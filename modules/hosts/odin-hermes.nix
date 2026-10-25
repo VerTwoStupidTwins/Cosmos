@@ -21,7 +21,14 @@ in
           chain output {
             type filter hook output priority -5; policy accept;
             meta skuid "hermes" ct direction reply ct state established,related accept
-            meta skuid "hermes" ip daddr 127.0.0.1 tcp dport { 18090, 18092 } accept
+            # Kernel WireGuard preserves the application socket UID on outer UDP.
+            # Only its privileged control-plane mark and declared transport pass.
+            meta skuid "hermes" meta nfproto ipv4 meta mark 0x1bd00 oifname "enp4s0" fib daddr type != local udp sport ${toString config.services.netbird.clients.wt0.port} counter accept
+            meta skuid "hermes" ip daddr 127.0.0.1 tcp dport { 18090, 18092${
+              lib.optionalString (
+                (config.services.hermes-agent.settings.memory.provider or "") == "honcho"
+              ) ", 8000"
+            } } accept
             # The dashboard PTY's authenticated WS callback targets this host.
             meta skuid "hermes" meta nfproto ipv4 fib daddr type local tcp dport 9119 accept
             meta skuid "hermes" counter reject
@@ -60,7 +67,10 @@ in
       };
     in
     {
-      imports = [ nixos."hermes-local" ];
+      imports = [
+        nixos."hermes-local"
+        nixos."hermes-honcho"
+      ];
       services.hermes-agent = {
         backend = {
           mode = "dashboard";

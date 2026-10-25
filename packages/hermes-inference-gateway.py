@@ -73,9 +73,12 @@ class Gateway(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 8
 
-    def __init__(self, address, upstream, timeout=1800):
+    def __init__(self, address, upstream, timeout=1800, *, endpoint='/v1/chat/completions', model=MODEL, validator=validate_request):
         self.upstream = upstream
         self.upstream_timeout = timeout
+        self.endpoint = endpoint
+        self.model = model
+        self.validator = validator
         self.capacity = threading.BoundedSemaphore(8)
         super().__init__(address, Handler)
 
@@ -109,12 +112,12 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(200, {'status': 'ok'})
         elif self.path == '/v1/models':
             # Do not expose the model-management service or unrelated models.
-            self.reply(200, {'object': 'list', 'data': [{'id': MODEL, 'object': 'model', 'owned_by': 'local', 'created': 0}]})
+            self.reply(200, {'object': 'list', 'data': [{'id': self.server.model, 'object': 'model', 'owned_by': 'local', 'created': 0}]})
         else:
             self.reply(403, {'error': 'Only the inference interface is permitted'})
 
     def do_POST(self):
-        if self.path != '/v1/chat/completions':
+        if self.path != self.server.endpoint:
             self.reply(403, {'error': 'Only chat inference is permitted'})
             return
         if self.headers.get('Transfer-Encoding') or len(self.headers.get_all('Content-Length', [])) != 1:
@@ -128,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
             raw = self.rfile.read(length)
             if len(raw) != length:
                 raise ValueError('Incomplete request body')
-            data = validate_request(json.loads(raw, object_pairs_hook=unique_object))
+            data = self.server.validator(json.loads(raw, object_pairs_hook=unique_object))
         except (ValueError, RecursionError, TimeoutError):
             self.reply(400, {'error': 'Request rejected by local inference policy'})
             return
@@ -138,7 +141,7 @@ class Handler(BaseHTTPRequestHandler):
         upstream = http.client.HTTPConnection(*self.server.upstream, timeout=self.server.upstream_timeout)
         response_started = False
         try:
-            upstream.request('POST', '/v1/chat/completions', body=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})
+            upstream.request('POST', self.server.endpoint, body=json.dumps(data).encode(), headers={'Content-Type': 'application/json'})
             response = upstream.getresponse()
             self.send_response(response.status)
             self.send_header('Content-Type', response.getheader('Content-Type', 'application/json'))

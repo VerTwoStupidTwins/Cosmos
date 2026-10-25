@@ -13,7 +13,8 @@ that installation or runtime verification has succeeded.
 - One 1 TB addlink PCIe NVMe, serial `A4D01953036200206341`.
 - Headless `x86_64-linux`, wired DHCP, hostname `odin`, admin `twins` with Fish.
 - Shared `base`: OpenSSH, resolved, firewall, NetBird client/interface `wt0`.
-- No desktop, Home Manager activation, 1Password, or container runtime.
+- No desktop, Home Manager activation, or 1Password GUI. The Honcho prerequisites
+  below add rootless Podman and native PostgreSQL, not a Docker daemon.
 - The `model-tools` profile supplies the native Hugging Face `hf` CLI. It does
   not download a model or enable an HTTP inference service.
 - The `llama-cpp-sycl` profile provides Intel compute prerequisites. The reusable
@@ -834,6 +835,272 @@ SSH authorization remains separate work.
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.
 
+## Local Honcho storage and container runtime
+
+[`honcho-local`](../features/agents/honcho-local.nix) provides native storage.
+[`honcho-runtime`](../features/agents/honcho-runtime.nix) extends that profile
+with the API and worker; a successful build does not activate them or enable
+Hermes memory integration:
+
+- Native PostgreSQL 17 with the separately packaged `pgvector` extension. The
+  bundled PostgreSQL contrib extensions `pg_trgm` and `btree_gin` do not require
+  additional Nix packages.
+- A database and non-superuser owner named `honcho`; no role/database creation
+  or replication privileges. A dedicated, non-login system account supplies the
+  rootless container identity, without adding privileges to Hermes. Odin pins
+  its already allocated UID 992 so native rootless OCI/user-manager units have
+  a stable runtime path; no existing state UID is changed.
+- Unix-socket-only database access with peer authentication; not even a loopback
+  TCP listener. No database port is opened in the firewall.
+- Idempotent [extension SQL](../../packages/honcho-database.sql) applied as
+  `postgres` after the native `postgresql-setup.service` creates the database and
+  role. Honcho itself does not need PostgreSQL superuser privileges.
+- Rootless Podman support, subordinate UID/GID ranges and lingering for the
+  dedicated account. No Docker daemon, Docker compatibility alias or agent
+  membership in privileged container-management groups.
+
+Honcho 3.4.0's migrations require `vector`; `pg_trgm` accelerates message search
+and `btree_gin` accelerates queue indexing. All three are enabled. The narrowly
+scoped `mkForce` for `listen_addresses` is necessary because the pinned NixOS
+module otherwise assigns `localhost` even when `enableTCPIP` is false.
+
+The [database check](../../tests/honcho-database.nix) uses only a disposable
+cluster and synthetic facts: extension creation, vector search, both index
+types, restricted role privileges, peer-authentication refusal and restart
+persistence. Its temporary trust authentication is not the deployed policy.
+
+Apply this configuration only through a separately approved Odin rebuild.
+After activation, verify the real `postgresql.service` and
+`postgresql-setup.service`, extension availability in the `honcho` database,
+role restrictions and absence of a TCP listener.
+Database installation does not prove Honcho extraction or recall works.
+
+The official [Honcho image](../../packages/honcho-image.nix) is exposed as
+`packages.x86_64-linux.honcho-image` and retained in Odin's system closure through
+`system.extraDependencies`. Nix fetches the Linux/amd64 3.4.0 archive using both a
+fixed registry digest and a separately verified archive content hash, with TLS
+verification enabled. There is no moving `latest` tag or activation-time registry
+pull. On Odin, it can be built independently with:
+
+```bash
+nix build --no-write-lock-file --no-link --print-out-paths path:/Cosmos#honcho-image
+```
+
+This command alone only builds the archive. The declarative OCI units use it
+through `imageFile`, with the archive-local name
+`ghcr.io/plastic-labs/honcho:3.4.0` and `pull = "never"`. The
+[image check](../../tests/honcho-image.nix) validates the archive platform/tag,
+packaged application version and generated runtime policy without starting it.
+
+Enabling Podman also generates `/etc/containers/policy.json`, `registries.conf`
+and `storage.conf` through the native NixOS containers module. These files appear
+on the live host only after activating this configuration. Do not hand-write a
+personal policy or disable TLS checks to work around an unactivated runtime.
+The default image policy permits unsigned images; the fixed digest and Nix
+archive hash provide content pinning, not publisher-signature verification.
+
+### Application, authentication and local inference
+
+`podman-honcho-api.service` and `podman-honcho-worker.service` run the official
+image as the native `honcho` identity. The image's app UID 100/GID 101 is mapped
+to that identity with `keep-id`, preserving PostgreSQL peer authentication.
+The containers have read-only root filesystems, no added capabilities or GPU
+devices, and only the database socket plus immutable startup/tokenizer files
+mounted. Host networking permits the private Unix socket and loopback model
+interfaces without publishing ports; Uvicorn explicitly binds `127.0.0.1:8000`.
+
+API startup runs upstream migrations, then `configure_embeddings.py --yes`
+before serving. Upstream initially creates 1,536-dimensional columns; the
+configuration tool aligns empty tables to EmbeddingGemma's 768 dimensions.
+It is a no-op at the matching dimension and refuses to alter populated
+embedding columns at another dimension. Do not work around that refusal by
+dropping data. The API uses conmon's container notification and a bounded,
+credential-free systemd `ExecStartPost` health poll. The worker waits for that
+poll, not merely container creation. This avoids the observed Podman health-timer
+startup failure; it is a startup gate, not continuous health monitoring.
+
+`honcho-credentials.service` generates a local signing key on first activation
+in root-only `/var/lib/cosmos-honcho` (0700 directory, 0600 files). It preserves
+the key across restarts and refuses malformed/link-unsafe state or an absent key
+when credential outputs already exist. Systemd reads the root-only server
+`EnvironmentFile` before filesystem namespace setup; Podman inherits
+`AUTH_JWT_SECRET` by name, never as a literal Nix or command-argument value.
+Do not pass a per-unit `/run/credentials/...` environment-file path into rootless
+Podman: its shared mount namespace can see the API's credential mount but not the
+worker's. The server key remains in the dedicated process/container environment,
+not Hermes's. The Hermes client JSON still uses protected `LoadCredential`
+publication. The private `client.json` contains a token scoped only to the `personal`
+workspace, never an admin token. The Hermes integration publishes only this
+client configuration, not the signing key or server environment. No new SOPS entry or operator credential
+is needed for this locally generated service identity. Back up the signing state
+securely with the database before relying on stored memory.
+
+Every extraction, summary, dream and dialectic model configuration explicitly
+uses the local Gemma model, with no fallback. Dreaming and Redis caching are
+disabled initially; derivation is a single background worker. The fixed local
+inference interfaces are `127.0.0.1:18094` for Gemma chat and
+`127.0.0.1:18093` for text-only `embeddinggemma2` embeddings. They refuse model
+management and caller-selected upstreams. The shared HTTP core retains the
+existing Hermes listener's chat-only policy; this adds no Hermes endpoint access.
+
+Honcho's tokenizer data is separately hash-pinned by
+[`honcho-tokenizer-cache.nix`](../../packages/honcho-tokenizer-cache.nix).
+The container receives actual data files, not store symlinks whose targets are
+outside its mounts, and can initialize both required encodings with networking
+disabled. Sentry, telemetry and payload tracing are explicitly disabled.
+`cosmos-honcho-egress.service` atomically installs a separate UID policy allowing
+only the API and these two model interfaces on IPv4 loopback, plus loopback reply
+traffic. Direct model-management access, DNS, other loopback ports, IPv6 and
+external egress are denied. Stopping its controller does not remove the policy;
+retirement requires stopping every Honcho-owned process before separately
+removing `inet cosmos_honcho`. Never flush the host ruleset.
+
+Container logs use Podman's bounded private file logging inside the account's
+0700 home, rather than the system-wide journal readable by Hermes. Treat those
+logs, memory tables, generated signing state and backups as sensitive. Odin's
+disk remains unencrypted and no memory-backup policy is established yet.
+
+### Hermes memory integration
+
+The reusable [hermes-honcho](../features/agents/hermes-honcho.nix) profile selects
+`memory.provider: honcho`. The [client package](../../packages/hermes-honcho-plugin.nix)
+pins the official catalog plugin to `e2d2aba182862deeb846e5cd4a30a41bce0ed82a`
+and the official `honcho-ai` SDK to 2.2.0. The plugin is copied into Hermes's
+immutable provider package; the SDK uses the sealed runtime's compatible
+dependencies. There is no activation-time pip install or mutable plugin clone.
+Honcho's server and worker still run exclusively in the official OCI image.
+The host Python files provide credential publication, a fixed-model inference
+boundary and startup/readiness glue; they do not reimplement the Honcho server.
+
+`hermes-state-setup` loads the root-generated client JSON through systemd
+`LoadCredential` and publishes root:hermes `0640` `honcho.json` in the protected
+managed home. Its original source must be a root-owned, single-link `0600`
+regular file beneath trusted no-follow ancestors, and must match the credential
+copy. The agent can read its workspace token but cannot replace the configuration
+or read signing state. No credential bytes enter Git, Nix derivations or arguments.
+
+The single-user identity is `twins`, the assistant identity is `hermes`, and the
+workspace is `personal`. Per-session conversations share the pinned user peer;
+this strategy also skips the plugin's automatic memory-file migration. There is
+no bulk historical import. Recall is hybrid, capped at 1,200 context tokens, with
+context cadence 1, dialectic cadence 5 and one low-capped reasoning pass.
+Writes and backend extraction are asynchronous: a correction may not be reflected
+in an immediate recall. Existing transcripts remain stored; forgetting a derived
+conclusion alone is not erasure of the source conversation or a backup policy.
+
+Hermes gains only IPv4 loopback API port 8000 when Honcho is selected. It still
+cannot reach PostgreSQL, the Honcho inference listeners, direct model management
+or external services. Neither its groups nor container authority change. Both
+Hermes units order initial startup after API readiness, but do not require the
+memory service to remain available for basic chat.
+
+### Activation boundary and acceptance
+
+After a reviewed, separately approved Odin rebuild, inspect only service status
+and the public health endpoint initially:
+
+```bash
+systemctl is-active honcho-credentials cosmos-honcho-egress cosmos-honcho-inference \
+  podman-honcho-api podman-honcho-worker
+curl --fail http://127.0.0.1:8000/health
+ss -ltn 'sport = :8000'
+```
+
+The listener must be IPv4 loopback-only. Do not paste credential files, container
+environment/inspect dumps or raw application logs into chat. Privileged live
+acceptance must check peer identity, authenticated requests, scope isolation,
+UID egress and restart recovery without exposing keys or existing memory.
+
+[`honcho-runtime.nix`](../../tests/honcho-runtime.nix) checks configuration and
+synthetic credential/startup/inference fixtures. The separate
+[`honcho-egress.py`](../../tests/honcho-egress.py) exercises the actual rule text
+inside a verified unprivileged user/network namespace, never on the host firewall.
+Disposable OCI/database acceptance uses only public synthetic facts; it is not
+proof that the native production units are active. The
+[Hermes check](../../tests/hermes-honcho.nix) verifies provider discovery/import,
+SDK requirements and private credential publication. The separate
+[provider fixture](../../tests/hermes-honcho-provider.py) requires an explicitly
+marked disposable home and exercises real hooks and reasoning tools, not a mock
+API. After activation, verify actual authenticated dashboard chat can learn a
+public sample preference, recall it in a new chat, apply a correction after
+extraction catches up, and retain it after an approved service restart. Check
+native-unit recovery separately; container-only restart is not that proof.
+Use a separately approved deletion scope for real memory, never test erasure by
+deleting the existing `personal` workspace. Do not paste memory or credentials
+into diagnostics.
+
+## OpenConcho memory inspection
+
+The reusable [openconcho profile](../features/agents/openconcho.nix) adds the
+published upstream OpenConcho **0.17.1** web image in rootless Podman. The image
+registry digest and Nix archive hash are pinned in
+[openconcho-image.nix](../../packages/openconcho-image.nix); activation loads the
+retained archive with `pull = "never"`. The frontend bundle is not forked.
+
+After separately approved activation, browse **http://100.94.82.252:9120/** from
+an authorized NetBird peer. nginx binds that address plus loopback for readiness;
+the firewall permits port 9120 only on `wt0`. NetBird management policy must also
+allow the intended peer. Honcho remains on `127.0.0.1:8000`, not a NetBird/public
+API listener.
+
+The browser first presents an HTTP Basic login. The username is `viewer`; its
+random password is generated once and kept in root-only
+`/var/lib/cosmos-openconcho/login.json`. Inspect that file privately on Odin with
+`sudo less /var/lib/cosmos-openconcho/login.json`, then save the password in the
+operator's password manager. Do not paste it, the file, or a Podman inspect/env
+dump into chat. The file also contains the verifier; never publish it. The helper
+preserves an existing valid login and refuses unsafe/corrupt state rather than
+silently resetting it. No shared SOPS file or existing dashboard login is changed.
+
+The preconfigured instance URL is `http://127.0.0.1:8000`; leave OpenConcho's own
+API-key field empty. Web requests use the same-origin `/api/` proxy, so this URL
+refers to nginx's local backend, not the workstation browser's localhost. nginx
+injects a private Honcho **admin JWT** server-side because stock workspace
+discovery requires admin authentication. It ignores browser-selected upstream
+headers. The JWT is not in the SPA, config.js or browser storage; the signing key
+is never mounted into the container. The browser login is a name, **not a
+read-only permission role**: normal OpenConcho mutation/management controls remain
+available. The intended usage is inspection, not enforced read-only access.
+
+A separate `openconcho` service identity (UID 991) owns its private Podman home.
+It has no database socket, signing key, GPU devices, Hermes group or container
+administrator access outside its own rootless engine. A root-only oneshot derives
+the UI token from the existing Honcho key without changing that key or Hermes's
+workspace-only credentials. systemd reads a private `container.env` and Podman
+inherits values by environment-variable name, avoiding per-unit credential mounts
+inside rootless Podman's shared mount namespace. nginx receives only the backend
+token and login hash; plaintext login passwords do not enter Podman.
+
+The UID firewall allows the local API, loopback readiness and inbound replies,
+plus the same exact marked NetBird transport exception as Hermes. Other outbound
+TCP, direct model access and database TCP are denied. The browser CSP restricts
+connections to the same origin and blocks remote image loading. nginx does not
+log requests; container errors use bounded files inside the private Podman home.
+The container root filesystem is read-only with writable temporary storage; this
+filesystem setting does not make Honcho API operations read-only.
+
+Validation includes the [flake contract](../../tests/openconcho.nix), synthetic
+[credential tests](../../tests/openconcho-credentials.py), and separate
+[real-image fixture](../../tests/openconcho-runtime.py). The latter runs as the
+unprivileged Odin operator, uses a fresh PostgreSQL database and both real OCI
+images, and checks login gating, upstream assets, browsing messages/conclusions,
+writable API proxying and UI-container restart recovery. It never uses the
+production memory database. These are not proof of post-activation browser access.
+
+After an approved rebuild, check:
+
+```bash
+systemctl is-active openconcho-credentials cosmos-openconcho-egress podman-openconcho
+curl --fail http://127.0.0.1:9120/healthz
+curl --silent --output /dev/null --write-out '%{http_code}\n' http://100.94.82.252:9120/
+ss -ltn 'sport = :9120'
+```
+
+The unauthenticated UI status must be `401`; health is public and contains no
+memory. Verify browser login and the existing `personal` workspace from Thoth
+separately. Do not test editing/deletion against real saved memory. Honcho and
+Hermes do not depend on the UI remaining available.
+
 ## Fresh local Hermes deployment
 
 [odin-hermes.nix](odin-hermes.nix) composes the reusable
@@ -879,11 +1146,33 @@ The shared upstream pin and Thoth package are unchanged.
 `cosmos-hermes-egress.service` installs an independent nftables table without
 changing the existing firewall backend. The rule covers the Hermes UID, including
 detached processes: new TCP traffic may reach only `127.0.0.1:18090` (inference)
-and `127.0.0.1:18092` (the authenticated local-owner RPC API). A separate IPv4 rule
+and `127.0.0.1:18092` (the authenticated local-owner RPC API), plus
+`127.0.0.1:8000` only when the Honcho provider is selected. A separate IPv4 rule
 permits port 9119 only when the kernel routing table identifies the destination as
 local to this host. The dashboard PTY and sidecar use that authenticated callback
 to their own dashboard listener, including its NetBird address; a remote peer on
 port 9119 is not allowed. Reply traffic is retained for inbound dashboard sessions.
+Kernel WireGuard can preserve the application socket UID on the encrypted UDP
+packet while resetting its conntrack metadata. The inner TCP reply may pass but
+its encrypted outer packet can still reach the UID reject rule, depending on
+which peer originated the UDP transport flow. A narrow exception therefore
+accepts only IPv4 UDP with NetBird's exact privileged control-plane mark
+`0x1bd00`, its declared source port (58120), physical output interface `enp4s0`,
+and a non-local destination. This does not allow unmarked UDP, data-plane marks,
+other source ports, loopback/proxy destinations or arbitrary outbound TCP.
+Hermes has neither `CAP_NET_ADMIN` nor `CAP_NET_RAW`, so it cannot set this mark.
+The mark matches the pinned NetBird default and checked live routing rule; a
+transport interface/port/mark change requires reviewing this fail-closed policy.
+No NetBird daemon configuration change is required.
+
+The separate [kernel WireGuard fixture](../../tests/hermes-wireguard-egress.py)
+runs only as the unprivileged Odin operator in verified disposable user/network
+namespaces. Point its `HERMES_TEST_RULES` at the generated policy, supply pinned
+`HERMES_TEST_NFT`/`HERMES_TEST_WG` tools and a private `HERMES_TEST_OUTPUT_DIR`.
+Green uses the actual rule; red removes only the exception. Test both server-
+and peer-originated transport flows plus rejected lookalike UDP and unrelated
+outbound TCP. Loopback-only tests cannot cover this encapsulation boundary.
+
 Native queue clients obtain a short-lived ticket over their private Unix socket,
 then connect to the fixed loopback owner API; arbitrary loopback ports remain
 denied. The policy is ordered before
