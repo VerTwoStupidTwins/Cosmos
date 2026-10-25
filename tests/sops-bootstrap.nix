@@ -45,7 +45,10 @@ let
           &&
             builtins.attrNames host.sops.secrets == (
               [ "bootstrap-validation" ]
-              ++ lib.optional (host.networking.hostName == "odin") "onepassword-service-account-token"
+              ++ lib.optionals (host.networking.hostName == "odin") [
+                "hermes-dashboard-env"
+                "onepassword-service-account-token"
+              ]
             )
         )
         [
