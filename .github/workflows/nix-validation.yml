@@ -57,6 +57,14 @@ jobs:
       - name: Validate flake outputs
         run: nix flake check --no-build --show-trace
 
+      # A warm store hides generated-source imports that fail in read-only
+      # flake checks. A fresh public Disko input exercises the cache-miss case.
+      - name: Verify Disko app read-only evaluation
+        shell: bash
+        run: |
+          nix shell --no-write-lock-file --inputs-from . nixpkgs#python3 --command \
+            python3 tests/disko-readonly.py --scratch "$TMPDIR/disko-readonly"
+
       # Hibernation must point to the encrypted LVM swap, not the empty default.
       - name: Verify Thoth hibernation resume device
         shell: bash
@@ -292,7 +300,7 @@ jobs:
             and (.llamaServer | not) and (.llamaOpenFirewall | not)
             and (.zram | not) and .lvmGroups == [] and .luks == {}
             and (.xserver | not) and (.greetd | not) and (.networkmanager | not) and (.onepassword | not)
-            and (.docker | not) and (.podman | not) and (.ollama | not) and (.frigate | not)
+            and (.docker | not) and .podman and (.ollama | not) and (.frigate | not)
             and (.sleep | not) and (.suspend | not) and (.hibernate | not)
             and (.hybridSleep | not) and (.suspendThenHibernate | not)
             and .stateVersion == "26.05"
