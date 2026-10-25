@@ -75,6 +75,20 @@ This proves host-side provisioning only when actually checked after activation.
 The local Hermes configuration, credentials and sessions are not migrated or
 changed by this bootstrap.
 
+## Interactive SOPS editing
+
+The [`sops-operator`](../features/security/sops-operator.nix) profile installs the
+operator callback and declares `SOPS_AGE_KEY_CMD` for normal login shells. After
+an approved rebuild and fresh login, `sops secrets.yaml` works from `/Cosmos`
+with the authorized, unlocked 1Password CLI. The helper automatically selects
+one accessible SSH-key item named `Cosmos SOPS Operator`; no manual key-reference
+export or private identity file is normally needed. Ambiguous discovery fails
+closed. An existing explicit reference still takes precedence, so remove stale
+manual exports when switching to automatic discovery. See
+[the shared operator workflow](odin.md#sops-secret-management-bootstrap) for
+optional overrides and secret-handling rules. This does not change the root-only
+host-key decryption used during system activation.
+
 ## Login and desktop selection
 
 The `tuigreet-login` profile runs greetd on VT1 with an explicit, store-qualified

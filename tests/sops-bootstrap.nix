@@ -25,6 +25,13 @@ let
       && !thoth.sops.age.generateKey
       && thoth.sops.gnupg.sshKeyPaths == [ ];
     operatorHelperConfigured = operatorIdentity != null;
+    workstationOperatorEnvironment =
+      (thoth.environment.variables.SOPS_AGE_KEY_CMD or "")
+      == "${operatorIdentity}/bin/cosmos-sops-identity";
+    workstationOperatorInstalled = builtins.elem (toString operatorIdentity) (
+      map toString thoth.environment.systemPackages
+    );
+    noOperatorOnOdin = !(odin.environment.variables ? SOPS_AGE_KEY_CMD);
     ageHostKey = sops != null && sops.age.sshKeyPaths == [ "/etc/ssh/ssh_host_ed25519_key" ];
     noGeneratedIdentity = sops != null && sops.age.keyFile == null && !sops.age.generateKey;
     noGpgIdentity = sops != null && sops.gnupg.sshKeyPaths == [ ];
@@ -59,9 +66,28 @@ let
   failures = builtins.attrNames (lib.filterAttrs (_: passed: !passed) checks);
   fakeOp = pkgs.writeShellScriptBin "op" ''
     set -euo pipefail
+    if test "''${1:-}" = item; then
+      test "$#" -eq 3
+      test "$2" = list
+      test "$3" = --format=json
+      case "''${OP_LIST_MODE:-unique}" in
+        empty) printf '%s\n' '[]' ;;
+        duplicate) printf '%s\n' '[{"title":"Cosmos SOPS Operator","category":"SSH_KEY","id":"fixtureitem","vault":{"id":"fixturevault"}},{"title":"Cosmos SOPS Operator","category":"SSH_KEY","id":"otheritem","vault":{"id":"fixturevault"}}]' ;;
+        malformed) printf '%s\n' 'not-json' ;;
+        error) printf '%s\n' 'private-provider-error-canary' >&2; exit 17 ;;
+        *)
+          printf '%s\n' '[{"title":"Cosmos SOPS Operator","category":"SSH_KEY","id":"fixtureitem","vault":{"id":"fixturevault"}}]'
+          test "''${OP_LIST_MODE:-unique}" != partial || exit 17
+          ;;
+      esac
+      exit 0
+    fi
     test "$#" -eq 2
     test "$1" = read
-    test "$2" = 'op://fixture/Cosmos SOPS Operator/private key?ssh-format=openssh'
+    case "$2" in
+      'op://fixture/Cosmos SOPS Operator/private key?ssh-format=openssh'|'op://fixturevault/fixtureitem/private_key?ssh-format=openssh') ;;
+      *) exit 19 ;;
+    esac
     test "''${FAIL_OP:-0}" != 1 || exit 17
     ${pkgs.coreutils}/bin/cat "$FIXTURE_SSH_KEY"
     test "''${FAIL_OP:-0}" != 2 || exit 17
@@ -126,11 +152,31 @@ pkgs.runCommand "sops-bootstrap-check"
       exit 1
     fi
     test ! -s "$TMPDIR/denied"
-    if COSMOS_SOPS_OPERATOR_KEY_REF= ${operatorIdentity}/bin/cosmos-sops-identity > "$TMPDIR/denied" 2>/dev/null; then
-      echo 'Missing reference must deny identity retrieval' >&2
+    # A normal workstation session needs no manually exported item reference.
+    env -u COSMOS_SOPS_OPERATOR_KEY_REF sops decrypt "$TMPDIR/encrypted.json" \
+      | jq -e '.marker == "public-sops-roundtrip-fixture"' >/dev/null
+    # Discovery must be unique and complete; never publish partial provider output.
+    for mode in empty duplicate malformed error partial; do
+      if env -u COSMOS_SOPS_OPERATOR_KEY_REF OP_LIST_MODE="$mode" \
+        ${operatorIdentity}/bin/cosmos-sops-identity > "$TMPDIR/denied" 2> "$TMPDIR/discovery-error"; then
+        echo 'Invalid operator discovery must fail closed' >&2
+        exit 1
+      fi
+      test ! -s "$TMPDIR/denied"
+      if grep -Eq 'AGE-SECRET-KEY-|private-provider-error-canary' "$TMPDIR/discovery-error"; then
+        echo 'Provider details must not escape discovery diagnostics' >&2
+        exit 1
+      fi
+    done
+    # An explicitly supplied reference remains supported without listing the vault.
+    OP_LIST_MODE=error sops decrypt "$TMPDIR/encrypted.json" \
+      | jq -e '.marker == "public-sops-roundtrip-fixture"' >/dev/null
+    env -u COSMOS_SOPS_OPERATOR_KEY_REF BASH_ENV="$TMPDIR/enable-xtrace" \
+      ${operatorIdentity}/bin/cosmos-sops-identity > "$TMPDIR/auto-identity" 2> "$TMPDIR/auto-trace"
+    if grep -Eq 'AGE-SECRET-KEY-|op://fixturevault/' "$TMPDIR/auto-trace"; then
+      echo 'Tracing must not expose discovered references or identities' >&2
       exit 1
     fi
-    test ! -s "$TMPDIR/denied"
     if COSMOS_SOPS_OPERATOR_KEY_REF='op://fixture/not-openssh' ${operatorIdentity}/bin/cosmos-sops-identity > "$TMPDIR/denied" 2>/dev/null; then
       echo 'Non-OpenSSH reference must be rejected' >&2
       exit 1

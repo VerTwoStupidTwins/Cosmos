@@ -404,17 +404,29 @@ access to the entire shared file. Automated configuration builds still
 run on Odin, independently of which computer edits the encrypted files.
 
 The development shell supplies pinned SOPS, age and ssh-to-age, and sets
-`SOPS_AGE_KEY_CMD` to a checked helper. That helper pipes `op read` directly
-into `ssh-to-age -private-key`, without a persistent identity file. It is not an
-SSH-agent-only operation: authorized key material enters local process memory.
-Do not invoke `cosmos-sops-identity` directly or enable shell tracing: its stdout
-is a private identity intended only for SOPS.
+`SOPS_AGE_KEY_CMD` to a checked helper. Thoth also imports the reusable
+[`sops-operator`](../features/security/sops-operator.nix) profile, which installs
+that helper and sets the callback in the normal login environment. After an
+approved rebuild and fresh login, unlock/authorize the 1Password CLI and edit:
 
-In 1Password, copy the secret reference for the operator item's **private key**
-field, not its value. Append `?ssh-format=openssh` so the CLI returns OpenSSH
-format. Keep the reference in your local shell, not in the repository. For Bash,
-replace `YOUR_VAULT` with the actual vault/reference and `/path/to/Cosmos` with
-your local checkout:
+```bash
+cd /path/to/Cosmos
+sops secrets.yaml
+```
+
+No manual item-reference export is normally needed. The helper selects exactly
+one accessible SSH-key item titled `Cosmos SOPS Operator`, derives its private-key
+reference from the vault/item IDs and reads it in OpenSSH format. Missing,
+ambiguous, malformed or failed discovery refuses to release an identity. It
+pipes `op read` into `ssh-to-age -private-key` without a persistent identity file;
+this is not an SSH-agent-only operation: authorized key material enters local
+process memory. The callback is not configured on Odin, whose unattended host-key
+decryption is unchanged. Do not invoke `cosmos-sops-identity` directly or enable
+shell tracing: its stdout is a private identity intended only for SOPS.
+
+An explicit `COSMOS_SOPS_OPERATOR_KEY_REF` remains an optional override, for
+example when several operator items are accessible. Copy a secret reference,
+not the key value, and include `?ssh-format=openssh`. For Bash:
 
 ```bash
 export COSMOS_SOPS_OPERATOR_KEY_REF='op://YOUR_VAULT/Cosmos SOPS Operator/private key?ssh-format=openssh'
@@ -422,7 +434,8 @@ cd /path/to/Cosmos
 nix develop path:. --command sops secrets.yaml
 ```
 
-For Fish, set the variable with `set -gx COSMOS_SOPS_OPERATOR_KEY_REF 'op://YOUR_VAULT/Cosmos SOPS Operator/private key?ssh-format=openssh'`.
+For Fish, use `set -gx` instead of `export`. Remove stale manual overrides to
+return to automatic discovery. Keep overrides local, not in the repository.
 Use the encrypted editor for real values; do not put them in shell arguments,
 terminal output, chat or a plaintext file under `/Cosmos`. Before committing,
 verify that the saved file contains encrypted values and SOPS metadata. A
