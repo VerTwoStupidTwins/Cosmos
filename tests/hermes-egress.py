@@ -34,6 +34,7 @@ def main():
     p.add_argument('--nft', required=True)
     p.add_argument('--ip', required=True)
     p.add_argument('--rules-file', type=Path, required=True)
+    p.add_argument('--honcho-enabled', action='store_true')
     p.add_argument('--inside', action='store_true')
     p.add_argument('--outer-network')
     args=p.parse_args()
@@ -49,11 +50,11 @@ def main():
     if len(uid_map)!=3 or uid_map[0]!='0' or uid_map[1]=='0' or uid_map[2]!='1':
         raise RuntimeError('Unexpected UID mapping; refusing firewall operations')
     subprocess.run([args.ip,'link','set','lo','up'],check=True)
-    servers=[ThreadingHTTPServer(('127.0.0.1',port),Fixture) for port in [18090,18092,9119,8081,18093]]
+    servers=[ThreadingHTTPServer(('127.0.0.1',port),Fixture) for port in [18090,18092,9119,8081,18093,18094,8000,5432]]
     for server in servers:threading.Thread(target=server.serve_forever,daemon=True).start()
-    assert all(request(port)==200 for port in [18090,18092,9119,8081,18093])
+    assert all(request(port)==200 for port in [18090,18092,9119,8081,18093,18094,8000,5432])
     rules=args.rules_file.read_text()
-    if rules.count('meta skuid "hermes"')!=4:
+    if rules.count('meta skuid "hermes"')!=5:
         raise RuntimeError('Canonical rules do not match the test mapping contract')
     # Only the UID name is replaced: namespace UID 0 maps to the unprivileged operator.
     rules=rules.replace('meta skuid "hermes"','meta skuid 0')
@@ -61,7 +62,9 @@ def main():
     assert request(18090)==200
     assert request(18092)==200,'Fixed local owner RPC was not reachable'
     assert request(9119)==200,'Same-host dashboard WebSocket transport was not reachable'
-    for forbidden in [8081,18093]:
+    if args.honcho_enabled:
+        assert request(8000)==200,'Local Honcho API was not reachable'
+    for forbidden in [8081,18093,18094,5432] + ([] if args.honcho_enabled else [8000]):
         try:
             request(forbidden)
         except (urllib.error.URLError,TimeoutError,OSError):
@@ -70,7 +73,7 @@ def main():
             denied=False
         assert denied,f'Forbidden local port {forbidden} was reachable'
     assert request(18090)==200,'Allowed inference or reply traffic was broken'
-    print(json.dumps({'private_namespace_verified':True,'baseline_all_ports_reachable':True,'inference_allowed':True,'fixed_owner_rpc_allowed':True,'same_host_dashboard_allowed':True,'direct_upstream_denied':True,'arbitrary_loopback_denied':True,'reply_traffic_allowed':True,'host_firewall_changed':False}))
+    print(json.dumps({'private_namespace_verified':True,'baseline_all_ports_reachable':True,'inference_allowed':True,'fixed_owner_rpc_allowed':True,'same_host_dashboard_allowed':True,'honcho_api_allowed':args.honcho_enabled,'database_and_memory_inference_denied':True,'direct_upstream_denied':True,'arbitrary_loopback_denied':True,'reply_traffic_allowed':True,'host_firewall_changed':False}))
     for server in servers:server.shutdown();server.server_close()
 
 

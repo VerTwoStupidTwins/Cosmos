@@ -7,6 +7,9 @@
 }:
 let
   inherit (pkgs) lib;
+  egressRules = lib.last (
+    lib.splitString " " odin.systemd.services.cosmos-hermes-egress.serviceConfig.ExecStart
+  );
   checks = {
     correctAgentSchema =
       (odin.services.hermes-agent.settings.agent.image_input_mode or "auto") == "native";
@@ -166,6 +169,13 @@ pkgs.runCommand "odin-hermes-check"
     cp ${./hermes-dashboard-bootstrap.py} fixture/tests/hermes-dashboard-bootstrap.py
     python3 fixture/tests/hermes-inference-gateway.py
     python3 fixture/tests/hermes-dashboard-bootstrap.py
+    python3 - ${lib.escapeShellArg egressRules} <<'PY'
+    import pathlib, sys
+    rules = pathlib.Path(sys.argv[1]).read_text()
+    wanted = 'meta skuid "hermes" meta nfproto ipv4 meta mark 0x1bd00 oifname "enp4s0" fib daddr type != local udp sport 58120 counter accept'
+    assert wanted in rules, 'Missing narrowly scoped kernel WireGuard transport exception'
+    assert rules.index(wanted) < rules.index('meta skuid "hermes" counter reject')
+    PY
     yq -o=json ${../secrets.yaml} | jq -e '.hermes_dashboard_env | startswith("ENC[")' >/dev/null
     mkdir -p "$out"
     printf '%s\n' '${builtins.toJSON checks}' > "$out/checks.json"

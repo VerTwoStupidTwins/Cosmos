@@ -43,6 +43,15 @@ in
               else
                 { text = value; }
             ) cfg.hermesHomeFiles
+            // lib.listToAttrs (
+              lib.imap0 (index: name: {
+                inherit name;
+                value = {
+                  credential = "home-${toString index}";
+                  trusted_source = cfg.privateHomeFiles.${name};
+                };
+              }) (builtins.attrNames cfg.privateHomeFiles)
+            )
             // {
               "config.yaml".source = toString configFiles.effective;
             };
@@ -153,6 +162,11 @@ in
             description = "Global CLI exposure (unsupported in this confined profile).";
           };
           container.enable = lib.mkEnableOption "container mode (unsupported in this native profile)";
+          privateHomeFiles = lib.mkOption {
+            type = lib.types.attrsOf lib.types.str;
+            default = { };
+            description = "Managed home filenames mapped to root-owned 0600 regular runtime sources; published through LoadCredential, never the Nix store.";
+          };
         };
       config = lib.mkMerge [
         {
@@ -320,8 +334,21 @@ in
                     ".managed"
                     "config.yaml"
                   ])
-                ) (builtins.attrNames cfg.hermesHomeFiles);
+                ) ((builtins.attrNames cfg.hermesHomeFiles) ++ (builtins.attrNames cfg.privateHomeFiles));
                 message = "hermes-local policy filenames must be single non-reserved path components.";
+              }
+              {
+                assertion =
+                  lib.intersectLists (builtins.attrNames cfg.hermesHomeFiles) (
+                    builtins.attrNames cfg.privateHomeFiles
+                  ) == [ ]
+                  && lib.all (
+                    path:
+                    lib.hasPrefix "/" path
+                    && !(lib.isStorePath path)
+                    && !(builtins.elem ".." (lib.splitString "/" path))
+                  ) (builtins.attrValues cfg.privateHomeFiles);
+                message = "hermes-local private files must have distinct names and absolute non-store runtime sources.";
               }
               {
                 assertion = lib.all (
@@ -378,7 +405,11 @@ in
                 Group = cfg.group;
                 UMask = "0077";
                 ExecStart = "${pkgs.python3}/bin/python3 ${../../../packages/hermes-state-setup.py} ${manifest}";
-                LoadCredential = lib.imap0 (index: path: "env-${toString index}:${path}") cfg.environmentFiles;
+                LoadCredential =
+                  lib.imap0 (index: path: "env-${toString index}:${path}") cfg.environmentFiles
+                  ++ lib.imap0 (index: name: "home-${toString index}:${cfg.privateHomeFiles.${name}}") (
+                    builtins.attrNames cfg.privateHomeFiles
+                  );
                 NoNewPrivileges = true;
                 ProtectSystem = "strict";
                 ProtectHome = true;
@@ -403,6 +434,10 @@ in
     };
 
   perSystem = { pkgs, ... }: {
+    checks.hermes-honcho = import ../../../tests/hermes-honcho.nix {
+      inherit pkgs;
+      odin = config.flake.nixosConfigurations.odin.config;
+    };
     checks.odin-hermes = import ../../../tests/odin-hermes.nix {
       inherit pkgs;
       odin = config.flake.nixosConfigurations.odin.config;

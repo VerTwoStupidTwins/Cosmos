@@ -3,6 +3,7 @@ import argparse
 from contextlib import contextmanager
 import errno
 import grp
+import hmac
 import json
 import os
 import pwd
@@ -144,7 +145,7 @@ def provision(parent_fd, name, *, uid, gid, files, root_uid=0):
         os.close(state)
 
 
-def read_trusted_file(path, *, root_uid=0):
+def read_trusted_file(path, *, root_uid=0, private=False):
     """Only read immutable regular inputs beneath trusted, no-follow ancestors."""
     parent, name = os.path.split(path)
     if name in ("", ".", ".."):
@@ -156,6 +157,8 @@ def read_trusted_file(path, *, root_uid=0):
             s = os.fstat(fd)
             if not stat.S_ISREG(s.st_mode) or s.st_uid != root_uid or s.st_mode & 0o022:
                 raise ValueError("untrusted input file")
+            if private and (s.st_nlink != 1 or stat.S_IMODE(s.st_mode) != 0o600):
+                raise ValueError("untrusted private input file")
             with os.fdopen(fd, "rb", closefd=False) as source:
                 return source.read()
         finally:
@@ -165,8 +168,18 @@ def read_trusted_file(path, *, root_uid=0):
 def render_files(manifest, credentials_directory, *, root_uid=0):
     files = {}
     for name, entry in manifest["files"].items():
-        files[name] = (read_trusted_file(entry["source"], root_uid=root_uid)
-                       if "source" in entry else entry["text"].encode())
+        if "credential" in entry:
+            alias = entry["credential"]
+            if not re.fullmatch(r"home-[0-9]+", alias):
+                raise ValueError("invalid private file credential")
+            original = read_trusted_file(entry["trusted_source"], root_uid=root_uid, private=True)
+            copy = read_trusted_file(credentials_directory + "/" + alias, root_uid=root_uid)
+            if not hmac.compare_digest(original, copy):
+                raise ValueError("private source changed during credential loading")
+            files[name] = copy
+        else:
+            files[name] = (read_trusted_file(entry["source"], root_uid=root_uid)
+                           if "source" in entry else entry["text"].encode())
     environment = []
     for key, value in manifest["environment"].items():
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
@@ -206,7 +219,8 @@ def main():
         return
     credentials = os.environ.get("CREDENTIALS_DIRECTORY", "")
     # These are systemd's root-managed copies, not the SOPS symlink or agent state.
-    if manifest["credential_count"] and not credentials.startswith("/run/credentials/"):
+    private_files = any("credential" in entry for entry in manifest["files"].values())
+    if (manifest["credential_count"] or private_files) and not credentials.startswith("/run/credentials/"):
         raise ValueError("missing trusted runtime credentials")
     files = render_files(manifest, credentials)
     state_parent, state_name = os.path.split(manifest["state_dir"])

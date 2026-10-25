@@ -9,6 +9,8 @@ in
       nixos.base
       nixos."bcachefs-root"
       nixos."model-tools"
+      nixos."honcho-local"
+      nixos.openconcho
       nixos."onepassword-service-account"
       nixos."llama-cpp-sycl"
       nixos."llama-cpp-instances"
@@ -36,6 +38,10 @@ in
     };
 
     services = {
+      openconcho = {
+        listenAddress = "100.94.82.252";
+        transportInterface = "enp4s0";
+      };
       fstrim.enable = true;
       smartd.enable = true;
       llama-cpp-instances = {
@@ -78,19 +84,24 @@ in
     };
 
     users.mutableUsers = true;
-    users.users.twins = {
-      isNormalUser = true;
-      createHome = true;
-      extraGroups = [
-        "wheel"
-        "render"
-      ];
-      shell = pkgs.fish;
-      # The private Cosmos Admin key stays in the client's 1Password agent.
-      openssh.authorizedKeys.keys = [
-        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMWQySUPlG4H7prC8ftuSz52jQT8v7g7pzCPhB5b7MT"
-      ];
-      # Set the sudo/console password interactively before reboot, not in Git.
+    users.users = {
+      # Preserve the allocated Honcho UID; rootless OCI units require a stable ID.
+      honcho.uid = 992;
+      openconcho.uid = 991;
+      twins = {
+        isNormalUser = true;
+        createHome = true;
+        extraGroups = [
+          "wheel"
+          "render"
+        ];
+        shell = pkgs.fish;
+        # The private Cosmos Admin key stays in the client's 1Password agent.
+        openssh.authorizedKeys.keys = [
+          "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMWQySUPlG4H7prC8ftuSz52jQT8v7g7pzCPhB5b7MT"
+        ];
+        # Set the sudo/console password interactively before reboot, not in Git.
+      };
     };
 
     system.stateVersion = "26.05";
