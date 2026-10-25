@@ -1,0 +1,102 @@
+--- a/hermes_cli/gateway_runtime_discovery.py
++++ b/hermes_cli/gateway_runtime_discovery.py
+@@ -33,11 +33,58 @@
+         return True
+ 
+ 
++def _root_managed_home(node: os.stat_result, path: Path) -> bool:
++    """Nix-only exception for a private, root-protected sticky profile home.
++
++    This never changes runtime-file ownership or same-UID socket-peer checks.
++    The private service group may create data, but cannot replace root policy.
++    """
++    if os.environ.get("HERMES_MANAGED") != "nixos" or os.getuid() == 0:
++        return False
++    try:
++        import grp
++        import pwd
++        user = pwd.getpwuid(os.getuid())
++        group = grp.getgrgid(user.pw_gid)
++        if (not stat.S_ISDIR(node.st_mode) or node.st_uid != 0
++                or node.st_gid != user.pw_gid or stat.S_IMODE(node.st_mode) != 0o3770
++                or path.absolute() != path.resolve() or _may_have_access_acl(path)):
++            return False
++        if (group.gr_name != user.pw_name or set(group.gr_mem) - {user.pw_name}
++                or {p.pw_uid for p in pwd.getpwall() if p.pw_gid == user.pw_gid} != {user.pw_uid}):
++            return False
++        # Validate top-down: every already-checked prefix is root controlled,
++        # so the service cannot rename the next directory during this walk.
++        for ancestor in reversed(path.parents):
++            info = ancestor.lstat()
++            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0
++                    or info.st_mode & 0o022 or _may_have_access_acl(ancestor)):
++                return False
++        if path.parent.lstat().st_gid != user.pw_gid:
++            return False
++        actual = path.lstat()
++        if (actual.st_dev, actual.st_ino) != (node.st_dev, node.st_ino):
++            return False
++        marker = path / ".managed"
++        info = marker.lstat()
++        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_gid != user.pw_gid
++                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o640
++                or _may_have_access_acl(marker)):
++            return False
++        # The validated root-owned marker cannot be swapped in the sticky home.
++        with marker.open("rb") as stream:
++            return stream.read(17) == b"nixos\n"
++    except (ImportError, KeyError, OSError, ValueError):
++        return False
++
++
+ def home_mode_unsafe(node: os.stat_result, path: Path) -> bool:
+     """The profile home keeps the operator's mode (main's home policy: symlinked homes,
+     HERMES_HOME_MODE 0701/0750). Only write by another user lets them swap the socket; read/search
+     bits grant nothing against our 0600 socket, and group-write is harmless when the group is the
+     owner's private group (the umask-002 user-private-group default). What we create stays 0700."""
++    if _root_managed_home(node, path):
++        return False
+     mode = stat.S_IMODE(node.st_mode)
+     if mode & 0o002:
+         return True
+@@ -63,7 +110,8 @@
+ def _private_node(path: Path, *, kind: str, home: bool = False) -> os.stat_result:
+     node = path.lstat()
+     predicates = {"socket": stat.S_ISSOCK, "file": stat.S_ISREG, "directory": stat.S_ISDIR}
+-    if not predicates[kind](node.st_mode) or node.st_uid != os.getuid():  # windows-footgun: ok — POSIX socket path only
++    if (not predicates[kind](node.st_mode) or (node.st_uid != os.getuid()
++            and not (home and _root_managed_home(node, path)))):  # windows-footgun: ok — POSIX socket path only
+         raise DiscoveryError("unsafe_control_path")
+     if home_mode_unsafe(node, path) if home else stat.S_IMODE(node.st_mode) & 0o077:
+         raise DiscoveryError("unsafe_control_permissions")
+--- a/gateway/run_runtime.py
++++ b/gateway/run_runtime.py
+@@ -363,9 +363,10 @@
+ 
+ 
+ async def start_gateway_runtime_api(runner):
++    import os
+     from gateway.run_api import start_gateway_api
+     from gateway.session_authorities import owner_scope
+-    runner.session_api = await start_gateway_api(runner)
++    runner.session_api = await start_gateway_api(runner, port=int(os.environ.get("HERMES_LOCAL_OWNER_PORT", "0")))
+     runner.session_runtime_descriptor['api_origin'] = runner.session_api.api_origin
+     from gateway.session_bot import recover_bot_deliveries
+     for authority in _authorities(runner):
+--- a/gateway/control_socket.py
++++ b/gateway/control_socket.py
+@@ -345,11 +345,12 @@
+         if os.name == "nt":
+             return None
+         try:
+-            from hermes_cli.gateway_runtime_discovery import home_mode_unsafe, socket_peer_uid
++            from hermes_cli.gateway_runtime_discovery import home_mode_unsafe, socket_peer_uid, _root_managed_home
+             home = self._home
+             info = home.lstat()
+             if (home.absolute() != home.resolve() or not stat.S_ISDIR(info.st_mode)
+-                    or info.st_uid != os.getuid() or home_mode_unsafe(info, home)):  # windows-footgun: ok — POSIX-only helper
++                    or (info.st_uid != os.getuid() and not _root_managed_home(info, home))
++                    or home_mode_unsafe(info, home)):  # windows-footgun: ok — POSIX-only helper
+                 return None
+             uid = socket_peer_uid(writer.get_extra_info("socket"))
+             return f"uid:{uid}" if uid == os.getuid() else None  # windows-footgun: ok — POSIX-only helper

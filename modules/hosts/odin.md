@@ -820,3 +820,149 @@ SSH authorization remains separate work.
 
 Routine approved updates use `sudo nixos-rebuild switch --flake path:/Cosmos#odin`.
 Never run Disko formatting for routine updates.
+
+## Fresh local Hermes deployment
+
+[odin-hermes.nix](odin-hermes.nix) composes the reusable
+[hermes-local](../features/agents/hermes-local.nix) profile. This is a fresh
+service account and state tree, not an import of Thoth's Hermes installation.
+Evaluation, package builds and fixture tests are not proof of live deployment.
+
+### Identity, network and credentials
+
+The native `hermes-agent` gateway owns durable dispatch; `hermes-backend` serves
+an authenticated dashboard on port 9119, bound to the IPv4 address of `wt0`.
+The firewall opens that port only on `wt0`. NetBird management-plane policy must
+also permit the intended operator peers. No public listener, external OAuth
+provider, cloud model credential or automatic GPT fallback is configured.
+
+The `hermes` account has journal-reading membership but no wheel, container-engine
+administration, root SSH or Nix-daemon access. Odin's Nix allowed-users are root
+and wheel operators: a privileged network-enabled builder must not become the
+agent's egress proxy. Personal homes, the user-manager bus, system bus, resolver/NSS
+and Nix-daemon sockets are hidden from both services. Lingering is disabled and a
+`user@.service` guard denies this account a separate user manager. Native Kanban
+contacts its profile owner directly; it does not need a user-bus mount. Writable
+data and proposals live under `/var/lib/hermes`; the checkout remains read-only.
+
+The state parent is root-owned `0750`; `.hermes` is root:hermes `3770` (sticky,
+setgid, private-group writable). Root-owned policy/credential files cannot be
+replaced by the agent, while its data directories and new runtime files remain
+writable. A dedicated root oneshot runs with the private service group and only
+`CAP_CHOWN`, `CAP_FOWNER` and `CAP_DAC_OVERRIDE`. It never forks or switches UID/GID.
+Each consumer's `ExecStartPre` runs `--prepare-data` as the service user inside that
+consumer's full sandbox, preparing `logs/curator` without credentials or policy
+publication. Root does not enter this nested mutable log directory.
+
+Root provisioning uses anchored no-follow descriptors and atomic publication, and
+checks actual owner/group/mode after changing privileged directory metadata. It
+rejects hostile symlinks/hardlinks instead of recursively chowning agent-controlled
+trees, and fails if Linux silently strips a required mode bit. It preserves
+existing data. The Odin-only package patch
+accepts this exact managed-home shape with trusted ancestry and a private group;
+it retains same-UID socket ownership and kernel peer-credential authentication.
+The shared upstream pin and Thoth package are unchanged.
+
+`cosmos-hermes-egress.service` installs an independent nftables table without
+changing the existing firewall backend. The rule covers the Hermes UID, including
+detached processes: new TCP traffic may reach only `127.0.0.1:18090` (inference)
+and `127.0.0.1:18092` (the authenticated local-owner RPC API). A separate IPv4 rule
+permits port 9119 only when the kernel routing table identifies the destination as
+local to this host. The dashboard PTY and sidecar use that authenticated callback
+to their own dashboard listener, including its NetBird address; a remote peer on
+port 9119 is not allowed. Reply traffic is retained for inbound dashboard sessions.
+Native queue clients obtain a short-lived ticket over their private Unix socket,
+then connect to the fixed loopback owner API; arbitrary loopback ports remain
+denied. The policy is ordered before
+network setup and required by both Hermes services. Stopping its controller does
+not remove the table; when retiring this feature, stop every same-UID worker
+before separately removing `inet cosmos_hermes`. Do not flush the host ruleset.
+
+`cosmos-hermes-inference.service` exposes only the selected Gemma model and chat
+inference. It rejects management/passthrough routes, alternate models, remote/file
+image URLs and unbounded generation. It forwards inline images and streaming,
+pins the agreed sampling, and does not log request bodies. Hermes cannot directly
+reach llama-swap's management API. This is a narrow interface, not a general HTTP
+proxy. Backend unavailability must fail locally, never switch to a cloud model.
+
+The single shared `secrets.yaml` contains encrypted `hermes_dashboard_env`.
+Only Odin receives its root-only runtime file. `hermes-state-setup` receives a
+systemd `LoadCredential` copy after SOPS provisioning, then atomically publishes
+root:hermes application policy and environment files; the agent never reads the
+SOPS directory or its host decryption identity.
+The raw dashboard password is stored in the operator's 1Password login named
+`Odin Hermes Dashboard`, in `Cosmos Runtime`, not in the repository or Nix store.
+There is no static dashboard session-token file. Changing a password does not
+revoke already signed Basic-auth sessions; rotate the signing secret to do that.
+
+The operator-only [credential bootstrap](../../packages/hermes-dashboard-bootstrap.py)
+uses the authorized SOPS callback on an editing client, passes values over stdin,
+and verifies the 1Password item and decrypted target privately. It refuses an
+implicit rotation when the SOPS entry already exists. Never invoke it as Hermes,
+print the identity callback, or put a password/hash/signing key in shell arguments.
+
+### Durable task workflow
+
+The gateway owns Kanban dispatch with one in-progress task and an explicit
+`default` assignee allowlist. `HERMES_HOME` and `HERMES_KANBAN_HOME` refer to the
+same fresh state tree. Automatic decomposition and review dispatch are disabled;
+local memory and skill updates do not need repeated interactive approval.
+Shell approval prompts are disabled only for this constrained service account.
+This grants no host-administration rights or GPT-handoff authorization.
+
+Use the dashboard's Kanban task interface, or ask the chat agent to enqueue the
+work and report its task ID. A browser chat/PTY or a background subagent alone is
+not the durable-work contract. A task needing additional authority must save its
+partial result and enter Blocked with an actionable reason, not leave a live
+approval dialog waiting to expire. Current configuration does not implement a
+privileged-action broker or approved GPT handoff path.
+
+For an operator CLI task, run the built Hermes binary as the service user with
+both state variables pinned. Example Bash, after separately approved activation:
+
+```bash
+hermes_bin=$(systemctl show --value --property=ExecStart hermes-agent.service)
+hermes_bin=${hermes_bin#*path=}
+hermes_bin=${hermes_bin%% ;*}
+case "$hermes_bin" in
+  /nix/store/*/bin/hermes) ;;
+  *) printf '%s\n' 'Unexpected Hermes executable; inspect the unit.' >&2; exit 1 ;;
+esac
+sudo -u hermes env \
+  HERMES_MANAGED=nixos \
+  HERMES_HOME=/var/lib/hermes/.hermes \
+  HERMES_KANBAN_HOME=/var/lib/hermes/.hermes \
+  "$hermes_bin" kanban create \
+  'Inspect the local workspace and save findings' \
+  --assignee default --workspace dir:/var/lib/hermes/workspace \
+  --completion-contract local-only --max-runtime 30m --json
+```
+
+The service package is deliberately not installed globally and does not export
+`HERMES_HOME` into the operator's shell. The example discovers its store binary
+from the active unit; do not use another user's profile or runtime. This is only
+an operator queue-submission command: do not launch interactive agents, workers,
+`dispatch` or `daemon` this way outside the system service sandbox.
+
+### Activation and acceptance
+
+After reviewing and validating the matching checkout, approved activation uses
+the normal Odin rebuild command above. Then verify:
+
+- Both Hermes units, the UID policy and inference gateway are active.
+- Unauthenticated dashboard requests are gated; the Basic provider is available,
+  and password login works from an intended NetBird peer. No LAN listener exists.
+- A real Hermes request reaches Gemma through the narrow interface, including a
+  tool round-trip and an uploaded image; a local outage does not route externally.
+- The service UID cannot reach the direct model API, public network, operator
+  home, private keys, SOPS runtime credentials or the Nix daemon.
+- A queued task continues after closing the browser. Test worker/gateway restart
+  recovery, saved results and a persistent Blocked task without repeating actions.
+
+The flake check validates configuration and synthetic HTTP/hash fixtures. The
+[namespace test](../../tests/hermes-egress.py) checks the generated packet policy
+inside a disposable unprivileged user/network namespace; it never changes the
+host firewall. These do not replace the post-activation checks above.
+
+Notifications, off-host backups, remote-host collectors and privileged actions
+remain separate rollout steps. A local state directory is not an off-host backup.
