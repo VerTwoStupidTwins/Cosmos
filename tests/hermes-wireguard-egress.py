@@ -4,7 +4,8 @@
 Set HERMES_TEST_NFT, HERMES_TEST_WG, HERMES_TEST_RULES and
 HERMES_TEST_OUTPUT_DIR to pinned tools, generated rules and private scratch.
 Green tests the actual generated policy; red removes only its marked transport
-exception. Peer-origin control checks both conntrack directions. No production
+exception. Select IPv4 or IPv6 outer transport with --transport-family.
+Peer-origin control checks both conntrack directions. No production
 network or service mutations; ephemeral private keys are removed on exit.
 """
 import argparse
@@ -28,7 +29,7 @@ WG = os.environ['HERMES_TEST_WG']
 UNSHARE = '/run/current-system/sw/bin/unshare'
 RULES = Path(os.environ['HERMES_TEST_RULES'])
 ROOT = Path(os.environ['HERMES_TEST_OUTPUT_DIR'])
-CANDIDATE = ('meta skuid "hermes" meta nfproto ipv4 meta mark 0x1bd00 '
+CANDIDATE = ('meta skuid "hermes" meta mark 0x1bd00 '
              'oifname "enp4s0" fib daddr type != local udp sport 58120 counter accept')
 FIXTURE_CANDIDATE = CANDIDATE.replace('meta skuid "hermes"', 'meta skuid 0').replace('"enp4s0"', '"fixture-out"')
 
@@ -96,10 +97,11 @@ def peer(args):
                 run(IP, 'link', 'set', 'lo', 'up')
                 run(IP, 'address', 'add', '192.0.2.2/30', 'dev', 'fixture-peer')
                 run(IP, 'link', 'set', 'fixture-peer', 'up')
+                run(IP, '-6', 'address', 'add', '2001:db8::2/64', 'dev', 'fixture-peer', 'nodad')
                 run(IP, 'link', 'add', 'wg-peer', 'type', 'wireguard')
                 run(WG, 'set', 'wg-peer', 'private-key', msg['key_file'], 'listen-port', '58120',
                     'fwmark', '0x1bd00', 'peer', msg['public_key'], 'allowed-ips', '10.77.0.1/32',
-                    'endpoint', '192.0.2.1:58120')
+                    'endpoint', '[2001:db8::1]:58120' if args.transport_family == 'ipv6' else '192.0.2.1:58120')
                 run(IP, 'address', 'add', '10.77.0.2/24', 'dev', 'wg-peer')
                 run(IP, 'link', 'set', 'wg-peer', 'up')
                 servers = [serve(('192.0.2.2', p)) for p in (18090, 9119)] + [serve(('10.77.0.2', 9119))]
@@ -145,12 +147,17 @@ def controller(args):
     assert original.count(CANDIDATE) == 1, 'Expected exact protected transport exception'
     tested = original.replace(CANDIDATE, '') if args.mode == 'red' else original
     rules = tested.replace(CANDIDATE, FIXTURE_CANDIDATE).replace('meta skuid "hermes"', 'meta skuid 0')
+    if args.mode == 'ipv4-only':
+        assert args.transport_family == 'ipv6', 'Legacy control requires IPv6 transport'
+        rules = rules.replace(FIXTURE_CANDIDATE, FIXTURE_CANDIDATE.replace(
+            'meta mark', 'meta nfproto ipv4 meta mark'))
     child = None
     server = None
     local_servers = []
     channel = None
     result = {'canonical_rules': str(RULES), 'canonical_sha256': hashlib.sha256(original.encode()).hexdigest(),
               'canonical_uid_matches_mapped': 10, 'namespace': checks, 'mode': args.mode,
+              'transport_family': args.transport_family,
               'kernel_wireguard': True, 'host_firewall_changed': False}
     with tempfile.TemporaryDirectory(prefix='keys-', dir=ROOT) as keys:
         os.chmod(keys, 0o700)
@@ -169,7 +176,8 @@ def controller(args):
             a.settimeout(12)
             child = subprocess.Popen([UNSHARE, '--net', PY, __file__, '--peer', '--fd', str(b.fileno()),
                 '--host-uid', str(args.host_uid), '--host-user', args.host_user, '--host-net', args.host_net,
-                '--parent-user', ns('user'), '--parent-net', ns('net')], pass_fds=(b.fileno(),),
+                '--parent-user', ns('user'), '--parent-net', ns('net'),
+                '--transport-family', args.transport_family], pass_fds=(b.fileno(),),
                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
             b.close()
             channel = a.makefile('rw')
@@ -190,10 +198,11 @@ def controller(args):
             run(IP, 'link', 'set', 'fixture-peer', 'netns', str(child.pid))
             run(IP, 'address', 'add', '192.0.2.1/30', 'dev', 'fixture-out')
             run(IP, 'link', 'set', 'fixture-out', 'up')
+            run(IP, '-6', 'address', 'add', '2001:db8::1/64', 'dev', 'fixture-out', 'nodad')
             run(IP, 'link', 'add', 'wg-server', 'type', 'wireguard')
             run(WG, 'set', 'wg-server', 'private-key', key_paths[0], 'listen-port', '58120',
                 'fwmark', '0x1bd00', 'peer', public_keys[1], 'allowed-ips', '10.77.0.2/32',
-                'endpoint', '192.0.2.2:58120')
+                'endpoint', '[2001:db8::2]:58120' if args.transport_family == 'ipv6' else '192.0.2.2:58120')
             run(IP, 'address', 'add', '10.77.0.1/24', 'dev', 'wg-server')
             run(IP, 'link', 'set', 'wg-server', 'up')
             rpc({'op': 'configure', 'key_file': key_paths[1], 'public_key': public_keys[0]})
@@ -275,7 +284,7 @@ def controller(args):
             if args.transport_origin == 'server':
                 assert result['observations']['marked_outer_uid_ct_original'] > 0
                 assert result['observations']['marked_outer_uid_ct_reply'] == 0
-                if args.mode == 'red':
+                if args.mode in ('red', 'ipv4-only'):
                     assert result['canonical_reject_packets'] > 0
                 else:
                     assert result['candidate_accept_packets'] > 0
@@ -285,6 +294,7 @@ def controller(args):
             run(IP, 'link', 'add', 'fixture-wrong', 'type', 'dummy')
             run(IP, 'link', 'set', 'fixture-wrong', 'up')
             run(IP, 'route', 'add', '198.51.100.2/32', 'dev', 'fixture-wrong', 'src', '192.0.2.1')
+            run(IP, '-6', 'route', 'add', '2001:db8:1::2/128', 'dev', 'fixture-wrong')
             negatives = {
                 'unmarked_source_58120': udp_probe(58120),
                 'ordinary_unmarked_udp': udp_probe(58121),
@@ -293,6 +303,10 @@ def controller(args):
                 'exact_mark_wrong_interface': udp_probe(58120, 0x1bd00, '198.51.100.2'),
                 'exact_mark_local_destination': udp_probe(58120, 0x1bd00, '127.0.0.1'),
                 'exact_mark_ipv6_loopback': udp_probe(58120, 0x1bd00, '::1', socket.AF_INET6),
+                'ipv6_unmarked_source_58120': udp_probe(58120, 0, '2001:db8::2', socket.AF_INET6),
+                'ipv6_wrong_source_port': udp_probe(58121, 0x1bd00, '2001:db8::2', socket.AF_INET6),
+                'ipv6_dataplane_mark': udp_probe(58120, 0x1bd10, '2001:db8::2', socket.AF_INET6),
+                'ipv6_wrong_interface': udp_probe(58120, 0x1bd00, '2001:db8:1::2', socket.AF_INET6),
             }
             assert all(v['blocked'] and v['errno'] == 1 and v['stage'] == 'sendto'
                 for v in negatives.values()), negatives
@@ -336,8 +350,9 @@ def main():
     p.add_argument('--host-net')
     p.add_argument('--parent-user')
     p.add_argument('--parent-net')
-    p.add_argument('--mode', choices=['red', 'green'], default='red')
+    p.add_argument('--mode', choices=['red', 'green', 'ipv4-only'], default='red')
     p.add_argument('--transport-origin', choices=['server', 'peer'], default='server')
+    p.add_argument('--transport-family', choices=['ipv4', 'ipv6'], default='ipv4')
     args = p.parse_args()
     if args.peer:
         peer(args); return 0
@@ -348,6 +363,7 @@ def main():
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     return subprocess.call([UNSHARE, '--user', '--map-root-user', '--map-auto', '--net', PY, __file__, '--inside',
         '--mode', args.mode, '--transport-origin', args.transport_origin,
+        '--transport-family', args.transport_family,
         '--host-uid', str(os.geteuid()), '--host-user', ns('user'), '--host-net', ns('net')])
 
 

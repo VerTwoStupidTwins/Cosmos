@@ -9,6 +9,9 @@ let
   inherit (pkgs) lib;
   container = odin.virtualisation.oci-containers.containers.openconcho or { };
   unit = odin.systemd.services.podman-openconcho or { };
+  egressRules = lib.last (
+    lib.splitString " " odin.systemd.services.cosmos-openconcho-egress.serviceConfig.ExecStart
+  );
   checks = {
     pinnedRootlessImage =
       (container.podman.user or "") == "openconcho"
@@ -59,6 +62,13 @@ pkgs.runCommand "openconcho-check"
     export PYTHONDONTWRITEBYTECODE=1
     python ${./openconcho-credentials.py} ${../packages/openconcho-credentials.py} ${../packages/honcho-credentials.py} ${pkgs.apacheHttpd}/bin/htpasswd
     ${pkgs.runtimeShell} -n ${../packages/openconcho-start.sh}
+    python - ${lib.escapeShellArg egressRules} <<'PY'
+    import pathlib, sys
+    rules = pathlib.Path(sys.argv[1]).read_text()
+    wanted = 'meta skuid "openconcho" meta mark 0x1bd00 oifname "enp4s0" fib daddr type != local udp sport 58120 counter accept'
+    assert wanted in rules, 'Missing dual-stack kernel WireGuard transport exception'
+    assert rules.index(wanted) < rules.index('meta skuid "openconcho" counter reject')
+    PY
     mkdir "$out"
     printf '%s\n' 'OpenConcho rootless configuration and private credentials passed' > "$out/result"
   ''
