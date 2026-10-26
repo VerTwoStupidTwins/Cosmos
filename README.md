@@ -86,7 +86,7 @@ When adding hosts, audit shared-profile assumptions: `base` enables SSH/NetBird 
 
 Follow [AGENTS.md](AGENTS.md) for branch, approval, and validation requirements. Never make changes directly on `main`. Use focused topic branches from freshly fetched `origin/main` and review diffs before committing.
 
-[GitHub Actions](.github/workflows/nix-validation.yml) runs for pull requests, pushes to `main`, and manual dispatch. It discovers all NixOS hosts, evaluates their derivations, checks flake outputs, verifies Thoth's resume/power/NetBird settings, Argus's headless NVR/storage baseline, and Odin's headless base/storage layout, and enforces Statix, Deadnix, and Nixfmt. CI is not a full system build, boot test, or deployment.
+[GitHub Actions](.github/workflows/nix-validation.yml) runs for pull requests, pushes to `main`, and manual dispatch. It discovers all NixOS hosts, evaluates their derivations, checks flake outputs, builds every declared flake regression check, verifies Thoth's resume/power/NetBird settings, Argus's headless NVR/storage baseline, and Odin's headless base/storage layout, and enforces Statix, Deadnix, and Nixfmt. The llama.cpp and llama-swap checks also run their systemd unit-verification commands outside the build sandbox. CI is not a full system build, boot test, or deployment.
 
 Use the pinned tools with `nix develop`. Nix evaluation and development-shell commands can download dependencies and write to the Nix store; they are not strictly read-only. Documentation-only changes need documentation checks, not a NixOS rebuild.
 
