@@ -1195,7 +1195,7 @@ Kernel WireGuard can preserve the application socket UID on the encrypted UDP
 packet while resetting its conntrack metadata. The inner TCP reply may pass but
 its encrypted outer packet can still reach the UID reject rule, depending on
 which peer originated the UDP transport flow. A narrow exception therefore
-accepts only IPv4 UDP with NetBird's exact privileged control-plane mark
+accepts only IPv4/IPv6 UDP with NetBird's exact privileged control-plane mark
 `0x1bd00`, its declared source port (58120), physical output interface `enp4s0`,
 and a non-local destination. This does not allow unmarked UDP, data-plane marks,
 other source ports or loopback/proxy destinations. Public TCP 443 is permitted
@@ -1203,14 +1203,18 @@ by the separate application rule described above.
 Hermes has neither `CAP_NET_ADMIN` nor `CAP_NET_RAW`, so it cannot set this mark.
 The mark matches the pinned NetBird default and checked live routing rule; a
 transport interface/port/mark change requires reviewing this fail-closed policy.
+The outer transport can be IPv6 even when the dashboard URL uses IPv4.
+Local NetBird proxy endpoints (`127.0.1.1`) remain excluded by this exception;
+relay/proxy paths require separate validation and policy review.
 No NetBird daemon configuration change is required.
 
 The separate [kernel WireGuard fixture](../../tests/hermes-wireguard-egress.py)
 runs only as the unprivileged Odin operator in verified disposable user/network
 namespaces. Point its `HERMES_TEST_RULES` at the generated policy, supply pinned
 `HERMES_TEST_NFT`/`HERMES_TEST_WG` tools and a private `HERMES_TEST_OUTPUT_DIR`.
-Green uses the actual rule; red removes only the exception. Test both server-
-and peer-originated transport flows plus rejected lookalike UDP and unrelated
+Green uses the actual rule; red removes only the exception. Test both
+`--transport-family ipv4` and `--transport-family ipv6`, each with server- and
+peer-originated transport flows, plus rejected lookalike UDP and unrelated
 outbound TCP. Loopback-only tests cannot cover this encapsulation boundary.
 
 Native queue clients obtain a short-lived ticket over their private Unix socket,

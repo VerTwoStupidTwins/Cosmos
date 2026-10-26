@@ -185,7 +185,7 @@ pkgs.runCommand "odin-hermes-check"
     python3 - ${lib.escapeShellArg egressRules} <<'PY'
     import pathlib, sys
     rules = pathlib.Path(sys.argv[1]).read_text()
-    wanted = 'meta skuid "hermes" meta nfproto ipv4 meta mark 0x1bd00 oifname "enp4s0" fib daddr type != local udp sport 58120 counter accept'
+    wanted = 'meta skuid "hermes" meta mark 0x1bd00 oifname "enp4s0" fib daddr type != local udp sport 58120 counter accept'
     assert wanted in rules, 'Missing narrowly scoped kernel WireGuard transport exception'
     assert rules.index(wanted) < rules.index('meta skuid "hermes" counter reject')
     PY

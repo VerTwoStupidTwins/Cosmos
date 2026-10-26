@@ -24,7 +24,7 @@
             type filter hook output priority -5; policy accept;
             meta skuid "openconcho" ct direction reply ct state established,related accept
             # Same kernel WireGuard socket-UID handling as the Hermes dashboard.
-            meta skuid "openconcho" meta nfproto ipv4 meta mark 0x1bd00 oifname "${cfg.transportInterface}" fib daddr type != local udp sport ${
+            meta skuid "openconcho" meta mark 0x1bd00 oifname "${cfg.transportInterface}" fib daddr type != local udp sport ${
               toString config.services.netbird.clients.${cfg.interfaceName}.port
             } counter accept
             meta skuid "openconcho" ip daddr 127.0.0.1 tcp dport { 8000, ${toString cfg.port} } accept
