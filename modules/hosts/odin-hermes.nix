@@ -36,19 +36,12 @@ in
         }
       '';
       hardening = {
-        # Hide personal homes and the user manager. Native Kanban dispatch
-        # uses its profile owner; it does not need the systemd user bus.
-        ProtectHome = lib.mkForce "tmpfs";
-        PrivateDevices = true;
+        # Host-specific additions to hermes-local's shared process sandbox.
         ProtectKernelTunables = true;
         ProtectKernelModules = true;
         ProtectControlGroups = true;
         ProtectClock = true;
-        RestrictSUIDSGID = true;
-        RestrictNamespaces = true;
         LockPersonality = true;
-        CapabilityBoundingSet = "";
-        AmbientCapabilities = "";
         InaccessiblePaths = [
           "/run/secrets"
           "/etc/ssh"
@@ -116,22 +109,14 @@ in
           after = [ "local-fs.target" ];
           conflicts = [ "shutdown.target" ];
           unitConfig.DefaultDependencies = false;
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-            ExecStart = "${pkgs.nftables}/bin/nft --file ${egressRules}";
-            # Deliberately no ExecStop: stopping the controller must not release
-            # surviving same-UID workers onto the network.
-            NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            PrivateTmp = true;
-            CapabilityBoundingSet = "CAP_NET_ADMIN";
-            RestrictAddressFamilies = [
-              "AF_UNIX"
-              "AF_NETLINK"
-            ];
-          };
+          serviceConfig =
+            (import ../../packages/agent-egress-service.nix {
+              inherit pkgs;
+              rules = egressRules;
+            })
+            // {
+              PrivateTmp = true;
+            };
         };
         cosmos-hermes-inference = {
           description = "Inference-only local model interface for Hermes";
@@ -155,28 +140,17 @@ in
             TasksMax = 32;
           };
         };
-        hermes-agent = {
-          requires = [
-            "cosmos-hermes-egress.service"
-            "cosmos-hermes-inference.service"
-          ];
-          after = [
-            "cosmos-hermes-egress.service"
-            "cosmos-hermes-inference.service"
-          ];
-          serviceConfig = hardening;
-        };
-        hermes-backend = {
-          requires = [
-            "cosmos-hermes-egress.service"
-            "cosmos-hermes-inference.service"
-          ];
-          after = [
-            "cosmos-hermes-egress.service"
-            "cosmos-hermes-inference.service"
-          ];
-          serviceConfig = hardening;
-        };
-      };
+      }
+      // lib.genAttrs [ "hermes-agent" "hermes-backend" ] (_: {
+        requires = [
+          "cosmos-hermes-egress.service"
+          "cosmos-hermes-inference.service"
+        ];
+        after = [
+          "cosmos-hermes-egress.service"
+          "cosmos-hermes-inference.service"
+        ];
+        serviceConfig = hardening;
+      });
     };
 }

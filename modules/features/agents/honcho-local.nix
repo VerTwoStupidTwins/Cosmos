@@ -8,12 +8,7 @@
       pkgs,
       ...
     }:
-    let
-      honchoImage = pkgs.callPackage ../../../packages/honcho-image.nix { };
-    in
     {
-      # Keep the verified archive with the system; no activation-time pull.
-      system.extraDependencies = [ honchoImage ];
       services.postgresql = {
         enable = true;
         package = pkgs.postgresql_17;

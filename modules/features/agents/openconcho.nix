@@ -68,7 +68,7 @@
         virtualisation.oci-containers = {
           backend = "podman";
           containers.openconcho = {
-            image = "ghcr.io/offendingcommit/openconcho-web:0.17.1";
+            image = "${image.imageName}:${image.imageTag}";
             imageFile = image;
             pull = "never";
             podman.user = "openconcho";
@@ -123,18 +123,9 @@
             description = "Keep OpenConcho networking on the local Honcho API and NetBird replies";
             after = [ "users-groups.service" ];
             before = [ "podman-openconcho.service" ];
-            serviceConfig = {
-              Type = "oneshot";
-              RemainAfterExit = true;
-              ExecStart = "${pkgs.nftables}/bin/nft -f ${egress}";
-              NoNewPrivileges = true;
-              ProtectSystem = "strict";
-              ProtectHome = true;
-              CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
-              RestrictAddressFamilies = [
-                "AF_NETLINK"
-                "AF_UNIX"
-              ];
+            serviceConfig = import ../../../packages/agent-egress-service.nix {
+              inherit pkgs;
+              rules = egress;
             };
           };
           podman-openconcho = {

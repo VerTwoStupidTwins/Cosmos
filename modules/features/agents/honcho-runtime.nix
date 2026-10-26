@@ -66,7 +66,7 @@ _: {
         NO_PROXY = "127.0.0.1,localhost";
       };
       common = name: {
-        image = "ghcr.io/plastic-labs/honcho:3.4.0";
+        image = "${image.imageName}:${image.imageTag}";
         imageFile = image;
         pull = "never";
         podman.user = "honcho";
@@ -147,6 +147,8 @@ _: {
       };
     in
     {
+      # Retain the same archive used by both containers; never pull on activation.
+      system.extraDependencies = [ image ];
       virtualisation.oci-containers = {
         backend = "podman";
         containers = {
@@ -183,18 +185,9 @@ _: {
             "podman-honcho-api.service"
             "podman-honcho-worker.service"
           ];
-          serviceConfig = {
-            Type = "oneshot";
-            RemainAfterExit = true;
-            ExecStart = "${pkgs.nftables}/bin/nft -f ${egress}";
-            NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            CapabilityBoundingSet = [ "CAP_NET_ADMIN" ];
-            RestrictAddressFamilies = [
-              "AF_NETLINK"
-              "AF_UNIX"
-            ];
+          serviceConfig = import ../../../packages/agent-egress-service.nix {
+            inherit pkgs;
+            rules = egress;
           };
         };
         cosmos-honcho-inference = {
