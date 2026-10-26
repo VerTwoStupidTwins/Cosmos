@@ -43,6 +43,7 @@
       telegram-desktop
       firefox
       emacs
+      codex
       libreoffice
       evince
       imv
