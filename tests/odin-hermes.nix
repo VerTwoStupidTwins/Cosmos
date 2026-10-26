@@ -27,6 +27,8 @@ let
           "tui"
           "api_server"
           "cron"
+          "telegram"
+          "discord"
         ];
     singleDurableWorker = (odin.services.hermes-agent.settings.kanban.max_in_progress or 0) == 1;
     enabledOnOdin = odin.services.hermes-agent.enable or false;
@@ -44,6 +46,17 @@ let
     noGlobalProfile = !(odin.services.hermes-agent.addToSystemPackages or true);
     localEndpoint = odin.services.hermes-agent.settings.model.base_url == "http://127.0.0.1:18090/v1";
     noFallback = odin.services.hermes-agent.settings.fallback_providers == [ ];
+    explicitMessaging =
+      odin.services.hermes-agent.settings.platforms.telegram.enabled
+      && odin.services.hermes-agent.settings.platforms.discord.enabled
+      && odin.services.hermes-agent.settings.unauthorized_dm_behavior == "ignore"
+      && odin.services.hermes-agent.environment.GATEWAY_ALLOW_ALL_USERS == "false"
+      && odin.services.hermes-agent.environment.TELEGRAM_ALLOW_ALL_USERS == "false"
+      && odin.services.hermes-agent.environment.DISCORD_ALLOW_ALL_USERS == "false";
+    noImplicitVoiceUpload = !odin.services.hermes-agent.settings.stt.enabled;
+    dnsStubConfigurationVisible =
+      !(builtins.elem "-/run/systemd/resolve" odin.systemd.services.hermes-agent.serviceConfig.InaccessiblePaths)
+      && builtins.elem "-/run/systemd/resolve/io.systemd.Resolve" odin.systemd.services.hermes-agent.serviceConfig.InaccessiblePaths;
     noManagedModelEngine = !odin.services.hermes-agent.settings.local_runtime.enabled;
     autonomousWithinBoundary =
       odin.services.hermes-agent.settings.approvals.mode == "off"

@@ -299,7 +299,7 @@ class NativeModuleTests(unittest.TestCase):
         self.assertIn("ExecCondition", text)
         self.assertIn("LoadCredential", text)
         for path in ("/run/user", "/run/dbus", "/run/systemd/private",
-                     "/run/systemd/resolve", "/run/nscd", "/run/nsncd",
+                     "/run/systemd/resolve/io.systemd.Resolve", "/run/nscd", "/run/nsncd",
                      "/nix/var/nix/daemon-socket"):
             self.assertIn(path, text)
         for unsafe in ("mkStateScript", "system.activationScripts", "tmpfiles.rules", "chown -R"):

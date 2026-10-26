@@ -141,7 +141,7 @@ def counters():
 def controller(args):
     checks = verified(args)
     original = RULES.read_text()
-    assert original.count('meta skuid "hermes"') == 5, 'Canonical UID mapping contract changed'
+    assert original.count('meta skuid "hermes"') == 10, 'Canonical UID mapping contract changed'
     assert original.count(CANDIDATE) == 1, 'Expected exact protected transport exception'
     tested = original.replace(CANDIDATE, '') if args.mode == 'red' else original
     rules = tested.replace(CANDIDATE, FIXTURE_CANDIDATE).replace('meta skuid "hermes"', 'meta skuid 0')
@@ -150,7 +150,7 @@ def controller(args):
     local_servers = []
     channel = None
     result = {'canonical_rules': str(RULES), 'canonical_sha256': hashlib.sha256(original.encode()).hexdigest(),
-              'canonical_uid_matches_mapped': 5, 'namespace': checks, 'mode': args.mode,
+              'canonical_uid_matches_mapped': 10, 'namespace': checks, 'mode': args.mode,
               'kernel_wireguard': True, 'host_firewall_changed': False}
     with tempfile.TemporaryDirectory(prefix='keys-', dir=ROOT) as keys:
         os.chmod(keys, 0o700)

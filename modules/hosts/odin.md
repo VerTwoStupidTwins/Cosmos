@@ -1010,9 +1010,10 @@ Writes and backend extraction are asynchronous: a correction may not be reflecte
 in an immediate recall. Existing transcripts remain stored; forgetting a derived
 conclusion alone is not erasure of the source conversation or a backup policy.
 
-Hermes gains only IPv4 loopback API port 8000 when Honcho is selected. It still
-cannot reach PostgreSQL, the Honcho inference listeners, direct model management
-or external services. Neither its groups nor container authority change. Both
+Selecting Honcho adds IPv4 loopback API port 8000 to Hermes's allowed destinations.
+It still cannot reach PostgreSQL, the Honcho inference listeners or direct model
+management. Its separately declared public HTTPS access supports cloud models and
+messaging. Neither its groups nor container authority change. Both
 Hermes units order initial startup after API readiness, but do not require the
 memory service to remain available for basic chat.
 
@@ -1132,11 +1133,19 @@ Evaluation, package builds and fixture tests are not proof of live deployment.
 
 ### Identity, network and credentials
 
+Odin retains upstream's **full** Hermes package, including the cloud, voice and
+messaging SDKs. The package override supplies compatibility inputs explicitly;
+only the pinned Python builder is intercepted to install the managed-home patch
+and Honcho plugin. The upstream service module is not a drop-in replacement: its
+agent-owned policy directory and user-manager lifecycle differ from this setup.
+
 The native `hermes-agent` gateway owns durable dispatch; `hermes-backend` serves
 an authenticated dashboard on port 9119, bound to the IPv4 address of `wt0`.
 The firewall opens that port only on `wt0`. NetBird management-plane policy must
-also permit the intended operator peers. No public listener, external OAuth
-provider, cloud model credential or automatic GPT fallback is configured.
+also permit the intended operator peers. The primary model remains local Gemma;
+cloud use is an explicit per-session or per-turn selection, with no automatic
+fallback. Telegram and Discord are enabled in configuration and connect once
+their credentials are supplied. No new inbound firewall ports are opened.
 
 The `hermes` account has journal-reading membership but no wheel, container-engine
 administration, root SSH or Nix-daemon access. Odin's Nix allowed-users are root
@@ -1167,13 +1176,21 @@ The shared upstream pin and Thoth package are unchanged.
 
 `cosmos-hermes-egress.service` installs an independent nftables table without
 changing the existing firewall backend. The rule covers the Hermes UID, including
-detached processes: new TCP traffic may reach only `127.0.0.1:18090` (inference)
+detached processes: local TCP traffic may reach `127.0.0.1:18090` (inference)
 and `127.0.0.1:18092` (the authenticated local-owner RPC API), plus
 `127.0.0.1:8000` only when the Honcho provider is selected. A separate IPv4 rule
 permits port 9119 only when the kernel routing table identifies the destination as
 local to this host. The dashboard PTY and sidecar use that authenticated callback
 to their own dashboard listener, including its NetBird address; a remote peer on
 port 9119 is not allowed. Reply traffic is retained for inbound dashboard sessions.
+DNS is allowed only to the host's `127.0.0.53` stub, over UDP/TCP port 53.
+Public IPv4 TCP port 443 is allowed for cloud APIs and messaging WebSockets.
+Other same-host destinations, private/NetBird/link-local/reserved networks,
+external DNS, arbitrary outbound ports and new IPv6 connections remain denied.
+This is a port-based policy, not a provider-domain allowlist or TLS inspection:
+Hermes's terminal tools can also reach public TCP port 443. Honcho and OpenConcho
+retain their separate local-only egress policies.
+
 Kernel WireGuard can preserve the application socket UID on the encrypted UDP
 packet while resetting its conntrack metadata. The inner TCP reply may pass but
 its encrypted outer packet can still reach the UID reject rule, depending on
@@ -1181,7 +1198,8 @@ which peer originated the UDP transport flow. A narrow exception therefore
 accepts only IPv4 UDP with NetBird's exact privileged control-plane mark
 `0x1bd00`, its declared source port (58120), physical output interface `enp4s0`,
 and a non-local destination. This does not allow unmarked UDP, data-plane marks,
-other source ports, loopback/proxy destinations or arbitrary outbound TCP.
+other source ports or loopback/proxy destinations. Public TCP 443 is permitted
+by the separate application rule described above.
 Hermes has neither `CAP_NET_ADMIN` nor `CAP_NET_RAW`, so it cannot set this mark.
 The mark matches the pinned NetBird default and checked live routing rule; a
 transport interface/port/mark change requires reviewing this fail-closed policy.
@@ -1207,7 +1225,9 @@ inference. It rejects management/passthrough routes, alternate models, remote/fi
 image URLs and unbounded generation. It forwards inline images and streaming,
 pins the agreed sampling, and does not log request bodies. Hermes cannot directly
 reach llama-swap's management API. This is a narrow interface, not a general HTTP
-proxy. Backend unavailability must fail locally, never switch to a cloud model.
+proxy. Backend unavailability must fail locally, never switch to a cloud model
+automatically. Explicit cloud selections use the provider's public HTTPS API;
+they do not pass through this fixed-model local gateway.
 
 The single shared `secrets.yaml` contains encrypted `hermes_dashboard_env`.
 Only Odin receives its root-only runtime file. `hermes-state-setup` receives a
@@ -1225,6 +1245,53 @@ and verifies the 1Password item and decrypted target privately. It refuses an
 implicit rotation when the SOPS entry already exists. Never invoke it as Hermes,
 print the identity callback, or put a password/hash/signing key in shell arguments.
 
+### Cloud models, Telegram and Discord
+
+Use the existing SOPS operator workflow to edit the encrypted
+`hermes_dashboard_env` value in `secrets.yaml`. Despite its historical name, it
+is the service's dotenv credential bundle. Preserve the dashboard entries and
+append the chosen provider's API-key variables plus:
+
+| Variable | Purpose |
+| --- | --- |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot credential |
+| `TELEGRAM_ALLOWED_USERS` | Comma-separated numeric IDs of authorized Telegram users |
+| `DISCORD_BOT_TOKEN` | Discord bot credential |
+| `DISCORD_ALLOWED_USERS` | Comma-separated numeric IDs of authorized Discord users |
+
+For supported API-key providers, configure their documented environment variable
+(for example `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`). Provider
+selection remains yours; no cloud key, paid request or bot connection is created
+by this change. Do not set a global `OPENAI_BASE_URL` to select a cloud provider;
+the default local route is declared in Nix. Custom provider endpoints and model
+catalog overrides belong in `services.hermes-agent.settings.providers`, with
+credential references rather than literal keys.
+
+Keep `GATEWAY_ALLOW_ALL_USERS`, `TELEGRAM_ALLOW_ALL_USERS` and
+`DISCORD_ALLOW_ALL_USERS` false. With no allowlist or operator-approved pairing,
+unknown senders are denied; unauthorized DMs are ignored. Use individual user IDs,
+not wildcard or whole-channel grants, for this autonomous assistant. Configure
+the bot permissions/intents in the relevant platform's console as well.
+
+Apply encrypted credential changes through the reviewed deployment workflow;
+SOPS restarts the consumers and the setup unit republishes `.env`. Do not edit
+the generated `/var/lib/hermes/.hermes/.env` or `config.yaml`: they are protected
+and regenerated. Interactive `hermes setup` is not the persistent configuration
+path for this service. Never paste credential values into chat or Git plaintext.
+
+In an authorized Telegram/Discord conversation, `/model` lists available
+providers. Use `/model <model-id> --provider <provider>` for that session or
+`/model <model-id> --provider <provider> --once` for the next turn only. Avoid
+`--global`; the declared default remains local. The pinned local-session/TUI
+path does not support `--once`: use its session model picker and explicitly
+return to the local model afterward. A cloud turn can include existing chat
+context and Honcho recall; start a separate task session when that context
+should not be shared.
+
+Voice dependencies remain installed, but automatic speech transcription is
+explicitly disabled so adding a model API key cannot silently enable audio
+uploads. Voice-provider selection and voice-channel networking are separate work.
+
 ### Durable task workflow
 
 The gateway owns Kanban dispatch with one in-progress task and an explicit
@@ -1232,14 +1299,15 @@ The gateway owns Kanban dispatch with one in-progress task and an explicit
 same fresh state tree. Automatic decomposition and review dispatch are disabled;
 local memory and skill updates do not need repeated interactive approval.
 Shell approval prompts are disabled only for this constrained service account.
-This grants no host-administration rights or GPT-handoff authorization.
+This grants no host-administration rights or autonomous cloud-fallback authority.
 
 Use the dashboard's Kanban task interface, or ask the chat agent to enqueue the
 work and report its task ID. A browser chat/PTY or a background subagent alone is
 not the durable-work contract. A task needing additional authority must save its
 partial result and enter Blocked with an actionable reason, not leave a live
 approval dialog waiting to expire. Current configuration does not implement a
-privileged-action broker or approved GPT handoff path.
+privileged-action broker or automatic cloud-delegation path. Explicit model
+selection is the supported cloud workflow.
 
 For an operator CLI task, run the built Hermes binary as the service user with
 both state variables pinned. Example Bash, after separately approved activation:
@@ -1278,8 +1346,12 @@ the normal Odin rebuild command above. Then verify:
   and password login works from an intended NetBird peer. No LAN listener exists.
 - A real Hermes request reaches Gemma through the narrow interface, including a
   tool round-trip and an uploaded image; a local outage does not route externally.
-- The service UID cannot reach the direct model API, public network, operator
-  home, private keys, SOPS runtime credentials or the Nix daemon.
+- The service UID can reach public IPv4 TCP 443 and the DNS stub, but cannot reach
+  the direct model API, other private-network services, operator home, private
+  keys, SOPS runtime credentials or the Nix daemon.
+- With credentials configured, Telegram/Discord admit the intended user IDs and
+  reject unlisted senders. Explicit cloud selection works and a one-turn pick
+  restores the prior model; a local outage does not trigger cloud fallback.
 - A queued task continues after closing the browser. Test worker/gateway restart
   recovery, saved results and a persistent Blocked task without repeating actions.
 

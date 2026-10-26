@@ -25,6 +25,9 @@ pkgs.runCommand "hermes-honcho-check" { } ''
   export HERMES_HOME="$TMPDIR/hermes"
   mkdir -p "$HERMES_HOME"
   export PYTHONPATH=${package.honchoSdk}/${package.python.sitePackages}
+  ${package.hermesVenv}/bin/python ${./hermes-integrations.py} \
+    ${pkgs.writeText "hermes-settings.json" (builtins.toJSON cfg.settings)} \
+    ${pkgs.writeText "hermes-environment.json" (builtins.toJSON cfg.environment)}
   ${package.hermesVenv}/bin/python - <<'PY'
   import importlib.metadata as metadata
   from pathlib import Path
