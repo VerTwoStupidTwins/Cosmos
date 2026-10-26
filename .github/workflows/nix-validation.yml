@@ -18,7 +18,7 @@ jobs:
   evaluate:
     name: Evaluate Cosmos (x86_64-linux)
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
 
     steps:
       - name: Check out Cosmos
@@ -306,21 +306,23 @@ jobs:
             and .stateVersion == "26.05"
           '
 
-      - name: Test SOPS bootstrap and operator identity helper
-        shell: bash
-        run: nix build --no-write-lock-file --no-link '.#checks.x86_64-linux.sops-bootstrap'
+      # Build every declared check, including future additions. The earlier
+      # --no-build pass validates outputs but does not execute check builders.
+      # Keep independent checks running if another fails; failures still fail CI.
+      - name: Build all flake regression checks
+        run: nix flake check --no-write-lock-file --keep-going --show-trace
 
-      - name: Test isolated 1Password service-account verifier
-        shell: bash
-        run: nix build --no-write-lock-file --no-link '.#checks.x86_64-linux.onepassword-service-account'
-
+      # These checks also expose verification commands that run outside the
+      # build sandbox. Keep both hooks after building the check derivations.
       - name: Test reusable llama.cpp instance module
+        if: ${{ success() || failure() }}
         shell: bash
         run: |
           check=$(nix build --no-write-lock-file --no-link --print-out-paths '.#checks.x86_64-linux.llama-cpp-instances')
           "$check/bin/verify-units"
 
       - name: Test Odin llama-swap model routing and units
+        if: ${{ success() || failure() }}
         shell: bash
         run: |
           check=$(nix build --no-write-lock-file --no-link --print-out-paths '.#checks.x86_64-linux.odin-llama-swap')
