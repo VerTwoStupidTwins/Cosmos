@@ -31,6 +31,28 @@ with `nixos-facter` 0.4.4 from Cosmos's pinned nixpkgs. Its remote/local SHA-256
 hashes matched. It includes attached installer hardware; never substitute another
 host's report. Review its machine identifiers before publishing.
 
+## Nix build capacity
+
+Odin declares `max-jobs = 2` and `cores = 6`: up to two local builds at once,
+with six cores advertised to each builder. The shared base retains overridable
+defaults of one job and two cores for other hosts. This is an initial budget for
+the 24-thread Ryzen server shared with inference, not a measured optimum.
+These settings do not reserve CPUs or cap memory, and builders may ignore the
+advertised core count. They do not make sequential evaluation faster.
+
+After separately approved activation, check the installed configuration:
+
+```bash
+rg '^(max-jobs|cores) =' /etc/nix/nix.conf
+```
+
+Expect `max-jobs = 2` and `cores = 6`. Compare representative uncached build
+times, memory pressure and inference responsiveness before increasing either
+limit further. Cache hits do not measure compilation speed. Evaluation of this
+configuration alone does not activate the limits or demonstrate a speedup.
+The conservative explicit limits in the fresh-install procedure remain local
+to that installation command.
+
 ## Storage
 
 The [Disko layout](../../disk-layouts/odin.nix) targets only:
