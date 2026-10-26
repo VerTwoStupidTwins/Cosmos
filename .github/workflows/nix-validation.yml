@@ -149,7 +149,7 @@ jobs:
             mediaType = c.fileSystems."/var/lib/frigate".fsType;
             rootType = c.fileSystems."/".fsType;
             bcachefsSupport = c.boot.supportedFilesystems.bcachefs or false;
-            systemdInitrd = c.boot.initrd.systemd.enable;
+            systemdInitrd = c.boot.initrd.systemd.contents."/init".source == "${c.boot.initrd.systemd.package}/lib/systemd/systemd";
             rootDisk = c.disko.devices.disk.system.device;
             mediaDisk = c.disko.devices.disk.media.device;
             mountDependencies = c.systemd.services.frigate.unitConfig.RequiresMountsFor;
@@ -204,7 +204,7 @@ jobs:
             swapCount = builtins.length c.swapDevices;
             bcachefsSupport = c.boot.supportedFilesystems.bcachefs or false;
             compression = c.disko.devices.bcachefs_filesystems."odin-root".extraFormatArgs;
-            systemdInitrd = c.boot.initrd.systemd.enable;
+            systemdInitrd = c.boot.initrd.systemd.contents."/init".source == "${c.boot.initrd.systemd.package}/lib/systemd/systemd";
             zram = c.zramSwap.enable;
             lvmGroups = builtins.attrNames c.disko.devices.lvm_vg;
             luks = c.boot.initrd.luks.devices;

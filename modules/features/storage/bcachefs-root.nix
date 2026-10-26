@@ -3,7 +3,6 @@
 {
   flake.modules.nixos."bcachefs-root" = {
     boot.supportedFilesystems = [ "bcachefs" ];
-    boot.initrd.systemd.enable = true;
     # Prefer disk-backed swap while first validating suspend-to-disk.
     zramSwap.enable = false;
   };
