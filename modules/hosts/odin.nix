@@ -18,6 +18,13 @@ in
       ../../disk-layouts/odin.nix
     ];
 
+    # Initial build budget for the 24-thread server shared with inference.
+    # Builders that honor cores may use six threads each, with two builds at once.
+    nix.settings = {
+      max-jobs = 2;
+      cores = 6;
+    };
+
     networking = {
       hostName = "odin";
       # Wired DHCP without the workstation/NetworkManager profile.

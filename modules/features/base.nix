@@ -1,13 +1,14 @@
 {
   # Modules in this directory contribute to shared profiles.
-  flake.modules.nixos.base = { pkgs, ... }: {
+  flake.modules.nixos.base = { lib, pkgs, ... }: {
     nix.settings = {
       experimental-features = [
         "nix-command"
         "flakes"
       ];
-      max-jobs = 1;
-      cores = 2;
+      # Conservative defaults; build hosts can select their own parallelism.
+      max-jobs = lib.mkDefault 1;
+      cores = lib.mkDefault 2;
     };
     time.timeZone = "America/Los_Angeles";
     i18n.defaultLocale = "en_US.UTF-8";
