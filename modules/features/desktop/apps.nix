@@ -40,6 +40,7 @@
 
       # General workstation applications.
       discord
+      telegram-desktop
       firefox
       emacs
       libreoffice
