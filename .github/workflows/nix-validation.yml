@@ -40,7 +40,7 @@ jobs:
       - name: Evaluate all NixOS host derivations
         shell: bash
         run: |
-          hosts_json="$(nix eval --json --apply builtins.attrNames '.#nixosConfigurations')"
+          hosts_json="$(nix eval --no-write-lock-file --json --apply builtins.attrNames '.#nixosConfigurations')"
           mapfile -t hosts < <(jq -r '.[]' <<< "$hosts_json")
           if (( ${#hosts[@]} == 0 )); then
             echo "::error::No NixOS hosts defined"
@@ -48,14 +48,14 @@ jobs:
           fi
           for host in "${hosts[@]}"; do
             echo "::group::Evaluate $host"
-            nix eval --raw ".#nixosConfigurations.\"$host\".config.system.build.toplevel.drvPath"
+            nix eval --no-write-lock-file --raw ".#nixosConfigurations.\"$host\".config.system.build.toplevel.drvPath"
             echo
             echo "::endgroup::"
           done
 
       # Evaluate flake outputs without compiling the whole NixOS desktop.
       - name: Validate flake outputs
-        run: nix flake check --no-build --show-trace
+        run: nix flake check --no-write-lock-file --no-build --show-trace
 
       # A warm store hides generated-source imports that fail in read-only
       # flake checks. A fresh public Disko input exercises the cache-miss case.
@@ -65,12 +65,83 @@ jobs:
           nix shell --no-write-lock-file --inputs-from . nixpkgs#python3 --command \
             python3 tests/disko-readonly.py --scratch "$TMPDIR/disko-readonly"
 
+      # Reuse one Thoth evaluation across the independently named assertions.
+      # Keep this after all-host derivation priming and the read-only checks.
+      - name: Export Thoth regression settings
+        shell: bash
+        run: |
+          nix eval --no-write-lock-file --json --apply 'c: {
+            resume = c.boot.resumeDevice;
+            swap = (builtins.head c.swapDevices).device;
+            lid = c.services.logind.settings.Login.HandleLidSwitch;
+            delay = c.systemd.sleep.settings.Sleep.HibernateDelaySec;
+            batteryAction = c.services.upower.criticalPowerAction;
+            batteryPercent = c.services.upower.percentageAction;
+            upowerEnabled = c.services.upower.enable;
+            upowerWantedBy = c.systemd.services.upower.wantedBy or [];
+            interface = c.services.netbird.clients.wt0.interface;
+            quickshell = builtins.any (p: (p.pname or "") == "quickshell") c.environment.systemPackages;
+            desktop = {
+              niri = c.programs.niri.enable;
+              mango = c.programs.mango.enable;
+              sddm = c.services.displayManager.sddm.enable;
+              greetd = c.services.greetd.enable;
+              textGreeter = c.services.greetd.useTextGreeter;
+              greeterCommand = if c.services.greetd.enable then (c.services.greetd.settings.default_session.command or "") else "";
+              greeterUser = if c.services.greetd.enable then (c.services.greetd.settings.default_session.user or "") else "";
+              autoLogin = c.services.displayManager.autoLogin.enable || (c.services.greetd.enable && (c.services.greetd.settings ? initial_session));
+              sessionDirectory = "${c.services.displayManager.sessionData.desktops}/share/wayland-sessions";
+              sessions = builtins.concatLists (map (p: p.providedSessions) c.services.displayManager.sessionPackages);
+              mangoSessionTarget = builtins.elem c.programs.mango.package c.systemd.packages;
+              stateVersion = c.system.stateVersion;
+            };
+            waybar = {
+              wantedBy = c.systemd.user.services.waybar.wantedBy or [];
+              condition = c.systemd.user.services.waybar.unitConfig.ConditionEnvironment or "";
+              packagedUnit = builtins.any (p: (p.pname or "") == "waybar") c.systemd.packages;
+            };
+            mako = {
+              wantedBy = c.systemd.user.services.mako.wantedBy or [];
+              condition = c.systemd.user.services.mako.unitConfig.ConditionEnvironment or "";
+              packagedUnit = builtins.any (p: (p.pname or "") == "mako") c.systemd.packages;
+            };
+            awww = let
+              s = c.systemd.user.services.awww or {};
+              packages = builtins.filter (p: (p.pname or "") == "awww") c.environment.systemPackages;
+              package = if packages == [] then null else builtins.head packages;
+            in {
+              installed = package != null;
+              wantedBy = s.wantedBy or [];
+              partOf = s.partOf or [];
+              after = s.after or [];
+              condition = s.unitConfig.ConditionEnvironment or "";
+              command = s.serviceConfig.ExecStart or "";
+              daemonCommand = if package != null then "${package}/bin/awww-daemon" else "";
+              type = s.serviceConfig.Type or "";
+              restart = s.serviceConfig.Restart or "";
+            };
+            locking = let
+              s = c.systemd.user.services.swayidle;
+              package = name: builtins.head (builtins.filter (p: (p.pname or "") == name) c.environment.systemPackages);
+            in {
+              wantedBy = s.wantedBy;
+              partOf = s.partOf;
+              after = s.after;
+              condition = s.unitConfig.ConditionEnvironment or "";
+              command = s.serviceConfig.ExecStart;
+              idleCommand = "${package "swayidle"}/bin/swayidle";
+              lockCommand = "${package "swaylock-effects"}/bin/swaylock -f";
+              restart = s.serviceConfig.Restart;
+              pam = builtins.hasAttr "swaylock" c.security.pam.services;
+            };
+          }' '.#nixosConfigurations.thoth.config' > "$RUNNER_TEMP/thoth-regression.json"
+
       # Hibernation must point to the encrypted LVM swap, not the empty default.
       - name: Verify Thoth hibernation resume device
         shell: bash
         run: |
-          resume="$(nix eval --raw '.#nixosConfigurations.thoth.config.boot.resumeDevice')"
-          swap="$(nix eval --raw --apply 'swaps: (builtins.head swaps).device' '.#nixosConfigurations.thoth.config.swapDevices')"
+          resume="$(jq -r '.resume' "$RUNNER_TEMP/thoth-regression.json")"
+          swap="$(jq -r '.swap' "$RUNNER_TEMP/thoth-regression.json")"
           if [[ "$resume" != "/dev/nixos/swap" || "$swap" != "$resume" ]]; then
             echo "::error::Thoth resume '$resume' must match swap '$swap' at /dev/nixos/swap"
             exit 1
@@ -80,11 +151,11 @@ jobs:
       - name: Verify Thoth laptop power policy
         shell: bash
         run: |
-          lid="$(nix eval --raw '.#nixosConfigurations.thoth.config.services.logind.settings.Login.HandleLidSwitch')"
-          delay="$(nix eval --raw '.#nixosConfigurations.thoth.config.systemd.sleep.settings.Sleep.HibernateDelaySec')"
-          battery_action="$(nix eval --raw '.#nixosConfigurations.thoth.config.services.upower.criticalPowerAction')"
-          battery_percent="$(nix eval --json '.#nixosConfigurations.thoth.config.services.upower.percentageAction')"
-          upower_enabled="$(nix eval --json '.#nixosConfigurations.thoth.config.services.upower.enable')"
+          lid="$(jq -r '.lid' "$RUNNER_TEMP/thoth-regression.json")"
+          delay="$(jq -r '.delay' "$RUNNER_TEMP/thoth-regression.json")"
+          battery_action="$(jq -r '.batteryAction' "$RUNNER_TEMP/thoth-regression.json")"
+          battery_percent="$(jq -r '.batteryPercent' "$RUNNER_TEMP/thoth-regression.json")"
+          upower_enabled="$(jq -r '.upowerEnabled' "$RUNNER_TEMP/thoth-regression.json")"
           [[ "$lid" == "suspend-then-hibernate" ]] || exit 1
           [[ "$delay" == "60min" ]] || exit 1
           [[ "$battery_action" == "Hibernate" ]] || exit 1
@@ -94,15 +165,13 @@ jobs:
       - name: Verify UPower starts without a desktop client
         shell: bash
         run: |
-          nix eval --no-write-lock-file --json --apply 'services: services.upower.wantedBy or []' \
-            '.#nixosConfigurations.thoth.config.systemd.services' \
-            | jq -e 'index("multi-user.target") != null'
+          jq -e '.upowerWantedBy | index("multi-user.target") != null' "$RUNNER_TEMP/thoth-regression.json"
 
       # Regression check for the previously mismatched NetBird client/interface.
       - name: Verify NetBird interface
         shell: bash
         run: |
-          interface="$(nix eval --raw '.#nixosConfigurations.thoth.config.services.netbird.clients.wt0.interface')"
+          interface="$(jq -r '.interface' "$RUNNER_TEMP/thoth-regression.json")"
           if [[ "$interface" != "wt0" ]]; then
             echo "::error::Expected NetBird interface wt0; got '$interface'"
             exit 1
@@ -112,21 +181,18 @@ jobs:
       - name: Verify OpenSSH over NetBird on every host
         shell: bash
         run: |
-          hosts_json="$(nix eval --no-write-lock-file --json --apply builtins.attrNames '.#nixosConfigurations')"
-          mapfile -t hosts < <(jq -r '.[]' <<< "$hosts_json")
-          (( ${#hosts[@]} > 0 )) || exit 1
-          for host in "${hosts[@]}"; do
-            nix eval --no-write-lock-file --json --apply 'c: {
+          nix eval --no-write-lock-file --json --apply 'hosts:
+            builtins.mapAttrs (_: host: let c = host.config; in {
               openssh = c.services.openssh.enable;
               interface = c.services.netbird.clients.wt0.interface;
               hardened = c.services.netbird.clients.wt0.hardened;
               embeddedSSH = c.services.netbird.clients.wt0.config.ServerSSHAllowed or null;
               generated = builtins.fromJSON c.environment.etc."netbird-wt0/config.d/50-nixos.json".text;
-            }' ".#nixosConfigurations.\"$host\".config" | jq -e '
-              .openssh and .hardened and .interface == "wt0"
-              and .embeddedSSH == false and .generated.ServerSSHAllowed == false
-            '
-          done
+            }) hosts
+          ' '.#nixosConfigurations' | jq -e '
+            length > 0 and all(.[]; .openssh and .hardened and .interface == "wt0"
+              and .embeddedSSH == false and .generated.ServerSSHAllowed == false)
+          '
 
       - name: Verify Argus headless NVR baseline
         shell: bash
@@ -332,20 +398,7 @@ jobs:
       - name: Verify Thoth desktop sessions
         shell: bash
         run: |
-          nix eval --json --apply 'c: {
-            niri = c.programs.niri.enable;
-            mango = c.programs.mango.enable;
-            sddm = c.services.displayManager.sddm.enable;
-            greetd = c.services.greetd.enable;
-            textGreeter = c.services.greetd.useTextGreeter;
-            greeterCommand = if c.services.greetd.enable then (c.services.greetd.settings.default_session.command or "") else "";
-            greeterUser = if c.services.greetd.enable then (c.services.greetd.settings.default_session.user or "") else "";
-            autoLogin = c.services.displayManager.autoLogin.enable || (c.services.greetd.enable && (c.services.greetd.settings ? initial_session));
-            sessionDirectory = "${c.services.displayManager.sessionData.desktops}/share/wayland-sessions";
-            sessions = builtins.concatLists (map (p: p.providedSessions) c.services.displayManager.sessionPackages);
-            mangoSessionTarget = builtins.elem c.programs.mango.package c.systemd.packages;
-            stateVersion = c.system.stateVersion;
-          }' '.#nixosConfigurations.thoth.config' | jq -e '
+          jq -e '.desktop | (
             .niri and .mango and (.sddm | not) and .greetd and .textGreeter
             and .greeterUser == "greeter" and (.autoLogin | not)
             and (.greeterCommand | contains("tuigreet") and contains("--sessions") and contains("--xsessions") and contains("--remember-user-session") and (contains("--cmd") | not) and (contains("--env") | not))
@@ -353,59 +406,35 @@ jobs:
             and (.sessions | index("niri") != null and index("mango") != null)
             and .mangoSessionTarget
             and .stateVersion == "26.05"
-          '
+          )' "$RUNNER_TEMP/thoth-regression.json"
 
       - name: Verify Quickshell is installed
         shell: bash
         run: |
-          nix eval --no-write-lock-file --json \
-            --apply 'packages: builtins.any (p: (p.pname or "") == "quickshell") packages' \
-            '.#nixosConfigurations.thoth.config.environment.systemPackages' | jq -e '.'
+          jq -e '.quickshell' "$RUNNER_TEMP/thoth-regression.json"
 
       - name: Verify Mango Waybar autostart
         shell: bash
         run: |
-          nix eval --no-write-lock-file --json --apply 'c: {
-            wantedBy = c.systemd.user.services.waybar.wantedBy or [];
-            condition = c.systemd.user.services.waybar.unitConfig.ConditionEnvironment or "";
-            packagedUnit = builtins.any (p: (p.pname or "") == "waybar") c.systemd.packages;
-          }' '.#nixosConfigurations.thoth.config' | jq -e '
+          jq -e '.waybar | (
             .wantedBy == ["mango-session.target"]
             and .condition == "WAYLAND_DISPLAY"
             and .packagedUnit
-          '
+          )' "$RUNNER_TEMP/thoth-regression.json"
 
       - name: Verify Mango Mako autostart
         shell: bash
         run: |
-          nix eval --no-write-lock-file --json --apply 'c: {
-            wantedBy = c.systemd.user.services.mako.wantedBy or [];
-            condition = c.systemd.user.services.mako.unitConfig.ConditionEnvironment or "";
-            packagedUnit = builtins.any (p: (p.pname or "") == "mako") c.systemd.packages;
-          }' '.#nixosConfigurations.thoth.config' | jq -e '
+          jq -e '.mako | (
             .wantedBy == ["mango-session.target"]
             and .condition == "WAYLAND_DISPLAY"
             and .packagedUnit
-          '
+          )' "$RUNNER_TEMP/thoth-regression.json"
 
       - name: Verify Mango awww autostart
         shell: bash
         run: |
-          nix eval --no-write-lock-file --json --apply 'c: let
-            s = c.systemd.user.services.awww or {};
-            packages = builtins.filter (p: (p.pname or "") == "awww") c.environment.systemPackages;
-            package = if packages == [] then null else builtins.head packages;
-          in {
-            installed = package != null;
-            wantedBy = s.wantedBy or [];
-            partOf = s.partOf or [];
-            after = s.after or [];
-            condition = s.unitConfig.ConditionEnvironment or "";
-            command = s.serviceConfig.ExecStart or "";
-            daemonCommand = if package != null then "${package}/bin/awww-daemon" else "";
-            type = s.serviceConfig.Type or "";
-            restart = s.serviceConfig.Restart or "";
-          }' '.#nixosConfigurations.thoth.config' | jq -e '
+          jq -e '.awww | (
             .installed
             and .wantedBy == ["mango-session.target"]
             and .partOf == ["mango-session.target"]
@@ -413,32 +442,19 @@ jobs:
             and .condition == "WAYLAND_DISPLAY"
             and .command == .daemonCommand
             and .type == "simple" and .restart == "on-failure"
-          '
+          )' "$RUNNER_TEMP/thoth-regression.json"
 
       - name: Verify compositor-independent Wayland locking
         shell: bash
         run: |
-          nix eval --json --apply 'c: let
-            s = c.systemd.user.services.swayidle;
-            package = name: builtins.head (builtins.filter (p: (p.pname or "") == name) c.environment.systemPackages);
-          in {
-            wantedBy = s.wantedBy;
-            partOf = s.partOf;
-            after = s.after;
-            condition = s.unitConfig.ConditionEnvironment or "";
-            command = s.serviceConfig.ExecStart;
-            idleCommand = "${package "swayidle"}/bin/swayidle";
-            lockCommand = "${package "swaylock-effects"}/bin/swaylock -f";
-            restart = s.serviceConfig.Restart;
-            pam = builtins.hasAttr "swaylock" c.security.pam.services;
-          }' '.#nixosConfigurations.thoth.config' | jq -e '
+          jq -e '.locking | (
             .wantedBy == ["graphical-session.target"]
             and .partOf == ["graphical-session.target"]
             and .after == ["graphical-session.target"]
             and .condition == "WAYLAND_DISPLAY"
             and .restart == "on-failure" and .pam
             and (. as $c | (.command | split("\u0027")) == [($c.idleCommand + " -w -C /dev/null lock "), $c.lockCommand, " before-sleep ", $c.lockCommand, ""])
-          '
+          )' "$RUNNER_TEMP/thoth-regression.json"
 
   lint:
     name: Nix style and lint
