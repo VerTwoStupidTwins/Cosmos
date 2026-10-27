@@ -31,6 +31,93 @@ with `nixos-facter` 0.4.4 from Cosmos's pinned nixpkgs. Its remote/local SHA-256
 hashes matched. It includes attached installer hardware; never substitute another
 host's report. Review its machine identifiers before publishing.
 
+## Homarr and monitoring
+
+[odin-dashboard.nix](odin-dashboard.nix) composes the reusable
+[Homarr](../features/homarr.nix) and [monitoring](../features/monitoring.nix)
+profiles. Homarr uses the published v2.9.1 image, pinned by digest and Nix hash;
+Grafana, Prometheus and exporters use the existing Nixpkgs pin. No flake input
+update is required. These declarations require a separately approved rebuild
+before the URLs below become available.
+
+| Application | NetBird URL | Purpose |
+| --- | --- | --- |
+| Homarr | `http://100.94.82.252:7575/` | Editable boards, integrations and custom widgets |
+| Grafana | `http://100.94.82.252:3000/` | Host and service monitoring |
+
+nginx listens on IPv4 ports 7575 and 3000; the host firewall permits these ports
+only through `wt0` (and loopback). NetBird policy must allow the operator peers.
+The upstream Homarr port 17575, Grafana port 13000, Prometheus port 9090,
+Node Exporter port 9100 and Blackbox Exporter port 9115 bind only to loopback.
+Homarr runs in rootless Podman under its own account, with persistent app data
+at `/var/lib/homarr/appdata`. No Docker/Podman socket is mounted, and container
+management is disabled. The container's `host.containers.internal` maps to its
+slirp host gateway so widgets can reach host-local APIs; this permits access to
+other host-loopback services too, so board administration belongs to trusted users.
+
+### First login and widgets
+
+After activation, open Homarr from a trusted NetBird peer and complete its
+onboarding to create the first administrator and board. Board layout and custom
+widgets live in Homarr's persistent database and are managed through its UI.
+Suggested app links are Hermes (`http://100.94.82.252:9119/`), OpenConcho
+(`http://100.94.82.252:9120/`), llama-swap (`http://100.94.82.252:8081/`), and
+Grafana. Browser-facing links use the NetBird address; integration requests run
+inside the container. Use `http://host.containers.internal:13000` for its Grafana
+integration and supply a dedicated read-only Grafana service-account token in
+Homarr's integration UI. Custom widgets can query the local Prometheus API at
+`http://host.containers.internal:9090`; no public Prometheus endpoint is needed.
+External Workshop content and integrations may make external requests.
+
+Grafana's initial username is `admin`. On first activation a root-only oneshot
+generates a random password and separate Homarr/Grafana encryption keys, preserving them on
+subsequent starts. These machine-local bootstrap secrets are not committed to
+Git or stored in Nix derivations. Read the initial password locally on Odin:
+
+```bash
+sudo cat /var/lib/cosmos-dashboard-credentials/grafana-admin-password
+```
+
+Grafana receives the password through a systemd credential. Its administrator
+password is stored in Grafana's database after initialization; changing it in
+the UI does not update the bootstrap file. Do not delete/regenerate Homarr's
+encryption key when upgrading: existing integration credentials need it.
+
+### Monitoring scope and persistence
+
+Prometheus scrapes every 30 seconds, retaining up to 30 days with a 10 GB TSDB
+retention limit (allow additional space for WAL and temporary compaction).
+The provisioned **Odin — host and services** Grafana dashboard shows CPU, memory,
+root filesystem capacity, disk I/O, networking, uptime, failed systemd units,
+scrape targets and HTTP frontend availability. Copy it in Grafana to experiment;
+the provisioned original is owned by the repository.
+
+HTTP probes cover Homarr, Grafana, Hermes, OpenConcho and llama-swap. Redirects
+and authentication gates count as reachable frontends; these probes do not prove
+login, model inference, or Honcho recall works. All probes run on Odin and cannot
+detect a broken remote NetBird path. GPU metrics, other hosts, notification
+destinations and remote probes are not configured in this initial rollout.
+
+Back up `/var/lib/homarr/appdata`, `/var/lib/cosmos-dashboard-credentials`, and
+`/var/lib/grafana` securely. Homarr's database and encryption key must be restored
+together. Use application-consistent backups; copying live SQLite files alone
+is not a reliable backup. Prometheus history lives under `/var/lib/prometheus2`.
+This configuration does not create off-host backups. Image rollback alone cannot
+undo Homarr database migrations.
+
+After approved activation, verify the services and both URLs from Thoth:
+
+```bash
+systemctl status podman-homarr grafana prometheus prometheus-node-exporter \
+  prometheus-blackbox-exporter nginx --no-pager
+curl --fail http://127.0.0.1:9090/-/ready
+curl --fail http://127.0.0.1:3000/api/health
+```
+
+Confirm Grafana lists the Prometheus data source, all expected scrape targets
+are up, and the provisioned dashboard contains data. Complete Homarr onboarding
+and test a custom widget before considering the UI setup complete.
+
 ## Nix build capacity
 
 Odin declares `max-jobs = 2` and `cores = 6`: up to two local builds at once,
