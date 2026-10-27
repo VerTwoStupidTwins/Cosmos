@@ -87,6 +87,10 @@ assert lib.assertMsg (
   failures == [ ]
 ) "Odin dashboard checks failed: ${lib.concatStringsSep ", " failures}";
 pkgs.runCommand "odin-dashboard-check" { } ''
+  # Use only the generated service PATH: nix shell can mask missing helpers.
+  ${pkgs.coreutils}/bin/env -i \
+    PATH=${lib.escapeShellArg odin.systemd.services.podman-homarr.environment.PATH} \
+    ${pkgs.bash}/bin/bash -eu -c 'command -v slirp4netns; slirp4netns --version'
   ${pkgs.prometheus.cli}/bin/promtool check rules ${rules}
   umask 0077
   mkdir -m 0700 "$TMPDIR/secrets"
