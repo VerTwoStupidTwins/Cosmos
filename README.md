@@ -53,6 +53,8 @@ Multiple feature files can extend the same profile:
 | `sops-secrets` | Pinned sops-nix with root-only host-key age decryption; hosts declare encrypted secrets explicitly |
 | `onepassword-service-account` | SOPS-provisioned token and isolated headless 1Password authentication/vault-access check; no GUI or agent token access |
 | `model-tools` | Hugging Face `hf` CLI from pinned nixpkgs, without an imperative Python environment |
+| `homarr` | Rootless Homarr dashboard with persistent boards and custom widgets; hosts supply credentials and ingress |
+| `server-monitoring` | Local Prometheus, host/HTTP exporters, and Grafana; hosts supply probes, dashboards, credentials and ingress |
 | `llama-cpp-sycl` | Intel compute-runtime prerequisites and narrowly scoped oneAPI licensing |
 | `llama-cpp-instances` | Independent named llama.cpp services, GPU environments, state/cache, and CLI launchers; disabled by default |
 | `llama-swap` | Native on-demand model proxy, loopback defaults, shared-user payload capture disabled; hosts supply backend/model choices |
