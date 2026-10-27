@@ -44,7 +44,10 @@ _: {
           log-driver = "k8s-file";
         };
       };
-      systemd.services.podman-homarr.environment.XDG_RUNTIME_DIR =
-        "/run/user/${toString config.users.users.homarr.uid}";
+      systemd.services.podman-homarr = {
+        # Podman resolves the explicitly selected network helper through PATH.
+        path = [ pkgs.slirp4netns ];
+        environment.XDG_RUNTIME_DIR = "/run/user/${toString config.users.users.homarr.uid}";
+      };
     };
 }
