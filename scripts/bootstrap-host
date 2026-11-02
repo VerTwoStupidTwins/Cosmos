@@ -1,0 +1,259 @@
+#!/usr/bin/env bash
+# Cosmos bootstrap stages that cannot partition disks, deploy, or reboot.
+set -euo pipefail
+
+PROGRAM=${0##*/}
+REPO_ROOT=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/bootstrap-host preflight HOST
+  scripts/bootstrap-host prepare-identity HOST
+  scripts/bootstrap-host verify-decryption STAGING_DIRECTORY
+
+preflight        Check the evaluated NixOS host for required remote-access settings.
+prepare-identity Create a *new* SSH host identity in a private, temporary staging
+                 directory. Does NOT modify the repo or install anything.
+verify-decryption Verify the staged host key alone can decrypt secrets/shared.yaml.
+
+The script never formats disks, enrolls NetBird, runs nixos-anywhere, or reboots.
+USAGE
+}
+
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  exit 1
+}
+need() { command -v "$1" >/dev/null 2>&1 || die "Missing command: $1"; }
+require_host() {
+  [[ $1 =~ ^[a-z][a-z0-9-]{0,62}$ ]] || die "Invalid host name: $1"
+}
+require_repo() {
+  [[ -f "$REPO_ROOT/flake.nix" ]] || die "Expected flake.nix in $REPO_ROOT"
+  [[ -f "$REPO_ROOT/secrets/shared.yaml" ]] || die 'Missing encrypted secrets/shared.yaml'
+}
+
+preflight() {
+  local host=$1 result
+  require_host "$host"
+  require_repo
+  need nix
+  need jq
+  cd "$REPO_ROOT"
+
+  # Only configuration metadata is evaluated; no decrypted secrets are printed.
+  result=$(nix eval --no-write-lock-file --json --apply '
+    c:
+    let
+      admin = c.users.users.twins or { };
+      s = c.services.openssh.settings;
+      secret = c.sops.secrets."twins-password-hash" or null;
+      netbird = c.services.netbird.clients.wt0 or null;
+    in
+    {
+      hostName = c.networking.hostName;
+      sshEnabled = c.services.openssh.enable;
+      sshOpenFirewall = c.services.openssh.openFirewall;
+      firewallEnabled = c.networking.firewall.enable;
+      sshPublicKeyAuth = s.PubkeyAuthentication or null;
+      sshPasswordAuth = s.PasswordAuthentication or null;
+      sshKeyboardAuth = s.KbdInteractiveAuthentication or null;
+      sshRootLogin = s.PermitRootLogin or null;
+      adminIsNormal = admin.isNormalUser or false;
+      adminWheel = builtins.elem "wheel" (admin.extraGroups or [ ]);
+      adminKeyCount = builtins.length (admin.openssh.authorizedKeys.keys or [ ]);
+      mutableUsers = c.users.mutableUsers;
+      passwordHashFile = admin.hashedPasswordFile or null;
+      secretPath = if secret == null then null else secret.path;
+      secretNeededForUsers = if secret == null then false else secret.neededForUsers;
+      secretFile = if secret == null then null else toString secret.sopsFile;
+      hostKeyForSops = builtins.elem "/etc/ssh/ssh_host_ed25519_key" (map toString c.sops.age.sshKeyPaths);
+      netbirdEnabled = netbird != null && netbird.autoStart;
+      netbirdInterface = if netbird == null then null else netbird.interface;
+      netbirdEmbeddedSSH = if netbird == null then null else (netbird.config.ServerSSHAllowed or null);
+      networkManager = c.networking.networkmanager.enable;
+      useDHCP = c.networking.useDHCP;
+      networkd = c.systemd.network.enable;
+    }
+  ' ".#nixosConfigurations.${host}.config") || die "Could not evaluate host '${host}'"
+
+  printf '%s\n' "$result" | jq -r --arg host "$host" '
+    "Host: \(.hostName)",
+    "Configured admin public keys: \(.adminKeyCount)",
+    "Network hints: NetworkManager=\(.networkManager) useDHCP=\(.useDHCP) networkd=\(.networkd)",
+    "(A real network link, routing and DNS must be verified separately.)",
+    "",
+    ( . as $c | {
+      "expected hostname": (.hostName == $host),
+      "OpenSSH enabled": .sshEnabled,
+      "LAN SSH firewall opened for first boot": .sshOpenFirewall,
+      "NixOS firewall enabled": .firewallEnabled,
+      "public-key SSH not disabled": (.sshPublicKeyAuth != false),
+      "SSH password disabled": (.sshPasswordAuth == false),
+      "keyboard-interactive SSH disabled": (.sshKeyboardAuth == false),
+      "direct root SSH disabled": (.sshRootLogin == "no"),
+      "twins normal user": .adminIsNormal,
+      "twins in wheel": .adminWheel,
+      "at least one authorized public key": (.adminKeyCount > 0),
+      "mutableUsers true for first-install policy": .mutableUsers,
+      "SOPS password provisioned before users": .secretNeededForUsers,
+      "SOPS hash wired into twins": (.passwordHashFile != null and .passwordHashFile == .secretPath),
+      "shared.yaml is secret source": (.secretFile != null and (.secretFile | endswith("/secrets/shared.yaml"))),
+      "SSH host key used for SOPS": .hostKeyForSops,
+      "NetBird auto-start configured": .netbirdEnabled,
+      "NetBird wt0 interface": (.netbirdInterface == "wt0"),
+      "NetBird built-in SSH disabled": (.netbirdEmbeddedSSH == false)
+    } | to_entries[] | "\(if .value then "PASS" else "FAIL" end)  \(.key)" )
+  '
+
+  printf '%s\n' "$result" | jq -e --arg host "$host" '
+    .hostName == $host
+    and .sshEnabled == true
+    and .sshOpenFirewall == true
+    and .firewallEnabled == true
+    and .sshPublicKeyAuth != false
+    and .sshPasswordAuth == false
+    and .sshKeyboardAuth == false
+    and .sshRootLogin == "no"
+    and .adminIsNormal == true
+    and .adminWheel == true
+    and .adminKeyCount > 0
+    and .mutableUsers == true
+    and .secretNeededForUsers == true
+    and .passwordHashFile != null
+    and .passwordHashFile == .secretPath
+    and .secretFile != null
+    and (.secretFile | endswith("/secrets/shared.yaml"))
+    and .hostKeyForSops == true
+    and .netbirdEnabled == true
+    and .netbirdInterface == "wt0"
+    and .netbirdEmbeddedSSH == false
+  ' >/dev/null || die 'Bootstrap preflight failed; review FAIL lines before installing'
+  echo 'RESULT: configured-access preflight passed (not a boot or connectivity test).'
+}
+
+prepare_identity() {
+  local host=$1 runtime stage key
+  require_host "$host"
+  require_repo
+  need ssh-keygen
+  need ssh-to-age
+
+  if [[ -e "$REPO_ROOT/keys/ssh/hosts/${host}.pub" ]]; then
+    die "A public host identity already exists in the repo for '${host}'. Do not rotate it accidentally."
+  fi
+
+  runtime=${XDG_RUNTIME_DIR:-/dev/shm}
+  [[ -d "$runtime" ]] || die "Missing runtime directory $runtime"
+  [[ -w "$runtime" ]] || die "Runtime directory is not writable: $runtime"
+
+  umask 077
+  stage=$(mktemp -d "$runtime/cosmos-${host}-bootstrap.XXXXXXXX")
+  install -d -m 0700 "$stage/extra-files/etc/ssh"
+  key="$stage/extra-files/etc/ssh/ssh_host_ed25519_key"
+  ssh-keygen -q -t ed25519 -N '' -C "${host}.cosmos-host" -f "$key"
+  chmod 0600 "$key"
+  chmod 0644 "$key.pub"
+  ssh-to-age -i "$key.pub" >"$stage/age-recipient.txt"
+  ssh-keygen -lf "$key.pub" >"$stage/host-fingerprint.txt"
+
+  printf '\nSecure staging directory (NOT for Git): %s\n' "$stage"
+  printf 'Public age recipient for .sops.yaml: '
+  cat "$stage/age-recipient.txt"
+  printf 'SSH host fingerprint: '
+  cat "$stage/host-fingerprint.txt"
+  printf '\nNext: add recipient to the shared.yaml creation rule, run sops updatekeys,\n'
+  printf 'then verify-decryption. Keep this directory available through installation.\n'
+  printf 'Never copy the private key into the repository or paste it into chat.\n'
+}
+
+verify_decryption() (
+  local stage=$1 key isolated identity expected actual
+
+  require_repo
+  need sops
+  need ssh-to-age
+  need age-keygen
+
+  [[ -d "$stage" ]] || die "No such staging directory: $stage"
+
+  key="$stage/extra-files/etc/ssh/ssh_host_ed25519_key"
+  [[ -s "$key" ]] || die "Missing staged SSH host private key"
+
+  [[ -s "$stage/age-recipient.txt" ]] ||
+    die "Missing staged age recipient"
+
+  # Keep temporary identities private.
+  umask 077
+
+  isolated=$(mktemp -d \
+    "${XDG_RUNTIME_DIR:-/dev/shm}/cosmos-sops-test.XXXXXXXX")
+
+  trap 'rm -rf -- "$isolated"' EXIT
+
+  identity="$isolated/age-identity.txt"
+
+  # Convert the SSH host key into an age private identity.
+  ssh-to-age -private-key -i "$key" -o "$identity"
+  chmod 0600 "$identity"
+
+  # Verify the converted identity matches the registered recipient.
+  expected=$(cat "$stage/age-recipient.txt")
+  actual=$(age-keygen -y "$identity")
+
+  [[ "$actual" == "$expected" ]] ||
+    die "Converted identity does not match the staged recipient"
+
+  echo "PASS: SSH host key matches its age recipient."
+
+  # Remove inherited credentials and verify using only this identity.
+  if env -i \
+    PATH="$PATH" \
+    HOME="$isolated" \
+    XDG_CONFIG_HOME="$isolated" \
+    GNUPGHOME="$isolated" \
+    SOPS_AGE_KEY_FILE="$identity" \
+    sops decrypt "$REPO_ROOT/secrets/shared.yaml" >/dev/null; then
+    echo "PASS: Staged host independently decrypts shared.yaml."
+  else
+    die "Independent SOPS decryption failed"
+  fi
+)
+
+[[ $# -ge 1 ]] || {
+  usage
+  exit 2
+}
+command=$1
+shift
+case "$command" in
+preflight)
+  [[ $# -eq 1 ]] || {
+    usage
+    exit 2
+  }
+  preflight "$1"
+  ;;
+prepare-identity)
+  [[ $# -eq 1 ]] || {
+    usage
+    exit 2
+  }
+  prepare_identity "$1"
+  ;;
+verify-decryption)
+  [[ $# -eq 1 ]] || {
+    usage
+    exit 2
+  }
+  verify_decryption "$1"
+  ;;
+-h | --help | help)
+  usage
+  ;;
+*)
+  usage
+  exit 2
+  ;;
+esac

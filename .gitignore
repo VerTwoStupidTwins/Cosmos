@@ -1,0 +1,22 @@
+# Nix build artifacts
+result
+result-*
+.direnv/
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+
+# Private SSH identities
+**/ssh_host_*_key
+**/id_ed25519
+**/id_rsa
+
+# Age private identities and backups
+*.agekey
+*.tar.age
+**/age-identity.txt
+
+# Temporary decrypted secrets
+*.plaintext.yaml
