@@ -3,7 +3,7 @@
 {
   flake.deploy.nodes.kawiil = {
     # Replace this when Kawiil has a stable NetBird/DNS name.
-    hostname = "10.77.10.225";
+    hostname = "100.94.154.89";
 
     sshUser = "twins";
 
