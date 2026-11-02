@@ -19,6 +19,10 @@
 
       # Kawiil-specific configuration
       {
+        nix.settings.extra-trusted-public-keys = [
+          "cosmos-deploy-1:N6ZWI51z7ixRUnSIJsgutoimWOA+Vkup1Ut2P0WBWxY="
+        ];
+
         networking = {
           hostName = "kawiil";
 
