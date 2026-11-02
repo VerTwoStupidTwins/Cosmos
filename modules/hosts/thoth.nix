@@ -51,6 +51,17 @@
           self.homeModules.niri
           self.homeModules.laptop
         ];
+
+        # Deploy-rs is available on Thoth only.
+        home-manager.users.twins.home.packages = [
+          inputs.deploy-rs.packages.x86_64-linux.default
+        ];
+
+        # Path to Thoth's Nix store signing key.
+        # Only the path is declared, never the private key contents.
+        home-manager.users.twins.home.sessionVariables.LOCAL_KEY =
+          "/home/twins/.local/share/cosmos/deploy-signing.key";
+
       }
     ];
   };
