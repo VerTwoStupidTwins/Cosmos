@@ -32,6 +32,8 @@
       neovim
       tree
       git
+      kitty.terminfo
+      lazygit
     ];
   };
 }
