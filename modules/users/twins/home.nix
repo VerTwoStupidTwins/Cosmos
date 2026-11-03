@@ -1,7 +1,7 @@
 { self, ... }:
 
 {
-  flake.homeModules.twins = { ... }: {
+  flake.homeModules.twins = { pkgs, ... }: {
     imports = [
       self.homeModules.twinsShell
       self.homeModules.twinsDevelopment
@@ -14,5 +14,9 @@
     ];
 
     home.stateVersion = "26.05";
+
+    home.packages = with pkgs; [
+      codex
+    ];
   };
 }
