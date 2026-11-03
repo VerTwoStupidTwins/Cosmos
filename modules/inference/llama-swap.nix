@@ -34,6 +34,7 @@
             cmd = ''
               ${llamaServer}
               --model ${lib.escapeShellArg modelPath}
+              --device Vulcan0
               --split-mode none
               --n-gpu-layers 99
               --n-cpu-moe 0
