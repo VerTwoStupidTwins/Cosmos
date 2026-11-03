@@ -22,6 +22,7 @@
 
       # Inference
       self.nixosModules.llamaVulkan
+      self.nixosModules.llamaSwap
 
       # Kawiil-specific configuration
       {
