@@ -1,4 +1,5 @@
 { ... }:
+
 {
   flake.nixosModules.llamaSwap =
     { config, lib, ... }:
@@ -27,14 +28,15 @@
 
             proxy = "http://127.0.0.1:\${PORT}";
 
+            # Expose only the AMD Vulkan driver to this process.
             env = [
-              "VK_LOADER_DRIVERS_SELECT=*radeon"
+              "VK_LOADER_DRIVERS_SELECT=*radeon*"
             ];
 
             cmd = ''
               ${llamaServer}
               --model ${lib.escapeShellArg modelPath}
-              --device Vulcan0
+              --device Vulkan0
               --split-mode none
               --n-gpu-layers 99
               --n-cpu-moe 0
