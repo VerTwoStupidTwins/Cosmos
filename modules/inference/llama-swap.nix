@@ -27,10 +27,13 @@
 
             proxy = "http://127.0.0.1:\${PORT}";
 
+            env = [
+              "VK_LOADER_DRIVERS_SELECT=*radeon"
+            ];
+
             cmd = ''
               ${llamaServer}
               --model ${lib.escapeShellArg modelPath}
-              --device Vulkan0
               --split-mode none
               --n-gpu-layers 99
               --n-cpu-moe 0
