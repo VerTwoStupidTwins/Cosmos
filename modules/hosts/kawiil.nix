@@ -20,6 +20,9 @@
       # GPU Drivers
       self.nixosModules.kawiilGpu
 
+      # Inference
+      self.nixosModules.llamaVulkan
+
       # Kawiil-specific configuration
       {
         nix.settings.extra-trusted-public-keys = [
