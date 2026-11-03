@@ -31,6 +31,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     llama-cpp.url = "github:ggml-org/llama.cpp";
+    codex-cli-nix.url = "github:sadjow/codex-cli-nix";
   };
 
   outputs = inputs: inputs.flake-parts.lib.mkFlake { inherit inputs; } (inputs.import-tree ./modules);

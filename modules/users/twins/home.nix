@@ -1,4 +1,4 @@
-{ self, ... }:
+{ self, inputs, ... }:
 
 {
   flake.homeModules.twins = { pkgs, ... }: {
@@ -16,7 +16,7 @@
     home.stateVersion = "26.05";
 
     home.packages = with pkgs; [
-      codex
+      inputs.codex-cli-nix.packages.x86_64-linux.default
     ];
   };
 }
