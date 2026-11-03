@@ -1,11 +1,10 @@
-{ ... }:
+{ inputs, ... }:
 
 {
   flake.nixosModules.llamaVulkan = { pkgs, ... }: {
     environment.systemPackages = [
-      (pkgs.llama-cpp.override {
-        vulkanSupport = true;
-      })
+      inputs.llama-cpp.packages.x86-linux.vulkan
+
       pkgs.python314Packages.huggingface-hub
     ];
   };
