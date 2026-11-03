@@ -17,6 +17,9 @@
       inputs.disko.nixosModules.disko
       ../../hosts/kawiil/disko.nix
 
+      # GPU Drivers
+      self.nixosModules.kawiilGpu
+
       # Kawiil-specific configuration
       {
         nix.settings.extra-trusted-public-keys = [
