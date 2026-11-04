@@ -46,4 +46,10 @@
 
     StrictHostKeyChecking = "yes";
   };
+
+  home-manager.users.twins.programs.ssh.settings.kawiil = {
+    User = "twins";
+    IdentityFile = "/home/twins/.ssh/id_ed25519_cosmos_admin";
+    IdentitiesOnly = true;
+  };
 }
