@@ -2,6 +2,7 @@ keys:
   - &thoth age1anv50487nvjm2ja53r738p9wk6xqylwuddxsxu7urxhey5808pfshtedw9
   - &recovery age1vvqp36sxzd98t40qh2tsg9twuv8cepdlwxlgsj28x4u86e9t733q47ewr9
   - &kawiil age16q6nekyes8smxhlw9p0xwyt83rr4pcvyln3z3334g6j89cj3m3hst2vj33
+  - &iris age1tpjsyv9ykrdvcdjkqtvv53lfffa8dys0d77fq3nrxdwpluzy434q0tk6za
 
 creation_rules:
   - path_regex: ^secrets/thoth\.yaml$
@@ -10,9 +11,16 @@ creation_rules:
           - *thoth
           - *recovery
 
+  - path_regex: ^secrets/iris\.yaml$
+    key_groups:
+      - age:
+          - *iris
+          - *recovery
+
   - path_regex: ^secrets/shared\.yaml$
     key_groups:
       - age:
           - *thoth
           - *recovery
           - *kawiil
+          - *iris

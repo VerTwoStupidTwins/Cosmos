@@ -1,5 +1,5 @@
 {
-  description = "Thoth NixOS - HP Elite Dragonfly Chromebook";
+  description = "Cosmos NixOS systems";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
