@@ -24,7 +24,8 @@
     };
     hermes-agent = {
       url = "github:NousResearch/hermes-agent";
-      inputs.nixpkgs.follows = "nixpkgs";
+      # Its patchelf patch only applies to the 0.19.2 in the nixpkgs revision Hermes locks.
+      inputs.nixpkgs.url = "github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe";
       inputs.home-manager.follows = "home-manager";
     };
     llama-cpp = {

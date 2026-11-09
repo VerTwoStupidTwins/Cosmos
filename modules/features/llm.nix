@@ -62,7 +62,7 @@
 
             helper.cmd = server helperDevice [
               "-m ${helperModels}/Qwen3.8-9B-heretic-uncensored.Q5_K_M.gguf"
-              "-c 64000"
+              "-c 96000"
               "-np 2"
               "--kv-unified"
               q8Cache

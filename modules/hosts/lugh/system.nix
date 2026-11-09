@@ -11,6 +11,7 @@ in
       nixos.gpu
       nixos.claude-code
       nixos.llm
+      nixos.hermes
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";

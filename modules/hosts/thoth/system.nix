@@ -12,6 +12,7 @@ in
       nixos.hyprland
       nixos.build-client
       nixos.claude-code
+      nixos.hermes-desktop
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";
