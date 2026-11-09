@@ -7,6 +7,7 @@ in
     imports = [
       nixos.systemd-boot
       nixos.server
+      nixos.builder
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";

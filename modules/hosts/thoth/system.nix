@@ -10,6 +10,7 @@ in
       nixos.snapshots
       nixos.desktop
       nixos.hyprland
+      nixos.build-client
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";
