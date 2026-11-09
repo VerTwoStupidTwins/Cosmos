@@ -1,7 +1,8 @@
 keys:
   - &admin age1drxrwyqyt093u6sdepe552qq4k5k9rlz3859t3t2g76elfzap4uq7wzja3
   - &thoth age1y3fzcwatkggphukr49hl22h2y88zvlgve430m6rsw24tdusz7qqq6nc42a 
+  - &lugh  age1az7jws43wyt0nq8v2l0gkchkw078fmuyqprrjt6xpa5d2ppmrvpqy6dmng
 creation_rules:
   - path_regex: secrets/.*\.yaml$
     key_groups:
-      - age: [*admin, *thoth]
+      - age: [*admin, *thoth, *lugh]
