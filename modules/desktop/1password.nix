@@ -15,10 +15,10 @@
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMXU4Nx8Z3Vst+FwsXIlz6bjJLtvU4ZwMUd9Rw/5mZbc";
 
         xdg.configFile."1Password/ssh/agent.toml".text = ''
-                    [[ssh-keys]]
-                    vault = "Cosmos Runtime"
-          	  [[ssh-keys]]
-          	  vault = "Private"
+	  [[ssh-keys]]
+          vault = "Cosmos Runtime"
+          [[ssh-keys]]
+          vault = "Private"
         '';
 
         programs.git.signing = {
@@ -31,8 +31,8 @@
           enable = true;
           enableDefaultConfig = false;
           settings."github.com" = {
-            identityFile = "~/.ssh/github.pub";
-            identitiesOnly = true;
+            IdentityFile = "~/.ssh/github.pub";
+            IdentitiesOnly = true;
           };
         };
       }
