@@ -630,7 +630,6 @@
           "name": "21.54",
           "value": 0
         },
-        "serial": "0x0001",
         "model": "Azurewave USB2.0 HD UVC WebCam",
         "sysfs_id": "/devices/pci0000:00/0000:00:14.0/usb3/3-8/3-8:1.0",
         "sysfs_bus_id": "3-8:1.0",
@@ -732,7 +731,6 @@
           "name": "21.54",
           "value": 0
         },
-        "serial": "0x0001",
         "model": "Azurewave USB2.0 HD UVC WebCam",
         "sysfs_id": "/devices/pci0000:00/0000:00:14.0/usb3/3-8/3-8:1.1",
         "sysfs_bus_id": "3-8:1.1",
@@ -1025,7 +1023,6 @@
           "hex": "a801",
           "value": 43009
         },
-        "serial": "S7U5NJ0XB13418V",
         "model": "Samsung SSD 990 EVO Plus 1TB",
         "sysfs_id": "/class/block/nvme0n1",
         "sysfs_bus_id": "nvme0",
@@ -1105,7 +1102,6 @@
           "name": "1100",
           "value": 0
         },
-        "serial": "AA00000000000489",
         "model": "Samsung Type-C",
         "sysfs_id": "/class/block/sda",
         "sysfs_bus_id": "0:0:0:0",
@@ -1613,7 +1609,6 @@
           "hex": "4171",
           "value": 16753
         },
-        "serial": "0",
         "model": "ATNA40YK07-0 LCD Monitor",
         "resources": [
           {
@@ -2913,7 +2908,6 @@
           "name": "21.54",
           "value": 0
         },
-        "serial": "0x0001",
         "model": "Azurewave USB2.0 HD UVC WebCam",
         "sysfs_id": "/devices/pci0000:00/0000:00:14.0/usb3/3-8/3-8:1.2",
         "sysfs_bus_id": "3-8:1.2",
