@@ -1,6 +1,9 @@
 { inputs, ... }:
 let
-  mountOptions = [ "compress=zstd:1" "noatime" ];
+  mountOptions = [
+    "compress=zstd:1"
+    "noatime"
+  ];
 in
 {
   hosts.lugh = {
@@ -31,17 +34,32 @@ in
               settings = {
                 allowDiscards = true;
                 bypassWorkqueues = true;
-		crypttabExtraOpts = [ "tpm2-device=auto" ];
+                crypttabExtraOpts = [ "tpm2-device=auto" ];
               };
               content = {
                 type = "btrfs";
                 extraArgs = [ "-f" ];
                 subvolumes = {
-                  "@" = { mountpoint = "/"; inherit mountOptions; };
-                  "@home" = { mountpoint = "/home"; inherit mountOptions; };
-                  "@nix" = { mountpoint = "/nix"; inherit mountOptions; };
-                  "@models" = { mountpoint = "/models"; inherit mountOptions; };
-                  "@games" = { mountpoint = "/games"; inherit mountOptions; };
+                  "@" = {
+                    mountpoint = "/";
+                    inherit mountOptions;
+                  };
+                  "@home" = {
+                    mountpoint = "/home";
+                    inherit mountOptions;
+                  };
+                  "@nix" = {
+                    mountpoint = "/nix";
+                    inherit mountOptions;
+                  };
+                  "@models" = {
+                    mountpoint = "/models";
+                    inherit mountOptions;
+                  };
+                  "@games" = {
+                    mountpoint = "/games";
+                    inherit mountOptions;
+                  };
                 };
               };
             };

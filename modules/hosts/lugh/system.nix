@@ -8,6 +8,9 @@ in
       nixos.systemd-boot
       nixos.server
       nixos.builder
+      nixos.gpu
+      nixos.claude-code
+      nixos.llm
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";

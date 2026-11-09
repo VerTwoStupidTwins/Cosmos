@@ -6,7 +6,9 @@
       protocol = "ssh-ng";
       write = true;
       trusted = true;
-      keys = [ "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKzNYKxXW4zC6fUZHoN31tyx43Jxar8iGKqBtx/Azf4e nix-builder" ];
+      keys = [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKzNYKxXW4zC6fUZHoN31tyx43Jxar8iGKqBtx/Azf4e nix-builder"
+      ];
     };
   };
 
@@ -32,7 +34,12 @@
           sshKey = config.sops.secrets.builder-key.path;
           maxJobs = 12;
           speedFactor = 4;
-          supportedFeatures = [ "nixos-test" "big-parallel" "kvm" "benchmark" ];
+          supportedFeatures = [
+            "nixos-test"
+            "big-parallel"
+            "kvm"
+            "benchmark"
+          ];
         }
       ];
     };
