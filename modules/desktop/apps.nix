@@ -8,7 +8,7 @@
           programs.firefox.enable = true;
 
           home.packages = with pkgs; [
-           # other GUI apps here 
+            # other GUI apps here
           ];
         }
       )

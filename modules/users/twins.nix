@@ -11,7 +11,10 @@
       isNormalUser = true;
       shell = pkgs.fish;
       hashedPasswordFile = config.sops.secrets.twins-password.path;
-      extraGroups = [ "wheel" "networkmanager" ];
+      extraGroups = [
+        "wheel"
+        "networkmanager"
+      ];
 
       openssh.authorizedKeys.keys = [
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKa1QvCU/Rrvh44eY4UZT0qunJkwvNYqt7F5rrK7IJno"

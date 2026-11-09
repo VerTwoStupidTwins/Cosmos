@@ -1,4 +1,9 @@
-{ config, inputs, lib, ... }:
+{
+  config,
+  inputs,
+  lib,
+  ...
+}:
 {
   options.hosts = lib.mkOption {
     type = lib.types.lazyAttrsOf lib.types.deferredModule;
@@ -10,8 +15,8 @@
     inputs.nixpkgs.lib.nixosSystem {
       modules = [
         config.flake.modules.nixos.base
-	module
-	{ networking.hostName = name; }
+        module
+        { networking.hostName = name; }
       ];
     }
   ) config.hosts;

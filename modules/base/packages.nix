@@ -1,5 +1,5 @@
 {
-  flake.modules.nixos.base = { pkgs, ... }:{
+  flake.modules.nixos.base = { pkgs, ... }: {
     environment.systemPackages = with pkgs; [
       git
       neovim
