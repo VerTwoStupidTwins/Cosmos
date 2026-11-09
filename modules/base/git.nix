@@ -7,7 +7,7 @@
           settings = {
             user = {
               name = "TwoStupidTwins";
-              email = "340907260+VerTwoStpidTwins@users.noreply.github.com";
+              email = "340907260+VerTwoStupidTwins@users.noreply.github.com";
             };
             init.defaultBranch = "main";
             pull.rebase = true;
