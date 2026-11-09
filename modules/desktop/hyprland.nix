@@ -1,4 +1,4 @@
-# modules/features/hyprland.nix
+# modules/desktop/hyprland.nix
 {
   flake.modules.nixos.hyprland = {
     programs.hyprland.enable = true;
@@ -85,7 +85,6 @@
 
               hl.on("hyprland.start", function()
                  hl.exec_cmd("waybar")
-                 hl.exec_cmd("systemctl --user start hyprpolkitagent")
               	 hl.exec_cmd("1password --silent")
               end)
 

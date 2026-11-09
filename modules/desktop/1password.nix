@@ -9,7 +9,10 @@
 
     home-manager.sharedModules = [
       {
-        home.sessionVariables.SSH_AUTH_SOCK = "$HOME/.1password/agent.sock";
+        home.sessionVariables = {
+          SSH_AUTH_SOCK = "$HOME/.1password/agent.sock";
+          SOPS_AGE_KEY_CMD = "op read op://wjyh7zy4j3dddmx5xw6sk3thpi/sops-admin-age/private_key";
+        };
 
         home.file.".ssh/github.pub".text =
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMXU4Nx8Z3Vst+FwsXIlz6bjJLtvU4ZwMUd9Rw/5mZbc";
@@ -36,6 +39,15 @@
           };
         };
       }
+      (
+        { config, ... }:
+        {
+          home.file.".ssh/allowed_signers".text =
+            "${config.programs.git.settings.user.email} ${config.programs.git.signing.key}\n";
+
+          programs.git.settings.gpg.ssh.allowedSignersFile = "~/.ssh/allowed_signers";
+        }
+      )
     ];
   };
 }

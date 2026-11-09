@@ -24,8 +24,6 @@
     home-manager.users.twins = {
       home.stateVersion = "26.05";
 
-      home.sessionVariables.SOPS_AGE_KEY_CMD = "op read op://wjyh7zy4j3dddmx5xw6sk3thpi/sops-admin-age/private_key";
-
       programs.fish.enable = true;
     };
   };
