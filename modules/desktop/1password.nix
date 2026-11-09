@@ -11,6 +11,8 @@
       {
         home.sessionVariables.SSH_AUTH_SOCK = "$HOME/.1password/agent.sock";
 
+	home.file.".ssh/github.pub".text = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMXU4Nx8Z3Vst+FwsXIlz6bjJLtvU4ZwMUd9Rw/5mZbc";
+
         xdg.configFile."1Password/ssh/agent.toml".text = ''
           [[ssh-keys]]
           vault = "Cosmos Runtime"
@@ -22,6 +24,15 @@
 	  format = "ssh";
 	  key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKa1QvCU/Rrvh44eY4UZT0qunJkwvNYqt7F5rrK7IJno";
 	  signByDefault = true;
+	};
+
+	programs.ssh = {
+	  enable = true;
+	  enableDefaultConfig = false;
+	  matchBlocks."github.com" = {
+	    identityFile = "~/.ssh/github.pub";
+	    identitiesOnly = true;
+	  };
 	};
       }
     ];
