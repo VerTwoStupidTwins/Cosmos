@@ -10,9 +10,29 @@
       mainModels = "/models/qwen3.8-27b";
       helperModels = "/models/helpers";
 
-      # Vulkan numbering can change when a GPU is added: recheck with `llama-server --list-devices`.
-      mainDevice = "Vulkan0"; # RX 7900 XT
-      helperDevice = "Vulkan1"; # Arc Pro B50
+      mainDevice = "Vulkan0";
+      helperDevice = "Vulkan1";
+      smallModelDevice = "Vulkan2";
+
+      # Vulkan numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
+      expectedCards = {
+        ${mainDevice} = "RX 7900 XT";
+        ${helperDevice} = "Arc(tm) B580";
+        ${smallModelDevice} = "Arc(tm) Pro B50";
+      };
+
+      checkDevices = pkgs.writeShellScript "llama-swap-check-devices" ''
+        devices=$(${llama-server} --list-devices 2>&1)
+        ${lib.concatStrings (
+          lib.mapAttrsToList (device: card: ''
+            if ! ${lib.getExe pkgs.gnugrep} -qF "${device}: " <<< "$(${lib.getExe pkgs.gnugrep} -F "${card}" <<< "$devices")"; then
+              echo "Expected ${card} on ${device}. Update llm.nix to match llama-server --list-devices:" >&2
+              echo "$devices" >&2
+              exit 1
+            fi
+          '') expectedCards
+        )}
+      '';
 
       q8Cache = "-ctk q8_0 -ctv q8_0";
 
@@ -38,6 +58,8 @@
       ];
 
       systemd.tmpfiles.rules = [ "d /models 0775 twins users -" ];
+
+      systemd.services.llama-swap.serviceConfig.ExecStartPre = checkDevices;
 
       services.llama-swap = {
         enable = true;
@@ -69,17 +91,17 @@
               "--spec-type none"
             ];
 
-            vision.cmd = server helperDevice [
+            vision.cmd = server smallModelDevice [
               "-m ${helperModels}/LFM3-VL-2B-Q6_K.gguf"
               "--mmproj ${helperModels}/mmproj-LFM3-VL-2B-F16.gguf"
-              "-mmdev ${helperDevice}"
+              "-mmdev ${smallModelDevice}"
               "-c 16384"
               "-np 1"
               "-b 4096 -ub 4096"
               "--reasoning off"
             ];
 
-            decision.cmd = server helperDevice [
+            decision.cmd = server smallModelDevice [
               "-m ${helperModels}/d1-2B-Q8_0.gguf"
               "-c 8192"
               "-np 1"
@@ -88,10 +110,10 @@
 
             embedding = {
               ttl = 1800;
-              cmd = server helperDevice [
+              cmd = server smallModelDevice [
                 "-m ${helperModels}/embeddinggemma-2-Q8_0.gguf"
                 "--mmproj ${helperModels}/mmproj-embeddinggemma-2-BF16.gguf"
-                "-mmdev ${helperDevice}"
+                "-mmdev ${smallModelDevice}"
                 "--embedding"
                 "-c 8192"
                 "-np 1"
@@ -101,7 +123,7 @@
 
             reranker = {
               ttl = 1800;
-              cmd = server helperDevice [
+              cmd = server smallModelDevice [
                 "-m ${helperModels}/Qwen3-Reranker-0.6B.Q8_0.gguf"
                 "--rerank --embedding --pooling rank"
                 "-c 8192"
@@ -132,7 +154,7 @@
                 ];
               };
 
-              # Only one of these is loaded at a time, which keeps the helper GPU inside its memory budget.
+              # Only one of these is loaded at a time, which keeps the small model GPU inside its memory budget.
               retrieval = {
                 swap = true;
                 exclusive = false;
