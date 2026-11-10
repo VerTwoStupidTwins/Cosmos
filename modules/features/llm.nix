@@ -7,7 +7,7 @@
       llama-cpp = inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan;
       llama-server = lib.getExe' llama-cpp "llama-server";
 
-      mainModels = "/models/qwen3.8-27b";
+      mainModels = "/models/ornith-1.5-35b";
       helperModels = "/models/helpers";
 
       mainDevice = "Vulkan0";
@@ -73,9 +73,11 @@
           # Clients ask for these role names, so the model behind a role can change without touching them.
           models = {
             main.cmd = server mainDevice [
-              "-m ${mainModels}/Swift-1.5-Qwen3.8-27B-Uncensored-VAL-APEX-I-NanoPlus-V3.gguf"
-              "-c 128000"
-              "-np 1"
+              "-m ${mainModels}/Ornith-1.5-35B-A3B-Abliterated-MTPv2-APEX-I-Mini-v2D-lite.gguf"
+              # A second slot lets another job run beside a chat. Both share one pool, so either can use all of it.
+              "-c 262144"
+              "-np 2"
+              "--kv-unified"
               q8Cache
               "-ctkd q8_0 -ctvd q8_0"
               "--spec-type draft-mtp"
@@ -90,6 +92,17 @@
               q8Cache
               "--spec-type none"
               # Thinking made its work several times slower without improving the results.
+              "--reasoning off"
+            ];
+
+            # Background work nobody waits on, so it never queues ahead of the helper's.
+            worker.cmd = server smallModelDevice [
+              "-m ${helperModels}/Ornith-1.5-9B-uncensored.Q5_K_M.gguf"
+              "-c 32000"
+              "-np 2"
+              "--kv-unified"
+              q8Cache
+              "--spec-type none"
               "--reasoning off"
             ];
 
@@ -151,6 +164,7 @@
                 exclusive = false;
                 members = [
                   "helper"
+                  "worker"
                   "vision"
                   "decision"
                 ];
@@ -168,11 +182,12 @@
             };
           };
 
+          # The decision model loads on first use. Nothing calls it until it has an approval adapter.
           hooks.on_startup.preload = [
             "main"
             "helper"
+            "worker"
             "vision"
-            "decision"
           ];
         };
       };

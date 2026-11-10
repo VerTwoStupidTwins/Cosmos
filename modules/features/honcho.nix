@@ -57,9 +57,9 @@
         dontCheckRuntimeDeps = true;
       };
 
-      useHelper = prefix: {
+      useModel = model: prefix: {
         "${prefix}__TRANSPORT" = "openai";
-        "${prefix}__MODEL" = "helper";
+        "${prefix}__MODEL" = model;
         "${prefix}__OVERRIDES__BASE_URL" = llamaSwap;
       };
 
@@ -79,26 +79,25 @@
         EMBEDDING_MODEL_CONFIG__OVERRIDES__BASE_URL = llamaSwap;
         EMBEDDING_MODEL_CONFIG__MAX_BATCH_SIZE = "10";
 
-        # Otherwise the helper spends the summary's whole token limit on reasoning.
+        # A thinking model would otherwise spend the summary's whole token limit on reasoning.
         SUMMARY_MODEL_CONFIG__THINKING_EFFORT = "none";
       }
       # Each feature needs its own endpoint, or it falls back to OpenAI.
+      # Memory upkeep runs in the background, while chat answers have someone waiting.
       // lib.mergeAttrsList (
-        map useHelper (
-          [
-            "DERIVER_MODEL_CONFIG"
-            "SUMMARY_MODEL_CONFIG"
-            "DREAM_DEDUCTION_MODEL_CONFIG"
-            "DREAM_INDUCTION_MODEL_CONFIG"
-          ]
-          ++ map (level: "DIALECTIC_LEVELS__${level}__MODEL_CONFIG") [
-            "minimal"
-            "low"
-            "medium"
-            "high"
-            "max"
-          ]
-        )
+        map (useModel "worker") [
+          "DERIVER_MODEL_CONFIG"
+          "SUMMARY_MODEL_CONFIG"
+          "DREAM_DEDUCTION_MODEL_CONFIG"
+          "DREAM_INDUCTION_MODEL_CONFIG"
+        ]
+        ++ map (level: useModel "helper" "DIALECTIC_LEVELS__${level}__MODEL_CONFIG") [
+          "minimal"
+          "low"
+          "medium"
+          "high"
+          "max"
+        ]
       );
 
       # Host networking lets Honcho reach llama-swap, which only listens on localhost.
