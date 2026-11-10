@@ -12,6 +12,7 @@ in
       nixos.claude-code
       nixos.llm
       nixos.hermes
+      nixos.honcho
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";
