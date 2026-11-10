@@ -11,8 +11,8 @@
       helperModels = "/models/helpers";
 
       mainDevice = "Vulkan0";
-      helperDevice = "Vulkan1";
-      smallModelDevice = "Vulkan2";
+      helperDevice = "Vulkan2";
+      smallModelDevice = "Vulkan1";
 
       # Vulkan numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
       expectedCards = {
@@ -83,12 +83,14 @@
             ];
 
             helper.cmd = server helperDevice [
-              "-m ${helperModels}/Qwen3.8-9B-heretic-uncensored.Q5_K_M.gguf"
+              "-m ${helperModels}/Ornith-1.5-9B-uncensored.Q5_K_M.gguf"
               "-c 96000"
               "-np 2"
               "--kv-unified"
               q8Cache
               "--spec-type none"
+              # Thinking made its work several times slower without improving the results.
+              "--reasoning off"
             ];
 
             vision.cmd = server smallModelDevice [
