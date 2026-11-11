@@ -42,6 +42,9 @@
           sessionTokenFile = config.sops.secrets.hermes-desktop-token.path;
         };
 
+        # llama-swap ignores it, but the image backend refuses to run without a key.
+        environment.LLAMA_SWAP_API_KEY = "local";
+
         settings = {
           model = {
             provider = "custom";
@@ -64,6 +67,17 @@
             background_review = helperTask 300;
             curator = helperTask 600;
             vision = localTask "vision" 120;
+          };
+
+          image_gen = {
+            provider = "openai";
+            openai = {
+              base_url = llamaSwap;
+              key_env = "LLAMA_SWAP_API_KEY";
+              model = "image-fast";
+            };
+            # Both image models share one card.
+            max_parallel_requests = 1;
           };
         };
       };

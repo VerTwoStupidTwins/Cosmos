@@ -9,10 +9,36 @@
 
       mainModels = "/models/ornith-1.5-35b";
       helperModels = "/models/helpers";
+      imageModels = "/models/image";
 
       mainDevice = "Vulkan0";
       helperDevice = "Vulkan2";
       smallModelDevice = "Vulkan1";
+      # SYCL numbers only the Intel cards, so the helper's card has a different name there.
+      helperSyclDevice = "SYCL1";
+
+      oneapi = pkgs.intel-oneapi-toolkit;
+
+      # Chroma renders only noise through Vulkan on the Arc cards, so it uses Intel's SYCL backend.
+      stable-diffusion-sycl =
+        (pkgs.stable-diffusion-cpp.override { stdenv = oneapi.stdenv; }).overrideAttrs
+          (old: {
+            pname = "stable-diffusion-cpp-sycl";
+            buildInputs = (old.buildInputs or [ ]) ++ [
+              oneapi
+              pkgs.level-zero
+            ];
+            # Fortify breaks the SYCL device code, as in nixpkgs' llama.cpp SYCL build.
+            hardeningDisable = [
+              "fortify"
+              "fortify3"
+            ];
+            # SYCL passes -fsycl to every target, and the video library insists on C++11, which SYCL rejects.
+            cmakeFlags = (old.cmakeFlags or [ ]) ++ [
+              "-DSD_SYCL=ON"
+              "-DSD_WEBM=OFF"
+            ];
+          });
 
       # Vulkan numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
       expectedCards = {
@@ -32,6 +58,10 @@
             fi
           '') expectedCards
         )}
+        if ! ${lib.getExe' stable-diffusion-sycl "sd-cli"} --list-devices 2>&1 | ${lib.getExe pkgs.gnugrep} -F "Arc(TM) B580" | ${lib.getExe pkgs.gnugrep} -q "^${helperSyclDevice}[[:space:]]"; then
+          echo "Expected the Arc B580 on ${helperSyclDevice}. Update llm.nix to match sd-cli --list-devices from the SYCL build." >&2
+          exit 1
+        fi
       '';
 
       q8Cache = "-ctk q8_0 -ctv q8_0";
@@ -50,12 +80,36 @@
           ]
           ++ args
         );
+
+      imageServer =
+        package: args:
+        lib.concatStringsSep " " (
+          [
+            (lib.getExe' package "sd-server")
+            "--listen-port \${PORT}"
+            # Otherwise every request uses seed 42, and the same prompt always gives the same image.
+            "--seed -1"
+            # Decoding the whole image at once took a minute on the B580.
+            "--vae-tiling"
+          ]
+          ++ args
+        );
+
+      # sd-server only listens once its model has loaded.
+      imageModel = cmd: {
+        inherit cmd;
+        ttl = 300;
+        checkEndpoint = "/";
+      };
     in
     {
       environment.systemPackages = [
         llama-cpp
         pkgs.python3Packages.huggingface-hub
       ];
+
+      # The Level Zero driver that SYCL runs on.
+      hardware.graphics.extraPackages = [ pkgs.intel-compute-runtime ];
 
       systemd.tmpfiles.rules = [ "d /models 0775 twins users -" ];
 
@@ -146,6 +200,30 @@
                 "-b 8192 -ub 8192"
               ];
             };
+
+            "image-fast" = imageModel (
+              imageServer pkgs.stable-diffusion-cpp-vulkan [
+                "--backend ${helperDevice}"
+                "-m ${imageModels}/waiNSFWIllustrious_v14.safetensors"
+                "--steps 28"
+                "--cfg-scale 6"
+                "--sampling-method euler_a"
+              ]
+            );
+
+            "image-quality" = imageModel (
+              imageServer stable-diffusion-sycl [
+                # The text encoder doesn't fit beside the image model, and it reads a prompt in seconds on the CPU.
+                "--backend te=CPU,diffusion=${helperSyclDevice},vae=${helperSyclDevice}"
+                "--diffusion-model ${imageModels}/Chroma1-HD-Flash-Q6_K.gguf"
+                "--t5xxl ${imageModels}/t5-v1_1-xxl-encoder-Q8_0.gguf"
+                "--vae ${imageModels}/flux-ae.safetensors"
+                # Flash has guidance built in, so it needs no second pass and few steps.
+                "--steps 8"
+                "--sampling-method heun"
+                "--cfg-scale 1"
+              ]
+            );
           };
 
           routing.router = {
@@ -163,10 +241,22 @@
                 swap = false;
                 exclusive = false;
                 members = [
-                  "helper"
                   "worker"
                   "vision"
                   "decision"
+                ];
+              };
+
+              # The image models need the helper's whole card. Loading one unloads the helper, which loads
+              # again on its next request. Each side waits for the other's running requests to finish.
+              helper-card = {
+                persistent = true;
+                swap = true;
+                exclusive = false;
+                members = [
+                  "helper"
+                  "image-fast"
+                  "image-quality"
                 ];
               };
 
