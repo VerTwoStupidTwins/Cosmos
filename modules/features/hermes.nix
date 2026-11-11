@@ -27,10 +27,24 @@
     {
       imports = [ inputs.hermes-agent.nixosModules.default ];
 
-      sops.secrets.hermes-desktop-token = {
-        owner = "hermes";
-        mode = "0400";
-        restartUnits = [ "hermes-backend.service" ];
+      sops.secrets = {
+        hermes-desktop-token = {
+          owner = "hermes";
+          mode = "0400";
+          restartUnits = [ "hermes-backend.service" ];
+        };
+        tavily-api-key = { };
+      };
+
+      # Activation copies this into Hermes' .env, which Hermes reads only when it starts.
+      sops.templates."hermes.env" = {
+        content = ''
+          TAVILY_API_KEY=${config.sops.placeholder.tavily-api-key}
+        '';
+        restartUnits = [
+          "hermes-agent.service"
+          "hermes-backend.service"
+        ];
       };
 
       networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [
@@ -54,6 +68,8 @@
 
         # llama-swap ignores it, but the image backend refuses to run without a key.
         environment.LLAMA_SWAP_API_KEY = "local";
+
+        environmentFiles = [ config.sops.templates."hermes.env".path ];
 
         # The image tool can't choose its model per request, so quality images get a tool of their own.
         extraPlugins = [ imageQualityPlugin ];
@@ -92,6 +108,8 @@
             # Both image models share one card.
             max_parallel_requests = 1;
           };
+
+          web.backend = "tavily";
 
           # Plugins that aren't bundled with Hermes load only when listed.
           plugins.enabled = [ "image-quality" ];

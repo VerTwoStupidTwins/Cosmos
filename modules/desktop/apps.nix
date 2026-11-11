@@ -8,7 +8,8 @@
           programs.firefox.enable = true;
 
           home.packages = with pkgs; [
-            # other GUI apps here
+            discord
+            telegram-desktop
           ];
         }
       )
