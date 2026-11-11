@@ -2,9 +2,19 @@
 { inputs, ... }:
 {
   flake.modules.nixos.hermes =
-    { config, lib, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       llamaSwap = "http://127.0.0.1:8080/v1";
+
+      # Hermes names a Nix-managed plugin after its derivation.
+      imageQualityPlugin = pkgs.runCommand "image-quality" { } ''
+        cp -r ${./hermes-image-quality} $out
+      '';
 
       localTask = model: timeout: {
         provider = "llamacpp";
@@ -45,6 +55,9 @@
         # llama-swap ignores it, but the image backend refuses to run without a key.
         environment.LLAMA_SWAP_API_KEY = "local";
 
+        # The image tool can't choose its model per request, so quality images get a tool of their own.
+        extraPlugins = [ imageQualityPlugin ];
+
         settings = {
           model = {
             provider = "custom";
@@ -79,6 +92,9 @@
             # Both image models share one card.
             max_parallel_requests = 1;
           };
+
+          # Plugins that aren't bundled with Hermes load only when listed.
+          plugins.enabled = [ "image-quality" ];
         };
       };
     };

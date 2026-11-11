@@ -1,0 +1,4 @@
+name: image-quality
+version: 1.0.0
+description: "Slower, higher-quality local image generation beside the built-in image tool."
+author: TwoStupidTwins
