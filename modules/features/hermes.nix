@@ -33,13 +33,24 @@
           mode = "0400";
           restartUnits = [ "hermes-backend.service" ];
         };
-        tavily-api-key = { };
-      };
+      }
+      # The user IDs aren't secret, but they're personal, so they stay out of the public repository.
+      // lib.genAttrs [
+        "tavily-api-key"
+        "telegram-bot-token"
+        "telegram-allowed-users"
+        "discord-bot-token"
+        "discord-allowed-users"
+      ] (_: { });
 
       # Activation copies this into Hermes' .env, which Hermes reads only when it starts.
       sops.templates."hermes.env" = {
         content = ''
           TAVILY_API_KEY=${config.sops.placeholder.tavily-api-key}
+          TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
+          TELEGRAM_ALLOWED_USERS=${config.sops.placeholder.telegram-allowed-users}
+          DISCORD_BOT_TOKEN=${config.sops.placeholder.discord-bot-token}
+          DISCORD_ALLOWED_USERS=${config.sops.placeholder.discord-allowed-users}
         '';
         restartUnits = [
           "hermes-agent.service"
@@ -69,6 +80,7 @@
         # llama-swap ignores it, but the image backend refuses to run without a key.
         environment.LLAMA_SWAP_API_KEY = "local";
 
+        # Web search, and the Telegram and Discord bots, which reply only to the allowed users.
         environmentFiles = [ config.sops.templates."hermes.env".path ];
 
         # The image tool can't choose its model per request, so quality images get a tool of their own.
