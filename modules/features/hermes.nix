@@ -77,11 +77,19 @@
           sessionTokenFile = config.sops.secrets.hermes-desktop-token.path;
         };
 
-        # llama-swap ignores it, but the image backend refuses to run without a key.
-        environment.LLAMA_SWAP_API_KEY = "local";
+        environment = {
+          # llama-swap ignores it, but the image backend refuses to run without a key.
+          LLAMA_SWAP_API_KEY = "local";
+          # Voice messages go to the local Whisper through Hermes' OpenAI-style transcription, which also needs a key.
+          STT_OPENAI_BASE_URL = llamaSwap;
+          VOICE_TOOLS_OPENAI_KEY = "local";
+        };
 
         # Web search, and the Telegram and Discord bots, which reply only to the allowed users.
         environmentFiles = [ config.sops.templates."hermes.env".path ];
+
+        # Converts audio for voice messages, such as the Opus files Telegram plays as voice bubbles.
+        extraPackages = [ pkgs.ffmpeg-headless ];
 
         # The image tool can't choose its model per request, so quality images get a tool of their own.
         extraPlugins = [ imageQualityPlugin ];
@@ -130,6 +138,25 @@
           };
 
           web.backend = "tavily";
+
+          stt = {
+            provider = "openai";
+            language = "en";
+            openai.model = "transcription";
+          };
+
+          # Spoken replies come from the Kokoro service on lugh.
+          tts = {
+            provider = "openai";
+            openai = {
+              base_url = "http://127.0.0.1:8880/v1";
+              model = "kokoro";
+              voice = "af_heart";
+            };
+          };
+
+          # Hermes Desktop would otherwise call the speech servers itself, and they only answer on lugh.
+          voice.client_direct = false;
 
           # Plugins that aren't bundled with Hermes load only when listed.
           plugins.enabled = [ "image-quality" ];

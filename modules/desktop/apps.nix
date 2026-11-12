@@ -10,6 +10,8 @@
           home.packages = with pkgs; [
             discord
             telegram-desktop
+            mpv
+            pavucontrol
           ];
         }
       )

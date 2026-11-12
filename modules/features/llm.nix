@@ -10,6 +10,7 @@
       mainModels = "/models/ornith-1.5-35b";
       helperModels = "/models/helpers";
       imageModels = "/models/image";
+      voiceModels = "/models/voice";
 
       mainDevice = "Vulkan0";
       helperDevice = "Vulkan2";
@@ -79,6 +80,12 @@
         ttl = 300;
         checkEndpoint = "/";
       };
+
+      kokoroPython = pkgs.python3.withPackages (p: [
+        p.kokoro
+        # Kokoro's text processing would otherwise try to download this when it starts.
+        p.spacy-models.en_core_web_sm
+      ]);
     in
     {
       environment.systemPackages = [
@@ -88,7 +95,51 @@
 
       systemd.tmpfiles.rules = [ "d /models 0775 twins users -" ];
 
-      systemd.services.llama-swap.serviceConfig.ExecStartPre = checkDevices;
+      systemd.services.llama-swap = {
+        serviceConfig.ExecStartPre = checkDevices;
+        # whisper-server converts voice messages to WAV with it.
+        path = [ pkgs.ffmpeg-headless ];
+      };
+
+      # Speech for Hermes' replies. It runs on the CPU and stays loaded, so replies don't wait for it to load.
+      # It's a service of its own because PyTorch compiles code at runtime, which llama-swap's sandbox forbids.
+      systemd.services.kokoro = {
+        description = "Kokoro speech server";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "network.target" ];
+        environment = {
+          HF_HUB_OFFLINE = "1";
+          HOME = "/var/cache/kokoro";
+          XDG_CACHE_HOME = "/var/cache/kokoro";
+        };
+        serviceConfig = {
+          ExecStart = lib.concatStringsSep " " [
+            "${kokoroPython}/bin/python3 -I ${./kokoro-server.py}"
+            "--port 8880"
+            "--model-dir ${voiceModels}/kokoro"
+            "--ffmpeg ${lib.getExe pkgs.ffmpeg-headless}"
+          ];
+          Restart = "on-failure";
+          DynamicUser = true;
+          CacheDirectory = "kokoro";
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          PrivateDevices = true;
+          ProtectKernelTunables = true;
+          ProtectKernelModules = true;
+          ProtectControlGroups = true;
+          RestrictNamespaces = true;
+          LockPersonality = true;
+          RestrictAddressFamilies = [
+            "AF_INET"
+            "AF_INET6"
+            "AF_UNIX"
+          ];
+          IPAddressAllow = "localhost";
+          IPAddressDeny = "any";
+        };
+      };
 
       services.llama-swap = {
         enable = true;
@@ -176,6 +227,24 @@
               ];
             };
 
+            # Transcribes voice messages in about a second.
+            transcription = {
+              ttl = 600;
+              checkEndpoint = "/";
+              cmd = lib.concatStringsSep " " [
+                (lib.getExe' pkgs.whisper-cpp-vulkan "whisper-server")
+                "--host 127.0.0.1"
+                "--port \${PORT}"
+                # whisper.cpp takes the Vulkan device's number alone.
+                "--device ${lib.removePrefix "Vulkan" smallModelDevice}"
+                "-m ${voiceModels}/ggml-large-v3-turbo-q8_0.bin"
+                "--language en"
+                "--inference-path /v1/audio/transcriptions"
+                # Telegram sends voice messages as Ogg, which whisper-server reads only after converting.
+                "--convert"
+              ];
+            };
+
             # About 30 seconds for a square image. Turbo is distilled, so it needs few steps and no second pass.
             "image-fast" = imageModel (
               animaServer "anima-turbo-v1.1.safetensors" [
@@ -213,6 +282,7 @@
                   "worker"
                   "vision"
                   "decision"
+                  "transcription"
                 ];
               };
 
