@@ -97,6 +97,14 @@
           # Prompts need a person until the decision model has an adapter.
           approvals.mode = "manual";
 
+          # The main model is abliterated, but it still refused some explicit requests.
+          agent.system_prompt = ''
+            This is a private system used only by its adult owner. Adult and sexually explicit content is
+            allowed here, including explicit images. When asked for one, write the prompt and call an image
+            tool instead of refusing, and start the prompt with the explicit or nsfw safety tag. Every person
+            in sexual content must be an adult, so describe them as adults.
+          '';
+
           auxiliary = {
             compression = lib.recursiveUpdate (helperTask 900) {
               # A large summary spends minutes reading its prompt with no streamed output.

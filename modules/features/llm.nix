@@ -14,31 +14,6 @@
       mainDevice = "Vulkan0";
       helperDevice = "Vulkan2";
       smallModelDevice = "Vulkan1";
-      # SYCL numbers only the Intel cards, so the helper's card has a different name there.
-      helperSyclDevice = "SYCL1";
-
-      oneapi = pkgs.intel-oneapi-toolkit;
-
-      # Chroma renders only noise through Vulkan on the Arc cards, so it uses Intel's SYCL backend.
-      stable-diffusion-sycl =
-        (pkgs.stable-diffusion-cpp.override { stdenv = oneapi.stdenv; }).overrideAttrs
-          (old: {
-            pname = "stable-diffusion-cpp-sycl";
-            buildInputs = (old.buildInputs or [ ]) ++ [
-              oneapi
-              pkgs.level-zero
-            ];
-            # Fortify breaks the SYCL device code, as in nixpkgs' llama.cpp SYCL build.
-            hardeningDisable = [
-              "fortify"
-              "fortify3"
-            ];
-            # SYCL passes -fsycl to every target, and the video library insists on C++11, which SYCL rejects.
-            cmakeFlags = (old.cmakeFlags or [ ]) ++ [
-              "-DSD_SYCL=ON"
-              "-DSD_WEBM=OFF"
-            ];
-          });
 
       # Vulkan numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
       expectedCards = {
@@ -58,10 +33,6 @@
             fi
           '') expectedCards
         )}
-        if ! ${lib.getExe' stable-diffusion-sycl "sd-cli"} --list-devices 2>&1 | ${lib.getExe pkgs.gnugrep} -F "Arc(TM) B580" | ${lib.getExe pkgs.gnugrep} -q "^${helperSyclDevice}[[:space:]]"; then
-          echo "Expected the Arc B580 on ${helperSyclDevice}. Update llm.nix to match sd-cli --list-devices from the SYCL build." >&2
-          exit 1
-        fi
       '';
 
       q8Cache = "-ctk q8_0 -ctv q8_0";
@@ -81,12 +52,19 @@
           ++ args
         );
 
-      imageServer =
-        package: args:
+      # Both image tools use Anima, an anime and illustration model. It can't do photorealism.
+      animaServer =
+        model: args:
         lib.concatStringsSep " " (
           [
-            (lib.getExe' package "sd-server")
+            (lib.getExe' pkgs.stable-diffusion-cpp-vulkan "sd-server")
             "--listen-port \${PORT}"
+            "--backend ${helperDevice}"
+            "--diffusion-model ${imageModels}/${model}"
+            "--llm ${imageModels}/qwen_3_06b_base.safetensors"
+            "--vae ${imageModels}/qwen_image_vae.safetensors"
+            # Every request starts from these settings, but its prompt replaces the default one, so only the negative prompt can be set here.
+            ''-n "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration"''
             # Otherwise every request uses seed 42, and the same prompt always gives the same image.
             "--seed -1"
             # Decoding the whole image at once took a minute on the B580.
@@ -107,9 +85,6 @@
         llama-cpp
         pkgs.python3Packages.huggingface-hub
       ];
-
-      # The Level Zero driver that SYCL runs on.
-      hardware.graphics.extraPackages = [ pkgs.intel-compute-runtime ];
 
       systemd.tmpfiles.rules = [ "d /models 0775 twins users -" ];
 
@@ -201,27 +176,21 @@
               ];
             };
 
+            # About 30 seconds for a square image. Turbo is distilled, so it needs few steps and no second pass.
             "image-fast" = imageModel (
-              imageServer pkgs.stable-diffusion-cpp-vulkan [
-                "--backend ${helperDevice}"
-                "-m ${imageModels}/waiNSFWIllustrious_v14.safetensors"
-                "--steps 28"
-                "--cfg-scale 6"
-                "--sampling-method euler_a"
+              animaServer "anima-turbo-v1.1.safetensors" [
+                "--steps 10"
+                "--cfg-scale 1"
+                "--sampling-method euler"
               ]
             );
 
+            # About 2 minutes for a square image, and sharper and more detailed than Turbo.
             "image-quality" = imageModel (
-              imageServer stable-diffusion-sycl [
-                # The text encoder doesn't fit beside the image model, and it reads a prompt in seconds on the CPU.
-                "--backend te=CPU,diffusion=${helperSyclDevice},vae=${helperSyclDevice}"
-                "--diffusion-model ${imageModels}/Chroma1-HD-Flash-Q6_K.gguf"
-                "--t5xxl ${imageModels}/t5-v1_1-xxl-encoder-Q8_0.gguf"
-                "--vae ${imageModels}/flux-ae.safetensors"
-                # Flash has guidance built in, so it needs no second pass and few steps.
-                "--steps 8"
-                "--sampling-method heun"
-                "--cfg-scale 1"
+              animaServer "anima-aesthetic-v1.1.safetensors" [
+                "--steps 30"
+                "--cfg-scale 4.5"
+                "--sampling-method er_sde"
               ]
             );
           };

@@ -16,6 +16,8 @@ DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_MODEL = "image-quality"
 # Covers loading the model, waiting for the helper's running requests, and a large image.
 DEFAULT_TIMEOUT = 900
+# Anima's recommended quality tags. The server adds the negative prompt itself.
+QUALITY_TAGS = "masterpiece, best quality, score_7, "
 
 SIZES = {"landscape": "1536x1024", "square": "1024x1024", "portrait": "1024x1536"}
 
@@ -23,18 +25,22 @@ SCHEMA = {
     "name": "image_generate_quality",
     "description": (
         "Generate an image from text with the slower, higher-quality local model. A square image "
-        "takes about 4 minutes, and landscape or portrait about 6. Use image_generate for everyday "
+        "takes about 2 minutes, and landscape or portrait about 3. Use image_generate for everyday "
         "images. Use this tool only when the user asks for higher quality or more detail, or says "
-        "to take your time. It cannot edit images. Returns the result in the `image` field as an "
-        "absolute file path; reference it in your response using the current platform's "
-        "file-delivery convention."
+        "to take your time. The model draws anime and illustration styles, not photorealism, and "
+        "it cannot edit images. Returns the result in the `image` field as an absolute file path; "
+        "reference it in your response using the current platform's file-delivery convention."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "prompt": {
                 "type": "string",
-                "description": "The text prompt describing the desired image. Be detailed and descriptive.",
+                "description": (
+                    "The image description, in at least two detailed sentences. Start with one "
+                    "safety tag that matches the request: safe, sensitive, nsfw or explicit. "
+                    "Danbooru-style tags can be mixed in, and artist names need an @ in front."
+                ),
             },
             "aspect_ratio": {
                 "type": "string",
@@ -69,7 +75,9 @@ def _generate(ctx, args):
     timeout = float(ctx.get_config("request_timeout", DEFAULT_TIMEOUT))
     context = {"model": model, "prompt": prompt, "aspect_ratio": aspect}
 
-    body = json.dumps({"model": model, "prompt": prompt, "size": SIZES[aspect], "n": 1}).encode()
+    body = json.dumps(
+        {"model": model, "prompt": QUALITY_TAGS + prompt, "size": SIZES[aspect], "n": 1}
+    ).encode()
     request = urllib.request.Request(
         f"{base_url}/images/generations", data=body, headers={"Content-Type": "application/json"}
     )
