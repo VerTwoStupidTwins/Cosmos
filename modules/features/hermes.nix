@@ -102,8 +102,8 @@
             context_length = 128000;
           };
 
-          # Prompts need a person until the decision model has an adapter.
-          approvals.mode = "manual";
+          # The decision model approves clearly safe commands. Anything it denies or is unsure about still asks a person.
+          approvals.mode = "smart";
 
           # The main model is abliterated, but it still refused some explicit requests.
           agent.system_prompt = ''
@@ -124,6 +124,7 @@
             background_review = helperTask 300;
             curator = helperTask 600;
             vision = localTask "vision" 120;
+            approval = localTask "approval" 30;
           };
 
           image_gen = {

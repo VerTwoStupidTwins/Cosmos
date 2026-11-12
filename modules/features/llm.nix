@@ -196,11 +196,19 @@
               "--reasoning off"
             ];
 
+            # Judges flagged commands for Hermes, through the approval adapter.
             decision.cmd = server smallModelDevice [
               "-m ${helperModels}/d1-2B-Q8_0.gguf"
               "-c 8192"
               "-np 1"
               "-b 4096 -ub 4096"
+            ];
+
+            # Hermes asks for a one-word verdict over chat, and the decision model answers through /v1/systemone.
+            approval.cmd = lib.concatStringsSep " " [
+              "${pkgs.python3}/bin/python3 -I ${./approval-adapter.py}"
+              "--port \${PORT}"
+              "--decision-url http://127.0.0.1:8080/upstream/decision"
             ];
 
             # Honcho embeds every saved message, so this stays loaded.
@@ -282,6 +290,7 @@
                   "worker"
                   "vision"
                   "decision"
+                  "approval"
                   "transcription"
                 ];
               };
@@ -312,13 +321,15 @@
             };
           };
 
-          # The decision model loads on first use. Nothing calls it until it has an approval adapter.
+          # Every flagged command waits on an approval, so those models never wait to load.
           hooks.on_startup.preload = [
             "main"
             "helper"
             "worker"
             "vision"
             "embedding"
+            "decision"
+            "approval"
           ];
         };
       };
