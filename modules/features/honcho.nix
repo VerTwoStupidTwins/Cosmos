@@ -223,6 +223,8 @@
           aiPeer = "hermes";
           # Injecting memories into the prompt would invalidate the main model's prompt cache.
           recallMode = "tools";
+          # Tools mode otherwise opens the session at the first Honcho tool call and drops every turn before it.
+          initOnSessionStart = true;
           # Desktop and gateway users have runtime IDs, and all of them are the same person here.
           pinUserPeer = true;
         };

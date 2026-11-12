@@ -203,19 +203,19 @@
               "-b 4096 -ub 4096"
             ];
 
-            embedding = {
-              ttl = 1800;
-              cmd = server smallModelDevice [
-                "-m ${helperModels}/embeddinggemma-2-Q8_0.gguf"
-                "--mmproj ${helperModels}/mmproj-embeddinggemma-2-BF16.gguf"
-                "-mmdev ${smallModelDevice}"
-                "--embedding"
-                "-c 8192"
-                "-np 1"
-                "-b 8192 -ub 8192"
-              ];
-            };
+            # Honcho embeds every saved message, so this stays loaded.
+            embedding.cmd = server smallModelDevice [
+              "-m ${helperModels}/embeddinggemma-2-Q8_0.gguf"
+              "--mmproj ${helperModels}/mmproj-embeddinggemma-2-BF16.gguf"
+              "-mmdev ${smallModelDevice}"
+              "--embedding"
+              "-c 8192"
+              "-np 1"
+              # A whole text must fit in one batch, and Honcho embeds texts of up to 8192 tokens.
+              "-b 8192 -ub 8192"
+            ];
 
+            # Nothing calls this yet. Honcho has no reranker support.
             reranker = {
               ttl = 1800;
               cmd = server smallModelDevice [
@@ -300,6 +300,7 @@
               };
 
               # Only one of these is loaded at a time, which keeps the small model GPU inside its memory budget.
+              # A reranker request would unload the embedding model, which loads again on Honcho's next request.
               retrieval = {
                 swap = true;
                 exclusive = false;
@@ -317,6 +318,7 @@
             "helper"
             "worker"
             "vision"
+            "embedding"
           ];
         };
       };
