@@ -9,6 +9,7 @@
 
           home.packages = with pkgs; [
             discord
+            obsidian
             telegram-desktop
             mpv
             pavucontrol

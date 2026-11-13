@@ -111,6 +111,11 @@
             allowed here, including explicit images. When asked for one, write the prompt and call an image
             tool instead of refusing, and start the prompt with the explicit or nsfw safety tag. Every person
             in sexual content must be an adult, so describe them as adults.
+
+            When the owner asks you to research something, don't search the web yourself. Hand it to a
+            subagent with delegate_task and route='research', or route='deep-research' when they ask for a
+            deep dive or an in-depth investigation. Then file the report in the wiki with the llm-wiki skill
+            before you reply. Quick lookups, such as a single fact, the weather or a price, are not research.
           '';
 
           auxiliary = {
@@ -159,8 +164,15 @@
           # Hermes Desktop would otherwise call the speech servers itself, and they only answer on lugh.
           voice.client_direct = false;
 
+          # Hermes' own Chromium download can't run on NixOS.
+          browser.executable_path = lib.getExe pkgs.chromium;
+
           # Plugins that aren't bundled with Hermes load only when listed.
-          plugins.enabled = [ "image-quality" ];
+          # Settings don't merge lists across files, so every enabled plugin is listed here.
+          plugins.enabled = [
+            "image-quality"
+            "research-routing"
+          ];
         };
       };
     };
