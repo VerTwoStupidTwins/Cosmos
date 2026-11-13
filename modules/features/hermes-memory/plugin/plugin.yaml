@@ -1,0 +1,4 @@
+name: hermes-memory
+version: 1.0.0
+description: "Durable memories and wiki search through lugh's memory service, with subagents kept out and local-only memories kept off remote chats."
+author: TwoStupidTwins

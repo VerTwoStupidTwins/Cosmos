@@ -19,11 +19,9 @@
         "kokoro"
         "hermes-agent"
         "hermes-backend"
-        "podman-honcho-api"
-        "podman-honcho-deriver"
-        "podman-openconcho"
+        "hermes-memory"
+        "obsidian-sync"
         "postgresql"
-        "redis-honcho"
         "netbird-wt0"
         "sshd"
       ];
@@ -57,10 +55,8 @@
           "${pkgs.systemd}/bin/journalctl"
           "--llama-swap-url"
           "http://127.0.0.1:${toString config.services.llama-swap.port}"
-          "--honcho-url"
-          "http://127.0.0.1:8000"
-          "--honcho-workspace"
-          "hermes"
+          "--memory-socket"
+          config.services.hermes-agent.environment.HERMES_MEMORY_SOCKET
           "--units"
           (lib.concatStringsSep "," units)
           "--disks"

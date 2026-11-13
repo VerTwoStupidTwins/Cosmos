@@ -211,7 +211,7 @@
               "--decision-url http://127.0.0.1:8080/upstream/decision"
             ];
 
-            # Honcho embeds every saved message, so this stays loaded.
+            # Every memory and wiki search embeds, so this stays loaded.
             embedding.cmd = server smallModelDevice [
               "-m ${helperModels}/embeddinggemma-2-Q8_0.gguf"
               "--mmproj ${helperModels}/mmproj-embeddinggemma-2-BF16.gguf"
@@ -219,7 +219,7 @@
               "--embedding"
               "-c 8192"
               "-np 1"
-              # A whole text must fit in one batch, and Honcho embeds texts of up to 8192 tokens.
+              # A whole text must fit in one batch, and a text can be up to 8192 tokens.
               "-b 8192 -ub 8192"
             ];
 
@@ -309,7 +309,7 @@
                 ];
               };
 
-              # Honcho and the wiki search embed constantly, so both stay loaded side by side.
+              # Memory and wiki searches use both on every query, so they stay loaded side by side.
               retrieval = {
                 persistent = true;
                 swap = false;

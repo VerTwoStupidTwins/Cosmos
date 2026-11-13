@@ -106,6 +106,14 @@
           approvals.mode = "smart";
 
           # The main model is abliterated, but it still refused some explicit requests.
+          # The memory_ tools are Hermes' only memory, so its built-in MEMORY.md and USER.md stay off.
+          memory = {
+            # Settings merge into Hermes' config file, so a removed provider would stay set without this.
+            provider = "";
+            memory_enabled = false;
+            user_profile_enabled = false;
+          };
+
           agent.system_prompt = ''
             This is a private system used only by its adult owner. Adult and sexually explicit content is
             allowed here, including explicit images. When asked for one, write the prompt and call an image
@@ -116,6 +124,11 @@
             subagent with delegate_task and route='research', or route='deep-research' when they ask for a
             deep dive or an in-depth investigation. Then file the report in the wiki with the llm-wiki skill
             before you reply. Quick lookups, such as a single fact, the weather or a price, are not research.
+
+            Your lasting memory of the owner is the memory_ tools. When the owner tells you something worth
+            keeping about themselves, their setup or how they like things done, or asks you to remember
+            something, save it with memory_remember. Before answering anything that depends on their situation
+            or history, check memory_recall. When they correct something you remembered, revise that memory.
           '';
 
           auxiliary = {
@@ -172,6 +185,7 @@
           plugins.enabled = [
             "image-quality"
             "research-routing"
+            "hermes-memory"
           ];
         };
       };

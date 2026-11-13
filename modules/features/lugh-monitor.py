@@ -1,13 +1,15 @@
 """A read-only MCP server that reports lugh's health to Hermes.
 
-Every tool reads status from /proc, /sys, systemd, the journal, llama-swap and Honcho.
+Every tool reads status from /proc, /sys, systemd, the journal, llama-swap and the memory service.
 None of them runs a shell or changes anything, and logs come only from listed services.
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 import urllib.request
@@ -29,7 +31,6 @@ GPU_TEMP_WARN = 90
 NVME_TEMP_WARN = 70
 MEM_AVAILABLE_WARN = 10
 VRAM_FREE_WARN_MIB = 300
-HONCHO_PENDING_WARN = 50
 
 
 def parse_args():
@@ -38,8 +39,7 @@ def parse_args():
     parser.add_argument("--systemctl", required=True)
     parser.add_argument("--journalctl", required=True)
     parser.add_argument("--llama-swap-url", required=True)
-    parser.add_argument("--honcho-url", required=True)
-    parser.add_argument("--honcho-workspace", required=True)
+    parser.add_argument("--memory-socket", required=True)
     parser.add_argument("--units", required=True, help="Services to watch, comma-separated")
     parser.add_argument("--disks", required=True, help="Mount points to watch, comma-separated")
     parser.add_argument("--always-loaded", required=True, help="Models that should always be loaded, comma-separated")
@@ -234,9 +234,24 @@ def services_info():
     return {"services": {u: unit_info(u) for u in UNITS}, "failed_units": failed}
 
 
-def honcho_info():
-    status = http_json(f"{ARGS.honcho_url}/v3/workspaces/{ARGS.honcho_workspace}/queue/status")
-    return {k: status.get(k) for k in ("total_work_units", "completed_work_units", "in_progress_work_units", "pending_work_units")}
+class UnixHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, path, timeout):
+        super().__init__("localhost", timeout=timeout)
+        self.socket_path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(self.socket_path)
+
+
+def memory_info():
+    conn = UnixHTTPConnection(ARGS.memory_socket, 10)
+    try:
+        conn.request("GET", "/health")
+        return json.load(conn.getresponse())
+    finally:
+        conn.close()
 
 
 def safely(fn):
@@ -291,17 +306,17 @@ def service_logs(unit: str, lines: int = 50, priority: str = "warning", hours: i
 
 
 @server.tool(annotations=READ_ONLY)
-def honcho_status() -> dict:
-    """Honcho's memory work queue: how many derivation and summary jobs are pending."""
-    return safely(honcho_info)
+def memory_status() -> dict:
+    """Whether the memory service answers, and how many memories it holds."""
+    return safely(memory_info)
 
 
 @server.tool(annotations=READ_ONLY)
 def health_report() -> dict:
     """Every check at once, with a list of anything that needs attention. Use this for a daily health summary."""
-    system, gpus, models, services, honcho = (safely(system_info), safely(gpu_info), safely(model_info), safely(services_info), safely(honcho_info))
+    system, gpus, models, services, memory = (safely(system_info), safely(gpu_info), safely(model_info), safely(services_info), safely(memory_info))
     warnings = []
-    for part, value in (("system", system), ("gpus", gpus), ("models", models), ("services", services), ("honcho", honcho)):
+    for part, value in (("system", system), ("gpus", gpus), ("models", models), ("services", services), ("memory", memory)):
         if isinstance(value, dict) and "error" in value:
             warnings.append(f"Could not check {part}: {value['error']}")
     if "error" not in system:
@@ -335,13 +350,11 @@ def health_report() -> dict:
                 warnings.append(f"{unit} is {s['state']}")
             if s["errors_24h"]:
                 warnings.append(f"{unit} logged {s['errors_24h']} errors in the last 24 hours")
-    if "error" not in honcho and (honcho.get("pending_work_units") or 0) > HONCHO_PENDING_WARN:
-        warnings.append(f"Honcho has {honcho['pending_work_units']} memory jobs waiting")
     return {
         "checked_at": time.strftime("%Y-%m-%d %H:%M %Z"),
         "status": "attention" if warnings else "ok",
         "warnings": warnings,
-        "system": system, "gpus": gpus, "models": models, "services": services, "honcho": honcho,
+        "system": system, "gpus": gpus, "models": models, "services": services, "memory": memory,
     }
 
 

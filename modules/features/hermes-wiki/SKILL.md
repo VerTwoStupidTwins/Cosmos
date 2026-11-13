@@ -29,6 +29,7 @@ Use file tools with absolute paths: `read_file`, `write_file`, `patch` and `sear
   topics/<slug>.md          summary pages you write and keep current
   references/<date>-<slug>.md   research reports saved as they arrived, never edited afterwards
   .obsidian/                Obsidian's settings: never touch
+  memory/                   generated from Hermes' memory database: never edit, and leave it out of index.md
 ```
 
 Slugs are lowercase words joined by hyphens, like `arc-vulkan-llama-cpp`. Add more folders under
@@ -146,7 +147,7 @@ When a research subagent finishes, file its report before you reply, unless the 
 5. Update `index.md` and add the changes to `log.md`.
 6. In your reply, mention which pages you created or updated.
 
-Research filed here is knowledge about topics. Facts about the owner themselves belong in Honcho, not the wiki.
+Research filed here is knowledge about topics. Facts about the owner themselves belong in memory, saved with `memory_remember`, not the wiki.
 
 ## Answering from the wiki
 
