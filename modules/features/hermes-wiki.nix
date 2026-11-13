@@ -2,11 +2,21 @@
 {
   # A research wiki Hermes maintains, synced to the owner's Obsidian through Obsidian Sync.
   flake.modules.nixos.hermes =
-    { lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       home = "/var/lib/hermes";
       wiki = "${home}/wiki";
       ob = lib.getExe pkgs.obsidian-headless;
+      searchPython = pkgs.python3.withPackages (p: [
+        p.mcp
+        p.numpy
+        p.pyyaml
+      ]);
     in
     {
       # For the one-time setup, as the hermes user:
@@ -22,6 +32,22 @@
         hermesHomeFiles."skills/research/llm-wiki/SKILL.md" = ./hermes-wiki/SKILL.md;
         # Hermes' bundled Obsidian skill looks for the vault here.
         environment.OBSIDIAN_VAULT_PATH = wiki;
+
+        # Finds pages by meaning, with the local embedding model and reranker. Its index lives outside
+        # the wiki, so it never syncs to Obsidian.
+        mcpServers.wiki-search = {
+          command = "${searchPython}/bin/python3";
+          args = [
+            "-I"
+            "${./wiki-search.py}"
+            "--wiki"
+            wiki
+            "--index"
+            "${home}/.cache/wiki-search/index.sqlite"
+            "--llama-swap-url"
+            "http://127.0.0.1:${toString config.services.llama-swap.port}"
+          ];
+        };
       };
 
       systemd.services.obsidian-sync = {

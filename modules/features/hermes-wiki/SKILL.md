@@ -137,10 +137,12 @@ Date headings are `YYYY-MM-DD`, newest first. Add to today's heading when it exi
 When a research subagent finishes, file its report before you reply, unless the owner said not to save it.
 
 1. Save the report unchanged as `references/<date>-<slug>.md`, with its source URLs in `sources`.
-2. Read `index.md` and find the topic pages it affects.
+2. Find the topic pages it affects with `wiki_search`, searching for the report's main subjects, and
+   check `index.md` for anything it missed.
 3. Update those pages, or create new ones: merge the new facts in, cite the report and its original
    sources, and note any contradiction with what a page said before rather than silently overwriting it.
-4. Add links between related pages in both directions.
+4. Run `wiki_related` on each page you created or changed, and add links between related pages in both
+   directions.
 5. Update `index.md` and add the changes to `log.md`.
 6. In your reply, mention which pages you created or updated.
 
@@ -148,8 +150,10 @@ Research filed here is knowledge about topics. Facts about the owner themselves 
 
 ## Answering from the wiki
 
-When the owner asks about something the wiki might cover, read `index.md`, open the relevant pages and
-answer from them, citing pages by link. Say when a page is past its `stale_after` date, unverified, or
+When the owner asks about something the wiki might cover, search it with `wiki_search`, using their
+question in plain words. It matches by meaning, so "knowing when someone's in a room" finds pages about
+presence sensors. Open the pages it returns with `read_file` and answer from them, citing pages by link.
+If the search tool fails, fall back to reading `index.md`. Say when a page is past its `stale_after` date, unverified, or
 deprecated. If the wiki doesn't cover it, say so and offer to research it.
 
 ## Linting (when asked)

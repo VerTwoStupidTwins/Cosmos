@@ -223,17 +223,18 @@
               "-b 8192 -ub 8192"
             ];
 
-            # Nothing calls this yet. Honcho has no reranker support.
-            reranker = {
-              ttl = 1800;
-              cmd = server smallModelDevice [
-                "-m ${helperModels}/Qwen3-Reranker-0.6B.Q8_0.gguf"
-                "--rerank --embedding --pooling rank"
-                "-c 8192"
-                "-np 1"
-                "-b 8192 -ub 8192"
-              ];
-            };
+            # Orders Hermes' wiki search results. It uses about 1.2 GB, which only the main card has to spare
+            # while the B50 keeps room for transcription. If a bigger main model needs that memory, remove it from
+            # the preload list and give it a ttl: the first search after a pause then loads it in about 1.4 s.
+            # Swapping it with the embedding model on the B50 made each search about 5.5 s instead of 0.5 s.
+            reranker.cmd = server mainDevice [
+              "-m ${helperModels}/Qwen3-Reranker-0.6B.Q8_0.gguf"
+              "--rerank --embedding --pooling rank"
+              "-c 4096"
+              "-np 1"
+              # A query and one wiki section fit in one batch.
+              "-b 2048 -ub 2048"
+            ];
 
             # Transcribes voice messages in about a second.
             transcription = {
@@ -308,10 +309,10 @@
                 ];
               };
 
-              # Only one of these is loaded at a time, which keeps the small model GPU inside its memory budget.
-              # A reranker request would unload the embedding model, which loads again on Honcho's next request.
+              # Honcho and the wiki search embed constantly, so both stay loaded side by side.
               retrieval = {
-                swap = true;
+                persistent = true;
+                swap = false;
                 exclusive = false;
                 members = [
                   "embedding"
@@ -328,6 +329,7 @@
             "worker"
             "vision"
             "embedding"
+            "reranker"
             "decision"
             "approval"
           ];
