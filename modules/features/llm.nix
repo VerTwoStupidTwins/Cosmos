@@ -156,20 +156,11 @@
               "--reasoning off"
             ];
 
-            # Background work nobody waits on, so it never queues ahead of the helper's.
-            worker.cmd = server smallModelDevice [
-              "-m ${helperModels}/Ornith-1.5-9B-uncensored.Q5_K_M.gguf"
-              "-c 32000"
-              "-np 2"
-              "--kv-unified"
-              q8Cache
-              "--spec-type none"
-              "--reasoning off"
-            ];
-
+            # Reads the images the owner sends. Q4_K_M is the largest quant that fits the B50 beside its other
+            # models: with all of them loaded, about 1 GB stays free during a request.
             vision.cmd = server smallModelDevice [
-              "-m ${helperModels}/LFM3-VL-2B-Q6_K.gguf"
-              "--mmproj ${helperModels}/mmproj-LFM3-VL-2B-F16.gguf"
+              "-m ${helperModels}/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf"
+              "--mmproj ${helperModels}/qwen3.5-9b/mmproj-F16.gguf"
               "-mmdev ${smallModelDevice}"
               "-c 16384"
               "-np 1"
@@ -204,11 +195,9 @@
               "-b 8192 -ub 8192"
             ];
 
-            # Orders Hermes' wiki search results. It uses about 1.2 GB, which only the main card has to spare
-            # while the B50 keeps room for transcription. If a bigger main model needs that memory, remove it from
-            # the preload list and give it a ttl: the first search after a pause then loads it in about 1.4 s.
-            # Swapping it with the embedding model on the B50 made each search about 5.5 s instead of 0.5 s.
-            reranker.cmd = server mainDevice [
+            # Orders memory and wiki search results, beside the embedding model so neither ever swaps. Reranking
+            # 30 sections takes about 0.9 s here, against 0.36 s on the 7900 XT, which keeps that card for main.
+            reranker.cmd = server smallModelDevice [
               "-m ${helperModels}/Qwen3-Reranker-0.6B.Q8_0.gguf"
               "--rerank --embedding --pooling rank"
               "-c 4096"
@@ -217,9 +206,9 @@
               "-b 2048 -ub 2048"
             ];
 
-            # Transcribes voice messages in about a second.
+            # Transcribes voice messages in about a second. It stays loaded, so the first message after a quiet
+            # stretch doesn't wait for it to load.
             transcription = {
-              ttl = 600;
               checkEndpoint = "/";
               cmd = lib.concatStringsSep " " [
                 (lib.getExe' pkgs.whisper-cpp-vulkan "whisper-server")
@@ -278,7 +267,6 @@
                 swap = false;
                 exclusive = false;
                 members = [
-                  "worker"
                   "vision"
                   "decision"
                   "approval"
@@ -310,12 +298,12 @@
           hooks.on_startup.preload = [
             "main"
             "helper"
-            "worker"
             "vision"
             "embedding"
             "reranker"
             "decision"
             "approval"
+            "transcription"
           ];
         };
       };

@@ -33,9 +33,9 @@
       ];
 
       roles = {
-        "7900 XT" = "main and the reranker, or the image model in main's place";
-        "B580" = "helper";
-        "Pro B50" = "worker, vision, decision, approval, embedding and transcription";
+        "7900 XT" = "main, or the image model in its place";
+        "B580" = "helper, which also picks out memories after each chat turn";
+        "Pro B50" = "vision, decision, approval, embedding, reranker and transcription";
       };
     in
     {

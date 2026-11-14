@@ -11,7 +11,7 @@ Routes (POST, JSON in and out):
   /list      browse memories, such as open commitments
   /wiki/search, /wiki/related   wiki-only search, for the llm-wiki skill
   /export    rewrite the Obsidian export now
-  /observe   queue a finished chat turn, for the worker model to pick out anything worth remembering
+  /observe   queue a finished chat turn, for the helper model to pick out anything worth remembering
 GET /health
 """
 
@@ -43,7 +43,7 @@ INFERRED_CONFIDENCE = 0.7
 CAPTURE_CONTEXT = 8
 CAPTURE_MAX_MEMORIES = 5
 CAPTURE_ATTEMPTS = 3
-# Long turns are cut so a prompt fits the worker's context with room for others using it.
+# Long turns are cut so a prompt leaves the helper's context room for Hermes' own tasks.
 CAPTURE_USER_CHARS = 6000
 CAPTURE_REPLY_CHARS = 3000
 # A new memory this close to an existing one is the same memory said again.
@@ -162,7 +162,7 @@ def parse_args():
     parser.add_argument("--export-dir", required=True, help="inside the wiki; never indexed")
     parser.add_argument("--embedding-model", default="embedding")
     parser.add_argument("--reranker-model", default="reranker")
-    parser.add_argument("--capture-model", default="worker")
+    parser.add_argument("--capture-model", default="helper")
     return parser.parse_args()
 
 
@@ -1003,7 +1003,7 @@ def capture_loop():
                 log.warning("capture: turn %d failed (attempt %d): %s", obs["id"], attempts,
                             f"{type(exc).__name__}: {exc}"[:300])
                 if attempts < CAPTURE_ATTEMPTS:
-                    # Most failures are the worker model being busy or reloading.
+                    # Most failures are the helper model being busy or reloading.
                     time.sleep(30)
                     break
 

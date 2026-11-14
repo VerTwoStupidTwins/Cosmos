@@ -8,7 +8,7 @@ sessions are subagents and which platform the rest are on.
 - Subagents, including research subagents on Claude, never see memories. They may search the wiki.
 - A session this plugin hasn't seen is refused, so a gap fails closed.
 - Local-only memories are kept off chats that pass through someone else's servers, such as Telegram.
-- After each turn in the owner's own chats, the exchange goes to the service, whose worker model saves
+- After each turn in the owner's own chats, the exchange goes to the service, whose helper model saves
   anything worth remembering. Subagents, scheduled jobs and webhooks aren't the owner talking, so they're skipped.
 """
 
