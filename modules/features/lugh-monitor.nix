@@ -33,8 +33,8 @@
       ];
 
       roles = {
-        "7900 XT" = "main and the reranker";
-        "B580" = "helper, or the image models";
+        "7900 XT" = "main and the reranker, or the image model in main's place";
+        "B580" = "helper";
         "Pro B50" = "worker, vision, decision, approval, embedding and transcription";
       };
     in

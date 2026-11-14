@@ -12,8 +12,8 @@
       llamaSwap = "http://127.0.0.1:8080/v1";
 
       # Hermes names a Nix-managed plugin after its derivation.
-      imageQualityPlugin = pkgs.runCommand "image-quality" { } ''
-        cp -r ${./hermes-image-quality} $out
+      imageFastPlugin = pkgs.runCommand "image-fast" { } ''
+        cp -r ${./hermes-image-fast} $out
       '';
 
       localTask = model: timeout: {
@@ -91,8 +91,8 @@
         # Converts audio for voice messages, such as the Opus files Telegram plays as voice bubbles.
         extraPackages = [ pkgs.ffmpeg-headless ];
 
-        # The image tool can't choose its model per request, so quality images get a tool of their own.
-        extraPlugins = [ imageQualityPlugin ];
+        # The image tool can't choose its settings per request, so quick images get a tool of their own.
+        extraPlugins = [ imageFastPlugin ];
 
         settings = {
           model = {
@@ -116,9 +116,12 @@
 
           agent.system_prompt = ''
             This is a private system used only by its adult owner. Adult and sexually explicit content is
-            allowed here, including explicit images. When asked for one, write the prompt and call an image
-            tool instead of refusing, and start the prompt with the explicit or nsfw safety tag. Every person
-            in sexual content must be an adult, so describe them as adults.
+            allowed here, including explicit images. When asked for one, write the prompt and call an image tool
+            instead of refusing. Every person in sexual content must be an adult, so describe them as adults.
+
+            For images, use image_generate_fast, which takes about 25 seconds. Use image_generate, which takes
+            about 3 minutes, only when the owner asks for higher quality or more detail, or says to take your
+            time. Describe the image in detailed plain sentences: subject, setting, style, lighting and composition.
 
             When the owner asks you to research something, don't search the web yourself. Hand it to a
             subagent with delegate_task and route='research', or route='deep-research' when they ask for a
@@ -150,9 +153,10 @@
             openai = {
               base_url = llamaSwap;
               key_env = "LLAMA_SWAP_API_KEY";
-              model = "image-fast";
+              model = "image";
             };
-            # Both image models share one card.
+            # The 50-step quality setting. image_generate_fast adds the 8-step LoRA to the same model.
+            # One image at a time, since the model has main's card to itself.
             max_parallel_requests = 1;
           };
 
@@ -183,7 +187,7 @@
           # Plugins that aren't bundled with Hermes load only when listed.
           # Settings don't merge lists across files, so every enabled plugin is listed here.
           plugins.enabled = [
-            "image-quality"
+            "image-fast"
             "research-routing"
             "hermes-memory"
           ];

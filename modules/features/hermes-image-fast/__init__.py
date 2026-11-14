@@ -1,8 +1,9 @@
-"""A second image tool for the slower, higher-quality local model.
+"""A quick image tool beside Hermes' built-in one.
 
-Hermes' image tool always uses the one configured model, so the agent could not
-choose between a fast and a quality model per request. This tool calls the
-quality model directly and returns its result the way the built-in tool does.
+Both tools use the same local image server, which runs MOSS-Image SFT. The built-in tool sends its
+prompt unchanged, so it gets the server's defaults: 50 steps, about 3 minutes. This tool adds the
+community 8-step distillation LoRA and its sampling settings to each request, for about 25 seconds.
+The server ignores LoRA tags in prompts, so they go in its sd_cpp_extra_args block instead.
 """
 
 import json
@@ -13,23 +14,26 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
-DEFAULT_MODEL = "image-quality"
-# Covers loading the model, waiting for the helper's running requests, and a large image.
-DEFAULT_TIMEOUT = 900
-# Anima's recommended quality tags. The server adds the negative prompt itself.
-QUALITY_TAGS = "masterpiece, best quality, score_7, "
+DEFAULT_MODEL = "image"
+# Covers unloading main, loading the image model, waiting for running requests, and a large image.
+DEFAULT_TIMEOUT = 600
+# lodestones/MOSS-Image-SFT-8-steps-dmd at the recommended strength of 1, with 8 steps and no CFG.
+FAST_ARGS = {
+    "lora": [{"path": "/models/image/moss/loras/moss-image-sft-8step-dmd.safetensors", "multiplier": 1.0}],
+    "sample_params": {"sample_steps": 8, "guidance": {"txt_cfg": 1.0}},
+}
 
 SIZES = {"landscape": "1536x1024", "square": "1024x1024", "portrait": "1024x1536"}
 
 SCHEMA = {
-    "name": "image_generate_quality",
+    "name": "image_generate_fast",
     "description": (
-        "Generate an image from text with the slower, higher-quality local model. A square image "
-        "takes about 2 minutes, and landscape or portrait about 3. Use image_generate for everyday "
-        "images. Use this tool only when the user asks for higher quality or more detail, or says "
-        "to take your time. The model draws anime and illustration styles, not photorealism, and "
-        "it cannot edit images. Returns the result in the `image` field as an absolute file path; "
-        "reference it in your response using the current platform's file-delivery convention."
+        "Generate an image from text with the local model in about 25 seconds. This is the default "
+        "image tool. Use image_generate instead only when the user asks for higher quality or more "
+        "detail, or says to take your time; it takes about 3 minutes. The model draws photos and "
+        "illustration in any style, renders short text well, and allows explicit content. It cannot "
+        "edit images. Returns the result in the `image` field as an absolute file path; reference it "
+        "in your response using the current platform's file-delivery convention."
     ),
     "parameters": {
         "type": "object",
@@ -37,9 +41,8 @@ SCHEMA = {
             "prompt": {
                 "type": "string",
                 "description": (
-                    "The image description, in at least two detailed sentences. Start with one "
-                    "safety tag that matches the request: safe, sensitive, nsfw or explicit. "
-                    "Danbooru-style tags can be mixed in, and artist names need an @ in front."
+                    "The image description in detailed plain sentences: subject, setting, style, "
+                    "lighting and composition. Put any text to draw in quotes."
                 ),
             },
             "aspect_ratio": {
@@ -75,9 +78,8 @@ def _generate(ctx, args):
     timeout = float(ctx.get_config("request_timeout", DEFAULT_TIMEOUT))
     context = {"model": model, "prompt": prompt, "aspect_ratio": aspect}
 
-    body = json.dumps(
-        {"model": model, "prompt": QUALITY_TAGS + prompt, "size": SIZES[aspect], "n": 1}
-    ).encode()
+    extra = f"<sd_cpp_extra_args>{json.dumps(FAST_ARGS)}</sd_cpp_extra_args>"
+    body = json.dumps({"model": model, "prompt": prompt + extra, "size": SIZES[aspect], "n": 1}).encode()
     request = urllib.request.Request(
         f"{base_url}/images/generations", data=body, headers={"Content-Type": "application/json"}
     )
@@ -99,14 +101,14 @@ def _generate(ctx, args):
     from agent.image_gen_provider import save_b64_image, success_response
 
     try:
-        path = save_b64_image(b64, prefix=f"local_{model}")
+        path = save_b64_image(b64, prefix=f"local_{model}_fast")
     except Exception as exc:
         return _error(f"Could not save the image: {exc}", "io_error", **context)
 
     return json.dumps(
         success_response(
             image=str(path),
-            model=model,
+            model=f"{model} (8-step)",
             prompt=prompt,
             aspect_ratio=aspect,
             provider="llama-swap",
@@ -120,15 +122,15 @@ def register(ctx):
         try:
             return _generate(ctx, args)
         except Exception as exc:
-            logger.exception("image_generate_quality failed")
+            logger.exception("image_generate_fast failed")
             return _error(f"Unexpected error: {exc}", "provider_error")
 
     # Joining the built-in image toolset means the tool is enabled and disabled with it.
     ctx.register_tool(
-        name="image_generate_quality",
+        name="image_generate_fast",
         toolset="image_gen",
         schema=SCHEMA,
         handler=handler,
-        description="Slower, higher-quality local image generation.",
+        description="Quick local image generation, about 25 seconds.",
         emoji="🎨",
     )

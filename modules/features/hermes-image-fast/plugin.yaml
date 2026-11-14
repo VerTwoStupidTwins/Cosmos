@@ -1,0 +1,4 @@
+name: image-fast
+version: 1.0.0
+description: "Quick local image generation with an 8-step LoRA, beside the built-in 50-step image tool."
+author: TwoStupidTwins

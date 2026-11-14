@@ -53,26 +53,7 @@
           ++ args
         );
 
-      # Both image tools use Anima, an anime and illustration model. It can't do photorealism.
-      animaServer =
-        model: args:
-        lib.concatStringsSep " " (
-          [
-            (lib.getExe' pkgs.stable-diffusion-cpp-vulkan "sd-server")
-            "--listen-port \${PORT}"
-            "--backend ${helperDevice}"
-            "--diffusion-model ${imageModels}/${model}"
-            "--llm ${imageModels}/qwen_3_06b_base.safetensors"
-            "--vae ${imageModels}/qwen_image_vae.safetensors"
-            # Every request starts from these settings, but its prompt replaces the default one, so only the negative prompt can be set here.
-            ''-n "worst quality, low quality, score_1, score_2, score_3, artist name, blurry, jpeg artifacts, chromatic aberration"''
-            # Otherwise every request uses seed 42, and the same prompt always gives the same image.
-            "--seed -1"
-            # Decoding the whole image at once took a minute on the B580.
-            "--vae-tiling"
-          ]
-          ++ args
-        );
+      mossModels = "${imageModels}/moss";
 
       # sd-server only listens once its model has loaded.
       imageModel = cmd: {
@@ -254,21 +235,26 @@
               ];
             };
 
-            # About 30 seconds for a square image. Turbo is distilled, so it needs few steps and no second pass.
-            "image-fast" = imageModel (
-              animaServer "anima-turbo-v1.1.safetensors" [
-                "--steps 10"
-                "--cfg-scale 1"
+            # MOSS-Image SFT draws photos and illustration, and isn't censored. It needs the main card, so
+            # loading it unloads main, which loads again in about 5 seconds on its next request.
+            # These defaults take about 3 minutes for a square image. Hermes' quick tool adds an 8-step LoRA
+            # from ${mossModels}/loras to its requests, which takes about 25 seconds.
+            image = imageModel (
+              lib.concatStringsSep " " [
+                (lib.getExe' pkgs.stable-diffusion-cpp-vulkan "sd-server")
+                "--listen-port \${PORT}"
+                "--backend ${mainDevice}"
+                "--diffusion-model ${mossModels}/MOSS-Image-SFT-Q8_0.gguf"
+                "--llm ${mossModels}/Qwen3.5-9B-Q8_0.gguf"
+                "--vae ${mossModels}/vae/flux2-vae.safetensors"
+                # Qwen3.5's vocabulary differs from the tokenizer built into stable-diffusion.cpp.
+                "--tokenizer ${mossModels}/tokenizer/tokenizer.json"
+                # The upstream defaults. stable-diffusion.cpp applies the matching shift and layer skip itself.
+                "--steps 50"
+                "--cfg-scale 3"
                 "--sampling-method euler"
-              ]
-            );
-
-            # About 2 minutes for a square image, and sharper and more detailed than Turbo.
-            "image-quality" = imageModel (
-              animaServer "anima-aesthetic-v1.1.safetensors" [
-                "--steps 30"
-                "--cfg-scale 4.5"
-                "--sampling-method er_sde"
+                # Otherwise every request uses seed 42, and the same prompt always gives the same image.
+                "--seed -1"
               ]
             );
           };
@@ -276,11 +262,15 @@
           routing.router = {
             use = "group";
             settings.groups = {
-              main = {
+              # The image model needs main's card. Each side waits for the other's running requests to finish.
+              main-card = {
                 persistent = true;
-                swap = false;
+                swap = true;
                 exclusive = false;
-                members = [ "main" ];
+                members = [
+                  "main"
+                  "image"
+                ];
               };
 
               helpers = {
@@ -296,17 +286,11 @@
                 ];
               };
 
-              # The image models need the helper's whole card. Loading one unloads the helper, which loads
-              # again on its next request. Each side waits for the other's running requests to finish.
               helper-card = {
                 persistent = true;
-                swap = true;
+                swap = false;
                 exclusive = false;
-                members = [
-                  "helper"
-                  "image-fast"
-                  "image-quality"
-                ];
+                members = [ "helper" ];
               };
 
               # Memory and wiki searches use both on every query, so they stay loaded side by side.
