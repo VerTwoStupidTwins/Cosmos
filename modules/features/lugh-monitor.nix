@@ -11,7 +11,8 @@
     }:
     let
       python = pkgs.python3.withPackages (p: [ p.mcp ]);
-      llama-cpp = inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan;
+      # The same build as llm.nix, which explains the missing web UI.
+      llama-cpp = (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; }).overrideAttrs { webui = null; };
 
       # Its logs are the only ones the monitor will show.
       units = [

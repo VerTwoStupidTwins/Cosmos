@@ -4,7 +4,9 @@
   flake.modules.nixos.llm =
     { lib, pkgs, ... }:
     let
-      llama-cpp = inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan;
+      # llama-swap talks to the API only, so the server's web UI is left out. Its build broke upstream on
+      # 2026-11-14 when it started importing a llama-brand module that the Nix build doesn't fetch.
+      llama-cpp = (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; }).overrideAttrs { webui = null; };
       llama-server = lib.getExe' llama-cpp "llama-server";
 
       mainModels = "/models/ornith-1.5-35b";
