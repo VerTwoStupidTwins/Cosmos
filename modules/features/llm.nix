@@ -6,27 +6,61 @@
     let
       # llama-swap talks to the API only, so the server's web UI is left out. Its build broke upstream on
       # 2026-11-14 when it started importing a llama-brand module that the Nix build doesn't fetch.
-      llama-cpp = (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; }).overrideAttrs { webui = null; };
+      llama-cpp =
+        (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; })
+        .overrideAttrs
+          { webui = null; };
       llama-server = lib.getExe' llama-cpp "llama-server";
+
+      # Vulkan on the Intel cards slows sharply on long prompts: 40,000 tokens into a chat, the helper read 248
+      # tokens a second and wrote 23, against 1,471 and 45 with SYCL. That made Hermes' compressions stall
+      # past its 900-second limit. The B50's models gave the same answers on both. The llama.cpp flake has
+      # no SYCL build, so this is nixpkgs' package on the same source, without the web UI and the tests,
+      # which need PyTorch.
+      llama-cpp-sycl = (pkgs.llama-cpp.override { syclSupport = true; }).overrideAttrs (old: {
+        src = inputs.llama-cpp;
+        version = "0-unstable-${inputs.llama-cpp.shortRev}";
+        doCheck = false;
+        nativeBuildInputs = builtins.filter (
+          p: !(lib.hasPrefix "nodejs" (p.pname or p.name or "")) && (p.name or "") != "npm-config-hook"
+        ) old.nativeBuildInputs;
+        npmDeps = null;
+        preConfigure = "";
+        cmakeFlags = old.cmakeFlags ++ [
+          "-DLLAMA_BUILD_WEBUI=OFF"
+          "-DGGML_SYCL_F16=ON"
+        ];
+      });
+      sycl-server = lib.getExe' llama-cpp-sycl "llama-server";
+
+      # Intel's Level Zero and OpenCL drivers, which SYCL reaches the cards through.
+      syclEnv = [
+        "LD_LIBRARY_PATH=${pkgs.intel-compute-runtime}/lib"
+        "OCL_ICD_VENDORS=${pkgs.intel-compute-runtime}/etc/OpenCL/vendors"
+      ];
 
       mainModels = "/models/minicpm-v-4.7-apex";
       helperModels = "/models/helpers";
       imageModels = "/models/image";
       voiceModels = "/models/voice";
 
+      # SYCL numbers only the Intel cards.
       mainDevice = "Vulkan0";
-      helperDevice = "Vulkan2";
-      smallModelDevice = "Vulkan1";
+      helperDevice = "SYCL1";
+      smallModelDevice = "SYCL0";
+      # whisper.cpp has no SYCL build in nixpkgs, so transcription stays on Vulkan.
+      transcriptionDevice = "Vulkan1";
 
-      # Vulkan numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
+      # Numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
       expectedCards = {
         ${mainDevice} = "RX 7900 XT";
-        ${helperDevice} = "Arc(tm) B580";
-        ${smallModelDevice} = "Arc(tm) Pro B50";
+        ${helperDevice} = "B580";
+        ${smallModelDevice} = "Pro B50";
+        ${transcriptionDevice} = "Pro B50";
       };
 
       checkDevices = pkgs.writeShellScript "llama-swap-check-devices" ''
-        devices=$(${llama-server} --list-devices 2>&1)
+        devices=$(${llama-server} --list-devices 2>&1; env ${lib.escapeShellArgs syclEnv} ${sycl-server} --list-devices 2>&1)
         ${lib.concatStrings (
           lib.mapAttrsToList (device: card: ''
             if ! ${lib.getExe pkgs.gnugrep} -qF "${device}: " <<< "$(${lib.getExe pkgs.gnugrep} -F "${card}" <<< "$devices")"; then
@@ -40,20 +74,25 @@
 
       q8Cache = "-ctk q8_0 -ctv q8_0";
 
+      sycl = lib.hasPrefix "SYCL";
+
       server =
         device: args:
-        lib.concatStringsSep " " (
-          [
-            llama-server
-            "--host 127.0.0.1"
-            "--port \${PORT}"
-            "--device ${device}"
-            "-ngl 99"
-            "--fit off"
-            "--jinja"
-          ]
-          ++ args
-        );
+        {
+          cmd = lib.concatStringsSep " " (
+            [
+              (if sycl device then sycl-server else llama-server)
+              "--host 127.0.0.1"
+              "--port \${PORT}"
+              "--device ${device}"
+              "-ngl 99"
+              "--fit off"
+              "--jinja"
+            ]
+            ++ args
+          );
+        }
+        // lib.optionalAttrs (sycl device) { env = syclEnv; };
 
       mossModels = "${imageModels}/moss";
 
@@ -135,7 +174,7 @@
 
           # Clients ask for these role names, so the model behind a role can change without touching them.
           models = {
-            main.cmd = server mainDevice [
+            main = server mainDevice [
               # MiniCPM-V 4.7 35B-A3B, abliterated. It sees images itself through its projector, also on this card.
               # It has no MTP head, and OpenBMB's DSpark draft accepted only about 12% of drafts on this abliterated
               # build, so it drafts from n-grams already in the context instead.
@@ -159,7 +198,7 @@
               "-cms 4096"
             ];
 
-            helper.cmd = server helperDevice [
+            helper = server helperDevice [
               "-m ${helperModels}/Ornith-1.5-9B-uncensored.Q5_K_M.gguf"
               "-c 96000"
               "-np 2"
@@ -171,7 +210,7 @@
             ];
 
             # Judges flagged commands for Hermes, through the approval adapter.
-            decision.cmd = server smallModelDevice [
+            decision = server smallModelDevice [
               "-m ${helperModels}/d1-2B-Q8_0.gguf"
               "-c 8192"
               "-np 1"
@@ -186,7 +225,7 @@
             ];
 
             # Every memory and wiki search embeds, so this stays loaded.
-            embedding.cmd = server smallModelDevice [
+            embedding = server smallModelDevice [
               "-m ${helperModels}/embeddinggemma-2-Q8_0.gguf"
               "--mmproj ${helperModels}/mmproj-embeddinggemma-2-BF16.gguf"
               "-mmdev ${smallModelDevice}"
@@ -199,7 +238,7 @@
 
             # Orders memory and wiki search results, beside the embedding model so neither ever swaps. Reranking
             # 30 sections takes about 0.9 s here, against 0.36 s on the 7900 XT, which keeps that card for main.
-            reranker.cmd = server smallModelDevice [
+            reranker = server smallModelDevice [
               "-m ${helperModels}/Qwen3-Reranker-0.6B.Q8_0.gguf"
               "--rerank --embedding --pooling rank"
               "-c 4096"
@@ -217,7 +256,7 @@
                 "--host 127.0.0.1"
                 "--port \${PORT}"
                 # whisper.cpp takes the Vulkan device's number alone.
-                "--device ${lib.removePrefix "Vulkan" smallModelDevice}"
+                "--device ${lib.removePrefix "Vulkan" transcriptionDevice}"
                 "-m ${voiceModels}/ggml-large-v3-turbo-q8_0.bin"
                 "--language en"
                 "--inference-path /v1/audio/transcriptions"
