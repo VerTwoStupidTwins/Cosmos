@@ -36,7 +36,7 @@
       roles = {
         "7900 XT" = "main, or the image model in its place";
         "B580" = "helper, which also picks out memories after each chat turn";
-        "Pro B50" = "vision, decision, approval, embedding, reranker and transcription";
+        "Pro B50" = "decision, approval, embedding, reranker and transcription";
       };
     in
     {

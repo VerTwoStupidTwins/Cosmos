@@ -100,6 +100,8 @@
             base_url = llamaSwap;
             default = "main";
             context_length = 128000;
+            # The main model reads images itself, so they go to it as images instead of text descriptions.
+            supports_vision = true;
           };
 
           # The decision model approves clearly safe commands. Anything it denies or is unsure about still asks a person.
@@ -144,7 +146,14 @@
             title_generation = helperTask 120;
             background_review = helperTask 300;
             curator = helperTask 600;
-            vision = localTask "vision" 120;
+            # The vision_analyze tool uses the main model too. An explicit vision backend here would turn the
+            # owner's images into text descriptions, and settings merge into Hermes' config file, so the old
+            # vision model would stay set if this were just removed.
+            vision = {
+              provider = "auto";
+              model = "";
+              base_url = "";
+            };
             approval = localTask "approval" 30;
           };
 

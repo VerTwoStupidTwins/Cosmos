@@ -9,7 +9,7 @@
       llama-cpp = (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; }).overrideAttrs { webui = null; };
       llama-server = lib.getExe' llama-cpp "llama-server";
 
-      mainModels = "/models/ornith-1.5-35b";
+      mainModels = "/models/minicpm-v-4.7-apex";
       helperModels = "/models/helpers";
       imageModels = "/models/image";
       voiceModels = "/models/voice";
@@ -136,15 +136,27 @@
           # Clients ask for these role names, so the model behind a role can change without touching them.
           models = {
             main.cmd = server mainDevice [
-              "-m ${mainModels}/Ornith-1.5-35B-A3B-Abliterated-MTPv2-APEX-I-Mini-v2D-lite.gguf"
+              # MiniCPM-V 4.7 35B-A3B, abliterated. It sees images itself through its projector, also on this card.
+              # It has no MTP head, and OpenBMB's DSpark draft accepted only about 12% of drafts on this abliterated
+              # build, so it drafts from n-grams already in the context instead.
+              "-m ${mainModels}/MiniCPM-V-4.7-35B-A3B-Abliterated.APEX-I-MiniPlus-V2.1.gguf"
+              "--mmproj ${mainModels}/mmproj-Q8_0.gguf"
               # A second slot lets another job run beside a chat. Both share one pool, so either can use all of it.
               "-c 262144"
               "-np 2"
               "--kv-unified"
               q8Cache
-              "-ctkd q8_0 -ctvd q8_0"
-              "--spec-type draft-mtp"
-              "--spec-draft-n-max 2"
+              # Larger batches read long prompts faster. With them the card has about 1.7 GB free.
+              "-b 4096 -ub 2048"
+              # Rewriting a file it was given ran 3.8 times faster, and quoting a log 11% faster. Output with
+              # nothing to copy is unaffected. ngram-simple quoted faster but slowed JSON output by a quarter.
+              "--spec-type ngram-mod"
+              # Its recurrent layers can only resume a prompt from a saved checkpoint, not from any token. More
+              # RAM for cached prompts and closer checkpoints let long chats and background jobs resume from
+              # cache more often instead of reading tens of thousands of tokens again. The defaults are 8 GB
+              # and a checkpoint every 8192 tokens.
+              "--cache-ram 32768"
+              "-cms 4096"
             ];
 
             helper.cmd = server helperDevice [
@@ -155,18 +167,6 @@
               q8Cache
               "--spec-type none"
               # Thinking made its work several times slower without improving the results.
-              "--reasoning off"
-            ];
-
-            # Reads the images the owner sends. Q4_K_M is the largest quant that fits the B50 beside its other
-            # models: with all of them loaded, about 1 GB stays free during a request.
-            vision.cmd = server smallModelDevice [
-              "-m ${helperModels}/qwen3.5-9b/Qwen3.5-9B-Q4_K_M.gguf"
-              "--mmproj ${helperModels}/qwen3.5-9b/mmproj-F16.gguf"
-              "-mmdev ${smallModelDevice}"
-              "-c 16384"
-              "-np 1"
-              "-b 4096 -ub 4096"
               "--reasoning off"
             ];
 
@@ -269,7 +269,6 @@
                 swap = false;
                 exclusive = false;
                 members = [
-                  "vision"
                   "decision"
                   "approval"
                   "transcription"
@@ -300,7 +299,6 @@
           hooks.on_startup.preload = [
             "main"
             "helper"
-            "vision"
             "embedding"
             "reranker"
             "decision"
