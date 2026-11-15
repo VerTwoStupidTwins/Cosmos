@@ -119,6 +119,10 @@
       services.hermes-agent = {
         extraPlugins = [ memoryPlugin ];
         environment.HERMES_MEMORY_SOCKET = "${socketDir}/api.sock";
+
+        # This service replaced the wiki-search MCP server. Settings merge into Hermes' config file, so the old
+        # entry would keep starting it with a stale index unless switched off here.
+        settings.mcp_servers.wiki-search.enabled = false;
       };
     };
 }
