@@ -200,6 +200,20 @@ in
                       }
                     '';
                   };
+
+                  # Stylix's own GTK template, rewritten for matugen so the two stay in step. GTK
+                  # reads it when an app starts: apps opened after a change get the new colours,
+                  # open ones keep theirs (GTK under niri has no way to reload it live).
+                  "gtk.css" = {
+                    file = pkgs.runCommand "gtk.css.template" { } ''
+                      sed -E \
+                        -e 's/#\{\{(base0[0-9A-F])-hex\}\}/{{base16.\L\1\E.default.hex}}/g' \
+                        -e 's/rgba\(\{\{(base0[0-9A-F])-dec-r\}\}, \{\{base0[0-9A-F]-dec-g\}\}, \{\{base0[0-9A-F]-dec-b\}\}, ([0-9.]+)\)/alpha({{base16.\L\1\E.default.hex}}, \2)/g' \
+                        ${inputs.stylix}/modules/gtk/gtk.css.mustache > "$out"
+                      # Fail if Stylix's template grows a placeholder this doesn't convert.
+                      if grep -E -- '-hex\}\}|-dec-' "$out"; then exit 1; fi
+                    '';
+                  };
                 };
 
                 matugenConfig = (pkgs.formats.toml { }).generate "matugen.toml" {
@@ -208,7 +222,7 @@ in
                     name: t:
                     lib.nameValuePair (lib.replaceStrings [ "." ] [ "-" ] name) (
                       {
-                        input_path = pkgs.writeText "${name}.template" t.text;
+                        input_path = t.file or (pkgs.writeText "${name}.template" t.text);
                         output_path = "${stateDir}/${name}";
                       }
                       // lib.optionalAttrs (t ? hook) { post_hook = t.hook; }
@@ -365,6 +379,11 @@ in
                 programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
                 services.mako.settings.include = "${stateDir}/mako";
                 programs.hyprlock.settings.source = "${stateDir}/hyprlock.conf";
+
+                # Stylix still picks adw-gtk3 and the fonts; the colours come from the wallpaper.
+                xdg.configFile = lib.genAttrs [ "gtk-3.0/gtk.css" "gtk-4.0/gtk.css" ] (_: {
+                  source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${stateDir}/gtk.css");
+                });
               }
             )
           ];
