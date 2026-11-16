@@ -1,6 +1,7 @@
 # modules/features/hermes-memory.nix
 {
-  # Hermes' own memory: durable memories and the wiki index in Postgres, served to a Hermes plugin over a Unix socket.
+  # Hermes' own memory: durable memories and the wiki index in an embedded SurrealDB, served to a Hermes plugin over a
+  # Unix socket by a Rust service.
   flake.modules.nixos.hermes =
     {
       config,
@@ -11,19 +12,36 @@
     let
       home = "/var/lib/hermes";
       socketDir = "/run/hermes-memory";
-      backups = "/var/lib/hermes-memory/backups";
+      state = "/var/lib/hermes-memory";
       postgres = config.services.postgresql.finalPackage;
 
-      python = pkgs.python3.withPackages (p: [
-        p.psycopg
-        p.pyyaml
-      ]);
+      server = pkgs.rustPlatform.buildRustPackage {
+        pname = "hermes-memory";
+        version = "0.1.0";
+        src = ./hermes-memory/server;
+        cargoLock.lockFile = ./hermes-memory/server/Cargo.lock;
+        # Nix builds link these system libraries instead of building their own copies. SurrealDB brings in aws-lc for
+        # TLS, which a Unix socket never uses.
+        nativeBuildInputs = [ pkgs.pkg-config ];
+        buildInputs = [
+          pkgs.zstd
+          pkgs.aws-lc
+        ];
+        # The tests build SurrealDB a second time, which doubles a long build; they run during development instead.
+        doCheck = false;
+      };
+
+      common = [
+        "--data ${state}/db"
+        "--llama-swap-url http://127.0.0.1:${toString config.services.llama-swap.port}"
+      ];
 
       memoryPlugin = pkgs.runCommand "hermes-memory" { } ''
         cp -r ${./hermes-memory/plugin} $out
       '';
     in
     {
+      # Postgres held the memories until the Rust service. It stays, untouched, as the way back for a while.
       services.postgresql = {
         enable = true;
         # The data directory was created with 15, and a major upgrade needs a migration.
@@ -51,30 +69,66 @@
         '';
       };
 
-      systemd.services.hermes-memory = {
-        description = "Hermes memory service";
-        wantedBy = [ "multi-user.target" ];
+      # Moves the memories out of Postgres the first time the Rust service starts, then never runs again. A failure
+      # leaves no database behind, so the next start tries again, and Postgres is only read.
+      systemd.services.hermes-memory-migrate = {
+        description = "Move Hermes' memories from Postgres to the Rust service";
         requires = [ "hermes-memory-database.service" ];
         after = [
           "hermes-memory-database.service"
+          "llama-swap.service"
+        ];
+        unitConfig.ConditionPathExists = "!${state}/db";
+        path = [ postgres ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          User = "hermes";
+          Group = "hermes";
+          StateDirectory = "hermes-memory";
+          StateDirectoryMode = "0700";
+          UMask = "0077";
+        };
+        script = ''
+          trap 'rm -rf ${state}/db ${state}/migration.json' ERR
+          psql -d memory -X -A -t -v ON_ERROR_STOP=1 -f ${./hermes-memory/server/dump-postgres.sql} > ${state}/migration.json
+          ${server}/bin/hermes-memory ${lib.concatStringsSep " " common} --import ${state}/migration.json
+          ${server}/bin/hermes-memory ${lib.concatStringsSep " " common} --check
+          rm ${state}/migration.json
+        '';
+      };
+
+      systemd.services.hermes-memory = {
+        description = "Hermes memory service";
+        wantedBy = [ "multi-user.target" ];
+        requires = [ "hermes-memory-migrate.service" ];
+        after = [
+          "hermes-memory-migrate.service"
           "llama-swap.service"
         ];
 
         serviceConfig = {
           User = "hermes";
           Group = "hermes";
-          ExecStart = lib.concatStringsSep " " [
-            "${python}/bin/python3 -I ${./hermes-memory/service.py}"
-            "--socket ${socketDir}/api.sock"
-            "--database 'dbname=memory host=/run/postgresql'"
-            "--llama-swap-url http://127.0.0.1:${toString config.services.llama-swap.port}"
-            "--wiki ${home}/wiki"
-            "--export-dir ${home}/wiki/memory"
-          ];
+          ExecStart = lib.concatStringsSep " " (
+            [
+              "${server}/bin/hermes-memory"
+              "--socket ${socketDir}/api.sock"
+              "--wiki ${home}/wiki"
+              "--export-dir ${home}/wiki/memory"
+              # Nightly at 3:30, keeping a week.
+              "--backup-dir ${state}/backups"
+            ]
+            ++ common
+          );
+          # Lets SurrealDB flush and close before systemd gives up on it.
+          TimeoutStopSec = 30;
           Restart = "on-failure";
           RestartSec = 10;
           RuntimeDirectory = "hermes-memory";
           RuntimeDirectoryMode = "0750";
+          StateDirectory = "hermes-memory";
+          StateDirectoryMode = "0700";
 
           NoNewPrivileges = true;
           PrivateTmp = true;
@@ -82,37 +136,6 @@
           ProtectHome = true;
           # It reads the wiki and writes only the memory export inside it.
           ReadWritePaths = [ "${home}/wiki" ];
-        };
-      };
-
-      # A nightly copy of the memories, until they can go to the NAS.
-      systemd.services.hermes-memory-backup = {
-        description = "Back up Hermes' memory database";
-        requires = [ "hermes-memory-database.service" ];
-        after = [ "hermes-memory-database.service" ];
-        path = [
-          postgres
-          pkgs.findutils
-        ];
-        serviceConfig = {
-          Type = "oneshot";
-          User = "hermes";
-          Group = "hermes";
-          StateDirectory = "hermes-memory/backups";
-          StateDirectoryMode = "0700";
-          UMask = "0077";
-        };
-        script = ''
-          pg_dump --format=custom --dbname=memory --file=${backups}/memory-$(date +%F).dump
-          find ${backups} -name 'memory-*.dump' -mtime +14 -delete
-        '';
-      };
-
-      systemd.timers.hermes-memory-backup = {
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnCalendar = "04:00";
-          Persistent = true;
         };
       };
 

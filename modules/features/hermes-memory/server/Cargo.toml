@@ -1,0 +1,31 @@
+[package]
+name = "hermes-memory"
+version = "0.1.0"
+edition = "2024"
+description = "Hermes' memory service: durable memories and the wiki index in an embedded SurrealDB, behind a Unix socket"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+# Plain HTTP to llama-swap on localhost, so no TLS.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# The embedded engines only: on disk for the service, in memory for the tests. Enabling both here means
+# SurrealDB compiles once for both. The network protocols aren't needed.
+sha2 = "0.10"
+surrealdb = { version = "4.0.1", default-features = false, features = ["kv-surrealkv", "kv-mem"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "fs"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+yaml-rust2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
