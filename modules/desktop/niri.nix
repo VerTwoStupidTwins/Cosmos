@@ -1,0 +1,50 @@
+# modules/desktop/niri.nix
+# niri, a scrollable-tiling compositor. Lock, idle, bar and the rest come from the shared
+# Wayland module; this holds niri itself and its config.
+{ config, ... }:
+{
+  flake.modules.nixos.niri = {
+    imports = [ config.flake.modules.nixos.wayland ];
+
+    programs.niri.enable = true;
+
+    # The niri module turns on gnome-keyring, which brings gcr-ssh-agent; that agent sets
+    # SSH_AUTH_SOCK in the systemd user environment and would shadow 1Password's agent.
+    services.gnome.gcr-ssh-agent.enable = false;
+
+    home-manager.sharedModules = [
+      (
+        { pkgs, ... }:
+        {
+          # niri runs X11 apps through xwayland-satellite when it is on PATH.
+          home.packages = [ pkgs.xwayland-satellite ];
+
+          # niri's own default config, patched only where it names software this system
+          # doesn't use. --replace-fail breaks the build if upstream rewords a line, and
+          # `niri validate` catches anything else before it reaches a session.
+          xdg.configFile."niri/config.kdl".source =
+            pkgs.runCommand "niri-config.kdl" { nativeBuildInputs = [ pkgs.niri ]; }
+              ''
+                cp ${pkgs.niri.src}/resources/default-config.kdl config.kdl
+                substituteInPlace config.kdl \
+                  --replace-fail \
+                    'Mod+T hotkey-overlay-title="Open a Terminal: alacritty" { spawn "alacritty"; }' \
+                    'Mod+Return hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' \
+                  --replace-fail \
+                    'Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }' \
+                    'Mod+Space hotkey-overlay-title="Run an Application: wofi" { spawn "wofi" "--show" "drun"; }' \
+                  --replace-fail \
+                    'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
+                    'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
+                  --replace-fail \
+                    'spawn-at-startup "waybar"' \
+                    'spawn-at-startup "waybar"
+                spawn-at-startup "1password" "--silent"'
+                niri validate -c config.kdl
+                cp config.kdl "$out"
+              '';
+        }
+      )
+    ];
+  };
+}

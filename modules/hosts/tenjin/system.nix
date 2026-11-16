@@ -11,6 +11,7 @@ in
       nixos.laptop
       nixos.snapshots
       nixos.desktop
+      nixos.niri
       nixos.hyprland
       nixos.build-client
       nixos.claude-code
