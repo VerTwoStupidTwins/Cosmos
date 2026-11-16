@@ -39,7 +39,7 @@
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
                   --replace-fail \
                     'spawn-at-startup "waybar"' \
-                    'spawn-at-startup "waybar"
+                    '// The bar is Quickshell, started as a systemd user service.
                 spawn-at-startup "1password" "--silent"
                 spawn-at-startup "wallpaper" "--restore"'
                 niri validate -c config.kdl

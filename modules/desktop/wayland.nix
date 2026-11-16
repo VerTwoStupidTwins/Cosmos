@@ -7,6 +7,7 @@
     key = "cosmos/desktop/wayland";
 
     programs.hyprlock.enable = true; # registers the PAM service hyprlock needs
+    services.upower.enable = true; # battery for the bar
 
     home-manager.sharedModules = [
       (
@@ -54,7 +55,7 @@
               @import url("file://${theme}/colors.css");
 
               * { font-family: "${mono}"; font-size: 14px; }
-              window { background-color: @base00; border: 2px solid @base0d; border-radius: 10px; }
+              window { background-color: @base00; border: 2px solid @accent; border-radius: 10px; }
               #outer-box { padding: 6px; }
               #input { margin: 4px 4px 8px; padding: 6px 10px; border: none; border-radius: 6px;
                        background-color: @base01; color: @base05; }
@@ -62,96 +63,36 @@
               #entry { padding: 6px 10px; border-radius: 6px; }
               #entry:selected { background-color: @base02; }
               #text { color: @base05; }
-              #entry:selected #text { color: @base0d; }
+              #entry:selected #text { color: @accent; }
             '';
           };
 
-          programs.waybar = {
+          # The bar: Quickshell, from ./quickshell plus a generated Config.qml with the paths and
+          # font it needs. Colours come from the theme's quickshell.json (theme.nix).
+          programs.quickshell = {
             enable = true;
-            settings.main = {
-              layer = "top";
-              position = "top";
-              height = 30;
-              spacing = 4;
-              # Each compositor's modules stay hidden in the other's session.
-              modules-left = [
-                "niri/workspaces"
-                "hyprland/workspaces"
-                "niri/window"
-                "hyprland/window"
-              ];
-              modules-center = [ "clock" ];
-              modules-right = [
-                "tray"
-                "wireplumber"
-                "backlight"
-                "network"
-                "battery"
-              ];
-              "niri/window".max-length = 60;
-              "hyprland/window".max-length = 60;
-              clock = {
-                format = "{:%a %d %b  %H:%M}";
-                tooltip-format = "<tt>{calendar}</tt>";
-              };
-              tray.spacing = 8;
-              wireplumber = {
-                format = "{icon} {volume}%";
-                format-muted = "󰝟 muted";
-                format-icons = [
-                  "󰕿"
-                  "󰖀"
-                  "󰕾"
-                ];
-                on-click = "pavucontrol";
-              };
-              backlight = {
-                format = "{icon} {percent}%";
-                format-icons = [
-                  "󰃞"
-                  "󰃟"
-                  "󰃠"
-                ];
-              };
-              network = {
-                format-wifi = "󰖩 {essid}";
-                format-ethernet = "󰈀 wired";
-                format-disconnected = "󰖪 offline";
-                tooltip-format = "{ifname}: {ipaddr}";
-              };
-              battery = {
-                states = {
-                  warning = 25;
-                  critical = 10;
-                };
-                format = "{icon} {capacity}%";
-                format-charging = "󰂄 {capacity}%";
-                format-icons = [
-                  "󰁺"
-                  "󰁼"
-                  "󰁾"
-                  "󰂀"
-                  "󰁹"
-                ];
-              };
-            };
-            style = ''
-              @import url("file://${theme}/colors.css");
+            configs.bar = pkgs.runCommand "quickshell-bar" { } ''
+              mkdir $out
+              cp ${./quickshell}/*.qml $out/
+              cat > $out/Config.qml <<'QML'
+              pragma Singleton
+              import Quickshell
 
-              * { font-family: "${mono}"; font-size: 13px; border: none; border-radius: 0; min-height: 0; }
-              window#waybar { background: alpha(@base00, 0.92); color: @base05; }
-              #workspaces button { padding: 0 8px; color: @base04; background: transparent; }
-              #workspaces button.active, #workspaces button.focused {
-                color: @base00; background: @base0d; border-radius: 6px; }
-              #workspaces button.urgent { color: @base00; background: @base08; border-radius: 6px; }
-              #window { padding: 0 8px; }
-              #clock { font-weight: bold; }
-              #clock, #tray, #wireplumber, #backlight, #network, #battery { padding: 0 10px; }
-              #wireplumber.muted, #network.disconnected { color: @base03; }
-              #battery.charging { color: @base0b; }
-              #battery.warning:not(.charging) { color: @base0a; }
-              #battery.critical:not(.charging) { color: @base08; }
+              Singleton {
+                  readonly property string themeFile: "${theme}/quickshell.json"
+                  readonly property string font: "${mono}"
+                  readonly property string brightnessctl: "${pkgs.brightnessctl}/bin/brightnessctl"
+                  readonly property string pavucontrol: "${pkgs.pavucontrol}/bin/pavucontrol"
+              }
+              QML
             '';
+            activeConfig = "bar";
+            systemd.enable = true;
+          };
+          systemd.user.services.quickshell.Unit = {
+            # Stop with the session, and restart when the bar's files change.
+            PartOf = [ config.wayland.systemd.target ];
+            X-Restart-Triggers = [ "${config.programs.quickshell.configs.bar}" ];
           };
 
           services.mako = {
@@ -196,7 +137,7 @@
                   position = "0, 0";
                   halign = "center";
                   valign = "center";
-                  outer_color = "$base0d";
+                  outer_color = "$accent";
                   inner_color = "$base01";
                   font_color = "$base05";
                   check_color = "$base0a";

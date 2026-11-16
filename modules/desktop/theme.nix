@@ -6,7 +6,7 @@
 # statically, from the default wallpaper.
 #
 # Runtime: `wallpaper` sets an image with awww and has matugen render the colour files that
-# kitty, waybar, wofi, mako, hyprlock and niri include. A wallpaper built into the system uses
+# kitty, the Quickshell bar, wofi, mako, hyprlock and niri include. A wallpaper built into the system uses
 # its cached palette; any other image (one added since the last rebuild, or a path given to
 # `wallpaper`) gets one from matugen's Material You colours, cached by the image's hash.
 { inputs, ... }:
@@ -96,30 +96,37 @@ in
                 pkill = "${pkgs.procps}/bin/pkill";
                 c = name: "{{base16.${name}.default.hex}}";
                 bare = name: "{{base16.${name}.default.hex_stripped}}";
-                bases = map (n: "base0${n}") [
-                  "0"
-                  "1"
-                  "2"
-                  "3"
-                  "4"
-                  "5"
-                  "6"
-                  "7"
-                  "8"
-                  "9"
-                  "a"
-                  "b"
-                  "c"
-                  "d"
-                  "e"
-                  "f"
-                ];
+                # The base16 colours, plus `accent`, which `wallpaper` picks from them (with_accent).
+                bases =
+                  map (n: "base0${n}") [
+                    "0"
+                    "1"
+                    "2"
+                    "3"
+                    "4"
+                    "5"
+                    "6"
+                    "7"
+                    "8"
+                    "9"
+                    "a"
+                    "b"
+                    "c"
+                    "d"
+                    "e"
+                    "f"
+                  ]
+                  ++ [ "accent" ];
 
                 templates = {
+                  # For wofi, which reads it each time it opens.
                   "colors.css" = {
                     text = lib.concatMapStrings (b: "@define-color ${b} ${c b};\n") bases;
-                    # nixpkgs wraps waybar and kitty, so their process names are .waybar-wrapped, .kitty-wrapped.
-                    hook = "${pkill} -USR2 -x '\\.?waybar(-wrapped)?' || true";
+                  };
+
+                  # The Quickshell bar watches this file and recolours itself.
+                  "quickshell.json" = {
+                    text = builtins.toJSON (lib.genAttrs bases c);
                   };
 
                   "kitty.conf" = {
@@ -161,7 +168,8 @@ in
                       color20 ${c "base04"}
                       color21 ${c "base06"}
                     '';
-                    # kitty rereads its config on SIGUSR1.
+                    # kitty rereads its config on SIGUSR1. nixpkgs wraps kitty, so the process is
+                    # named .kitty-wrapped.
                     hook = "${pkill} -USR1 -x '\\.?kitty(-wrapped)?' || true";
                   };
 
@@ -169,7 +177,7 @@ in
                     text = ''
                       background-color=${c "base00"}
                       text-color=${c "base05"}
-                      border-color=${c "base0d"}
+                      border-color=${c "accent"}
                       progress-color=over ${c "base02"}
 
                       [urgency=high]
@@ -188,12 +196,12 @@ in
                     text = ''
                       layout {
                           focus-ring {
-                              active-color "${c "base0d"}"
+                              active-color "${c "accent"}"
                               inactive-color "${c "base03"}"
                               urgent-color "${c "base08"}"
                           }
                           border {
-                              active-color "${c "base0d"}"
+                              active-color "${c "accent"}"
                               inactive-color "${c "base03"}"
                               urgent-color "${c "base08"}"
                           }
@@ -295,8 +303,22 @@ in
                       echo "$out"
                     }
 
+                    # Adds `accent`: the most vivid of base09–base0f, by chroma (brightest channel
+                    # minus dimmest), so it is both saturated and bright. base08 is left out, being
+                    # the urgent colour; base00–07 are the greys.
+                    # shellcheck disable=SC2016 # the $ are jq's
+                    with_accent='
+                      def chroma: ltrimstr("#") | ascii_downcase | explode
+                        | map(if . >= 97 then . - 87 else . - 48 end)
+                        | [.[0] * 16 + .[1], .[2] * 16 + .[3], .[4] * 16 + .[5]]
+                        | max - min;
+                      .base16.accent = ([.base16 | to_entries[]
+                          | select(.key | test("^base0[9a-f]$"))]
+                        | max_by(.value.default.color | chroma) | .value)'
+
                     render() {
-                      matugen --config ${matugenConfig} json "$(palette_for "$1")" > /dev/null
+                      jq "$with_accent" "$(palette_for "$1")" > "$state/palette.json"
+                      matugen --config ${matugenConfig} json "$state/palette.json" > /dev/null
                     }
 
                     show() {
@@ -366,7 +388,6 @@ in
                 # matugen supplies these apps' colours at runtime; Stylix keeps their fonts.
                 stylix.targets = {
                   kitty.colors.enable = false;
-                  waybar.enable = false;
                   wofi.enable = false;
                   mako.enable = false;
                   hyprlock.enable = false;
