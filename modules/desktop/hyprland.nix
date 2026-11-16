@@ -35,12 +35,14 @@
 
             hl.on("hyprland.start", function()
                hl.exec_cmd("waybar")
-            	 hl.exec_cmd("1password --silent")
+               hl.exec_cmd("1password --silent")
+               hl.exec_cmd("wallpaper --restore")
             end)
 
             -- Apps and session
             hl.bind(mod .. " + Return", hl.dsp.exec_cmd("kitty"))
             hl.bind(mod .. " + Space", hl.dsp.exec_cmd("wofi --show drun"))
+            hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd("wallpaper"))
             hl.bind(mod .. " + L", hl.dsp.exec_cmd("loginctl lock-session"))
             hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
 

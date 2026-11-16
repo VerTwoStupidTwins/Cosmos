@@ -32,15 +32,22 @@
                     'Mod+Return hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' \
                   --replace-fail \
                     'Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }' \
-                    'Mod+Space hotkey-overlay-title="Run an Application: wofi" { spawn "wofi" "--show" "drun"; }' \
+                    'Mod+Space hotkey-overlay-title="Run an Application: wofi" { spawn "wofi" "--show" "drun"; }
+                    Mod+Shift+W hotkey-overlay-title="Change the Wallpaper" { spawn "wallpaper"; }' \
                   --replace-fail \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
                   --replace-fail \
                     'spawn-at-startup "waybar"' \
                     'spawn-at-startup "waybar"
-                spawn-at-startup "1password" "--silent"'
+                spawn-at-startup "1password" "--silent"
+                spawn-at-startup "wallpaper" "--restore"'
                 niri validate -c config.kdl
+
+                # The wallpaper's colours, written at runtime by `wallpaper` (theme.nix). Appended
+                # after validation because the file doesn't exist at build time, and last so it
+                # overrides the stock colours.
+                printf '\ninclude "~/.local/state/theme/niri.kdl"\n' >> config.kdl
                 cp config.kdl "$out"
               '';
         }
