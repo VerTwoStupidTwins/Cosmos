@@ -850,57 +850,86 @@ def export():
 
 # ── Capture ───────────────────────────────────────────────────────────────────────────────
 
-CAPTURE_PROMPT = """You keep the long-term memory of a personal AI assistant about its owner. You'll get one \
-exchange between the owner and the assistant, and the memories already kept that are closest to it. Decide \
-whether the owner revealed anything worth remembering for months: facts about them, their life, work, people \
-or setup; their preferences; how they want things done; or notable events in their life.
+CAPTURE_PROMPT = """You keep the long-term memory of a personal AI assistant about its owner. You'll get the \
+memories already kept that are closest to one exchange, then the owner's message and the assistant's reply. \
+Decide whether the owner's message revealed anything worth remembering for months: facts about them, their \
+life, work, people or setup; their preferences; how they want things done; or notable events in their life.
 
-Rules:
-- Only what the owner said or clearly confirmed. Ignore the assistant's claims, web pages and tool output, and \
-don't treat a question the owner asked as a fact about them.
-- Skip details of the task at hand, small talk, and anything a known memory already says. Keep standing \
-instructions about how the owner wants a kind of task done from now on.
-- Never record passwords, keys, account numbers or other secrets.
+Where memories come from:
+- Only the owner's message. The reply is there to show what the owner was answering or agreeing to. Never \
+store something that appears only in the reply, even when the owner answers "ok" or "thanks".
+- A question the owner asks, something they ask to look up, or a task they give is not a fact about them.
+
+Skip:
+- Anything a known memory already says, even in other words. Repeating a known memory is not a change. \
+When a known memory says only part of it, store the new part.
+- The task at hand. Fixes, edits, lookups and anything done in this chat are not events in the owner's life.
+- Small talk and passing moods.
+- Passwords, keys, account numbers and other secrets, even when the owner asks to keep them.
+
+Keep:
+- Standing instructions for how the owner wants a kind of task done from now on.
+- How the owner plans to use their tools, services and devices.
+
+When the owner changes a known memory:
+- Use "replace" with the id of the known memory the owner's news makes wrong or out of date. Read every \
+known memory to find it; it is the one whose words no longer hold, which isn't always the closest topic.
+- Write the whole memory again as a sentence about the owner: keep every part that still holds and change \
+only what changed.
+- Use "add" for anything new.
+
+Writing:
 - kind: "preference" for what the owner likes, wants or asks of the assistant; "procedure" for how they \
-want a particular task done; "event" for something that happened to them; "fact" for anything else true \
-about them or their setup.
+want a particular task done; "event" for something that happened in their life; "fact" for anything else \
+true about them or their setup.
 - Write each memory as one self-contained sentence about "the owner", using they/them, that makes sense \
 months later without the conversation. Date events, and only events.
-- When the owner says a known memory has changed or was wrong, use "replace" with that memory's id and the \
-new content. Otherwise use "add".
 - importance: 1 minor, 3 typical, 5 essential to know about them.
 - When nothing is worth remembering, return an empty list.
 
 Examples:
-- "from now on keep code reviews short" -> preference: The owner wants code reviews kept short.
-- "when you write emails for me, sign them 'Cheers, J'" -> procedure: When writing emails for the owner, \
+- "from now on keep code reviews short" -> add preference: The owner wants code reviews kept short.
+- "when you write emails for me, sign them 'Cheers, J'" -> add procedure: When writing emails for the owner, \
 sign them "Cheers, J".
-- "my sister Ana is visiting next week" -> fact: The owner has a sister named Ana.
+- "my sister Ana is visiting next week" -> add fact: The owner has a sister named Ana.
+- "I'll use my tablet for reading and the laptop for work" -> add fact: The owner uses their tablet for \
+reading and their laptop for work.
+- Known "#4 (fact) The owner lives in Portland and works as a nurse." Owner: "we moved to Seattle" -> \
+replace #4: The owner lives in Seattle and works as a nurse.
+- Known "#6 (preference) The owner drinks tea every morning." Owner: "I drink tea every morning" -> nothing: \
+already known.
+- Owner: "ok". Assistant: "Noted, you prefer dark mode." -> nothing: it is only in the reply.
 - "fix the typo on line 12" -> nothing: it's about the task at hand.
 - "how do hnsw indexes work?" -> nothing: a question isn't a fact about the owner.
 - "ugh, my coffee spilled" -> nothing: passing."""
 
-CAPTURE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "memories": {
-            "type": "array",
-            "maxItems": CAPTURE_MAX_MEMORIES,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "action": {"type": "string", "enum": ["add", "replace"]},
-                    "replaces": {"type": "integer"},
-                    "kind": {"type": "string", "enum": list(CAPTURE_KINDS)},
-                    "content": {"type": "string"},
-                    "importance": {"type": "integer", "minimum": 1, "maximum": 5},
-                },
-                "required": ["action", "kind", "content", "importance"],
-            },
-        }
-    },
-    "required": ["memories"],
-}
+
+def capture_schema(known_ids):
+    """Replacing is only offered for the memories shown, and always names one of them."""
+    common = {
+        "kind": {"type": "string", "enum": list(CAPTURE_KINDS)},
+        "content": {"type": "string"},
+        "importance": {"type": "integer", "minimum": 1, "maximum": 5},
+    }
+    variants = [{
+        "type": "object",
+        "properties": {"action": {"const": "add"}, **common},
+        "required": ["action", "kind", "content", "importance"],
+    }]
+    if known_ids:
+        variants.append({
+            "type": "object",
+            "properties": {"action": {"const": "replace"}, "replaces": {"type": "integer", "enum": sorted(known_ids)},
+                           **common},
+            "required": ["action", "replaces", "kind", "content", "importance"],
+        })
+    return {
+        "type": "object",
+        "properties": {"memories": {"type": "array", "maxItems": CAPTURE_MAX_MEMORIES,
+                                    "items": variants[0] if len(variants) == 1 else {"anyOf": variants}}},
+        "required": ["memories"],
+    }
+
 
 _capture_wake = threading.Event()
 
@@ -935,18 +964,19 @@ def capture_context(db, text, caller):
 
 def extract(obs, known):
     known_text = "\n".join(f"#{m['id']} ({m['kind']}) {m['content']}" for m in known) or "(none)"
+    # The labels keep the reply as context, so the model stops storing what only the assistant said.
     prompt = (
         f"Today is {datetime.now().astimezone().date().isoformat()}.\n\n"
-        f"Known memories:\n{known_text}\n\n"
-        f"Owner:\n{obs['user_message']}\n\n"
-        f"Assistant:\n{obs['assistant_response'] or '(no reply)'}"
+        f"Known memories (already kept):\n{known_text}\n\n"
+        f"The owner's message (the only source of new memories):\n{obs['user_message']}\n\n"
+        f"The assistant's reply (context only):\n{obs['assistant_response'] or '(no reply)'}"
     )
     out = post_json(ARGS.llama_swap_url + "/v1/chat/completions", {
         "model": ARGS.capture_model,
         "messages": [{"role": "system", "content": CAPTURE_PROMPT}, {"role": "user", "content": prompt}],
         "temperature": 0.2,
         "max_tokens": 800,
-        "response_format": {"type": "json_schema", "json_schema": {"name": "memories", "schema": CAPTURE_SCHEMA}},
+        "response_format": {"type": "json_schema", "json_schema": {"name": "memories", "schema": capture_schema([m["id"] for m in known])}},
     }, timeout=300)
     items = json.loads(out["choices"][0]["message"]["content"]).get("memories") or []
     return items[:CAPTURE_MAX_MEMORIES]
