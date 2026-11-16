@@ -1,9 +1,8 @@
 """A quick image tool beside Hermes' built-in one.
 
-Both tools use the same local image server, which runs MOSS-Image SFT. The built-in tool sends its
-prompt unchanged, so it gets the server's defaults: 50 steps, about 3 minutes. This tool adds the
-community 8-step distillation LoRA and its sampling settings to each request, for about 25 seconds.
-The server ignores LoRA tags in prompts, so they go in its sd_cpp_extra_args block instead.
+Both tools use the same local image server, MOSS-Image SFT in ComfyUI. The built-in tool's requests get
+its 25-step settings, about 85 seconds. This tool asks for "fast", which adds the community 8-step
+distillation LoRA, for about 20 seconds.
 """
 
 import json
@@ -15,22 +14,17 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_MODEL = "image"
-# Covers unloading main, loading the image model, waiting for running requests, and a large image.
+# Covers unloading the helper, loading the image models, waiting for running requests, and a large image.
 DEFAULT_TIMEOUT = 600
-# lodestones/MOSS-Image-SFT-8-steps-dmd at the recommended strength of 1, with 8 steps and no CFG.
-FAST_ARGS = {
-    "lora": [{"path": "/models/image/moss/loras/moss-image-sft-8step-dmd.safetensors", "multiplier": 1.0}],
-    "sample_params": {"sample_steps": 8, "guidance": {"txt_cfg": 1.0}},
-}
 
 SIZES = {"landscape": "1536x1024", "square": "1024x1024", "portrait": "1024x1536"}
 
 SCHEMA = {
     "name": "image_generate_fast",
     "description": (
-        "Generate an image from text with the local model in about 25 seconds. This is the default "
+        "Generate an image from text with the local model in about 20 seconds. This is the default "
         "image tool. Use image_generate instead only when the user asks for higher quality or more "
-        "detail, or says to take your time; it takes about 3 minutes. The model draws photos and "
+        "detail, or says to take your time; it takes about 90 seconds. The model draws photos and "
         "illustration in any style, renders short text well, and allows explicit content. It cannot "
         "edit images. Returns the result in the `image` field as an absolute file path; reference it "
         "in your response using the current platform's file-delivery convention."
@@ -78,8 +72,7 @@ def _generate(ctx, args):
     timeout = float(ctx.get_config("request_timeout", DEFAULT_TIMEOUT))
     context = {"model": model, "prompt": prompt, "aspect_ratio": aspect}
 
-    extra = f"<sd_cpp_extra_args>{json.dumps(FAST_ARGS)}</sd_cpp_extra_args>"
-    body = json.dumps({"model": model, "prompt": prompt + extra, "size": SIZES[aspect], "n": 1}).encode()
+    body = json.dumps({"model": model, "prompt": prompt, "size": SIZES[aspect], "n": 1, "fast": True}).encode()
     request = urllib.request.Request(
         f"{base_url}/images/generations", data=body, headers={"Content-Type": "application/json"}
     )
@@ -131,6 +124,6 @@ def register(ctx):
         toolset="image_gen",
         schema=SCHEMA,
         handler=handler,
-        description="Quick local image generation, about 25 seconds.",
+        description="Quick local image generation, about 20 seconds.",
         emoji="🎨",
     )

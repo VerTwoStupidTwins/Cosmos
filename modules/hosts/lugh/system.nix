@@ -11,6 +11,7 @@ in
       nixos.gpu
       nixos.claude-code
       nixos.llm
+      nixos.comfyui
       nixos.hermes
     ];
 

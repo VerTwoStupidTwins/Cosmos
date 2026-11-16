@@ -41,7 +41,6 @@
 
       mainModels = "/models/minicpm-v-4.7-apex";
       helperModels = "/models/helpers";
-      imageModels = "/models/image";
       voiceModels = "/models/voice";
 
       # SYCL numbers only the Intel cards.
@@ -94,14 +93,8 @@
         }
         // lib.optionalAttrs (sycl device) { env = syclEnv; };
 
-      mossModels = "${imageModels}/moss";
-
-      # sd-server only listens once its model has loaded.
-      imageModel = cmd: {
-        inherit cmd;
-        ttl = 300;
-        checkEndpoint = "/";
-      };
+      # MOSS-Image in ComfyUI's single-file formats, from Comfy-Org/MOSS-Image, and the community 8-step LoRA.
+      comfyuiUrl = "http://127.0.0.1:8188";
 
       kokoroPython = pkgs.python3.withPackages (p: [
         p.kokoro
@@ -265,42 +258,33 @@
               ];
             };
 
-            # MOSS-Image SFT draws photos and illustration, and isn't censored. It needs the main card, so
-            # loading it unloads main, which loads again in about 5 seconds on its next request.
-            # These defaults take about 3 minutes for a square image. Hermes' quick tool adds an 8-step LoRA
-            # from ${mossModels}/loras to its requests, which takes about 25 seconds.
-            image = imageModel (
-              lib.concatStringsSep " " [
-                (lib.getExe' pkgs.stable-diffusion-cpp-vulkan "sd-server")
-                "--listen-port \${PORT}"
-                "--backend ${mainDevice}"
-                "--diffusion-model ${mossModels}/MOSS-Image-SFT-Q8_0.gguf"
-                "--llm ${mossModels}/Qwen3.5-9B-Q8_0.gguf"
-                "--vae ${mossModels}/vae/flux2-vae.safetensors"
-                # Qwen3.5's vocabulary differs from the tokenizer built into stable-diffusion.cpp.
-                "--tokenizer ${mossModels}/tokenizer/tokenizer.json"
-                # The upstream defaults. stable-diffusion.cpp applies the matching shift and layer skip itself.
-                "--steps 50"
-                "--cfg-scale 3"
-                "--sampling-method euler"
-                # Otherwise every request uses seed 42, and the same prompt always gives the same image.
-                "--seed -1"
-              ]
-            );
+            # MOSS-Image SFT draws photos and illustration, and isn't censored. It runs in ComfyUI on the B580, which
+            # this adapter borrows from the helper: loading it stops the helper, and stopping it unloads ComfyUI's
+            # models. A fast image takes about 20 seconds and a 25-step one about 85.
+            image = {
+              cmd = lib.concatStringsSep " " [
+                "${pkgs.python3}/bin/python3 -I ${./comfyui-adapter.py}"
+                "--port \${PORT}"
+                "--comfyui-url ${comfyuiUrl}"
+                "--diffusion-model moss_image_sft_int8_convrot.safetensors"
+                "--text-encoder qwen3.5_9b_w4a8_gptq.safetensors"
+                "--vae flux2-vae_small.safetensors"
+                "--fast-lora moss-image-sft-8step-dmd.safetensors"
+              ];
+              checkEndpoint = "/health";
+              # Gives the card back to the helper after five idle minutes.
+              ttl = 300;
+            };
           };
 
           routing.router = {
             use = "group";
             settings.groups = {
-              # The image model needs main's card. Each side waits for the other's running requests to finish.
               main-card = {
                 persistent = true;
-                swap = true;
+                swap = false;
                 exclusive = false;
-                members = [
-                  "main"
-                  "image"
-                ];
+                members = [ "main" ];
               };
 
               helpers = {
@@ -314,11 +298,15 @@
                 ];
               };
 
+              # Images borrow the helper's card. Each side waits for the other's running requests to finish.
               helper-card = {
                 persistent = true;
-                swap = false;
+                swap = true;
                 exclusive = false;
-                members = [ "helper" ];
+                members = [
+                  "helper"
+                  "image"
+                ];
               };
 
               # Memory and wiki searches use both on every query, so they stay loaded side by side.

@@ -1,0 +1,30 @@
+# ComfyUI on an Intel Arc card through PyTorch's XPU builds.
+#
+# nixpkgs packages ComfyUI, but its PyTorch has no Intel XPU support, so this image installs PyTorch's own
+# XPU wheels instead. They reach the card through Level Zero, whose GPU driver comes from Intel's graphics
+# PPA, the packages Intel documents for Battlemage.
+FROM docker.io/library/ubuntu:24.04
+
+ARG COMFYUI_VERSION=v0.45.4
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates git gpg-agent software-properties-common \
+ && add-apt-repository -y ppa:kobuk-team/intel-graphics \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libze1 libze-intel-gpu1 intel-opencl-icd \
+      python3.12 python3.12-venv \
+      libgl1 libglib2.0-0 \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${COMFYUI_VERSION}" https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI
+
+COPY requirements.lock /opt/requirements.lock
+RUN python3.12 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/xpu -r /opt/requirements.lock
+
+WORKDIR /opt/ComfyUI
+ENTRYPOINT ["/opt/venv/bin/python", "main.py"]

@@ -121,8 +121,8 @@
             allowed here, including explicit images. When asked for one, write the prompt and call an image tool
             instead of refusing. Every person in sexual content must be an adult, so describe them as adults.
 
-            For images, use image_generate_fast, which takes about 25 seconds. Use image_generate, which takes
-            about 3 minutes, only when the owner asks for higher quality or more detail, or says to take your
+            For images, use image_generate_fast, which takes about 20 seconds. Use image_generate, which takes
+            about 90 seconds, only when the owner asks for higher quality or more detail, or says to take your
             time. Describe the image in detailed plain sentences: subject, setting, style, lighting and composition.
 
             When the owner asks you to research something, don't search the web yourself. Hand it to a
@@ -164,8 +164,8 @@
               key_env = "LLAMA_SWAP_API_KEY";
               model = "image";
             };
-            # The 50-step quality setting. image_generate_fast adds the 8-step LoRA to the same model.
-            # One image at a time, since the model has main's card to itself.
+            # The 25-step quality setting. image_generate_fast asks the same model for its 8-step LoRA.
+            # One image at a time, since the model has the B580 to itself.
             max_parallel_requests = 1;
           };
 
