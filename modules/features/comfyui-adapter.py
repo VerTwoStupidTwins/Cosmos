@@ -6,6 +6,10 @@ Stopping tells ComfyUI to unload its models and free the card's memory.
 
 A request draws one MOSS-Image picture per `n`. `"fast": true` uses the 8-step distillation LoRA (about
 20 seconds); otherwise it uses the templates' 25-step settings (about 85 seconds).
+
+Krita drives ComfyUI directly, through comfyui-gate, which sends each of its jobs here to /comfy/prompt. That
+queues the job and answers with ComfyUI's reply straight away, but keeps the response open until the job ends,
+so llama-swap counts it as running and won't hand the card back to the helper mid-job.
 """
 
 import argparse
@@ -148,6 +152,9 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {"error": {"message": "not found"}})
 
     def do_POST(self):
+        if self.path == "/comfy/prompt":
+            self.queue_and_hold()
+            return
         if self.path.rstrip("/") not in ("/v1/images/generations", "/images/generations"):
             self.reply(404, {"error": {"message": "not found"}})
             return
@@ -173,6 +180,45 @@ class Handler(BaseHTTPRequestHandler):
         # Never logs the prompt.
         print(f"{n} {'fast' if fast else 'quality'} {width}x{height} image(s) in {time.time() - started:.1f}s", flush=True)
         self.reply(200, {"created": int(time.time()), "data": data})
+
+    def queue_and_hold(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        request = urllib.request.Request(ARGS.comfyui_url + "/prompt", data=body, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                reply = response.read()
+        except urllib.error.HTTPError as exc:
+            # ComfyUI rejected the job, such as for a missing model. Krita shows its reply.
+            data = exc.read()
+            self.send_response(exc.code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        except Exception as exc:
+            self.reply(502, {"error": {"message": f"ComfyUI isn't answering: {exc}"}})
+            return
+        prompt_id = json.loads(reply).get("prompt_id")
+        # No length, so the body runs until the connection closes, and llama-swap passes the first line on at once.
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(reply.strip() + b"\n")
+        self.wfile.flush()
+        started = time.time()
+        while prompt_id and time.time() - started < 3600:
+            time.sleep(1)
+            try:
+                if prompt_id in comfy(f"/history/{prompt_id}"):
+                    break
+                queue = comfy("/queue")
+                # Gone from the queue without a history entry: cancelled before it started.
+                if not any(job[1] == prompt_id for job in queue.get("queue_running", []) + queue.get("queue_pending", [])):
+                    break
+            except Exception:
+                pass
+        self.close_connection = True
 
     def log_message(self, *args):
         pass

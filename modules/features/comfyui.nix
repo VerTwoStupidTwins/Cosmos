@@ -1,11 +1,13 @@
 # modules/features/comfyui.nix
 {
   # ComfyUI in a Podman container on one Intel Arc card. llama-swap reaches it through comfyui-adapter.py as its
-  # `image` model, which shares the card with the helper; Krita can use it directly.
+  # `image` model, which shares the card with the helper. Krita on the NetBird network reaches it through
+  # comfyui-gate, which borrows the card the same way for each job.
   flake.modules.nixos.comfyui =
     { lib, pkgs, ... }:
     let
       port = 8188;
+      gatePort = 8189;
       state = "/var/lib/comfyui";
 
       # The card by its PCI address, which stays put across boots, unlike its renderD number. udev names it
@@ -31,7 +33,18 @@
           loras: |
             loras
             /models/moss/loras
+          model_patches: model_patches
+          upscale_models: upscale_models
+          inpaint: inpaint
+          custom_nodes: /opt/custom_nodes
       '';
+
+      gate = pkgs.rustPlatform.buildRustPackage {
+        pname = "comfyui-gate";
+        version = "0.1.0";
+        src = ./comfyui/gate;
+        cargoLock.lockFile = ./comfyui/gate/Cargo.lock;
+      };
     in
     {
       services.udev.extraRules = ''
@@ -100,6 +113,35 @@
           "--device=${card}:/dev/dri/renderD128"
           "--security-opt=no-new-privileges"
         ];
+      };
+
+      # For Krita on tenjin. ComfyUI has no login, so only NetBird peers can reach it.
+      networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [ gatePort ];
+
+      systemd.services.comfyui-gate = {
+        description = "Krita's way into ComfyUI";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "network.target" ];
+        serviceConfig = {
+          ExecStart = lib.concatStringsSep " " [
+            (lib.getExe gate)
+            "--listen 0.0.0.0:${toString gatePort}"
+            "--comfyui http://127.0.0.1:${toString port}"
+            # llama-swap's image model, the adapter, queues each job and holds the card until it ends.
+            "--submit http://127.0.0.1:8080/upstream/image/comfy/prompt"
+          ];
+          Restart = "always";
+          DynamicUser = true;
+          NoNewPrivileges = true;
+          ProtectSystem = "strict";
+          ProtectHome = true;
+          PrivateTmp = true;
+          PrivateDevices = true;
+          RestrictAddressFamilies = [
+            "AF_INET"
+            "AF_INET6"
+          ];
+        };
       };
 
       systemd.services.podman-comfyui = {

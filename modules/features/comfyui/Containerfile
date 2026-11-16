@@ -22,6 +22,24 @@ RUN apt-get update \
 
 RUN git clone --depth 1 --branch "${COMFYUI_VERSION}" https://github.com/Comfy-Org/ComfyUI.git /opt/ComfyUI
 
+# The custom nodes Krita AI Diffusion requires, at the commits its version 1.54 pins. ComfyUI finds them
+# through the model-paths file, since its own custom_nodes folder is under the mounted base directory.
+RUN mkdir /opt/custom_nodes && cd /opt/custom_nodes \
+ && for node in \
+      "Fannovel16/comfyui_controlnet_aux e8b689a513c3e6b63edc44066560ca5919c0576e" \
+      "cubiq/ComfyUI_IPAdapter_plus b188a6cb39b512a9c6da7235b880af42c78ccd0d" \
+      "Acly/comfyui-tooling-nodes b3ae4aa2d98f6ac4284ddbe261e3559c94bd652b" \
+      "Acly/comfyui-inpaint-nodes bd6d8fd5104d539187dfb172d07352215c09fcaa"; do \
+      set -- $node; dir=$(basename "$1"); \
+      git init -q "$dir" && git -C "$dir" fetch -q --depth 1 "https://github.com/$1.git" "$2" \
+      && git -C "$dir" checkout -q FETCH_HEAD && rm -rf "$dir/.git"; \
+    done
+
+# The ControlNet preprocessors download their weights on first use. This keeps them across restarts, and runs
+# their ONNX models on the CPU, since onnxruntime has no Intel GPU support.
+ENV AUX_ANNOTATOR_CKPTS_PATH=/data/annotators \
+    AUX_ORT_PROVIDERS=CPUExecutionProvider
+
 COPY requirements.lock /opt/requirements.lock
 RUN python3.12 -m venv /opt/venv \
  && /opt/venv/bin/pip install --extra-index-url https://download.pytorch.org/whl/xpu -r /opt/requirements.lock
