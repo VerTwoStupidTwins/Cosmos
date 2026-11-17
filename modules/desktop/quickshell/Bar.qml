@@ -30,12 +30,25 @@ PanelWindow {
     }
 
     Island {
+        id: centre
         anchors.horizontalCenter: parent.horizontalCenter
         y: 6
         cutBottomLeft: 14
         cutBottomRight: 14
 
         Clock {}
+
+        // Clicking the clock opens the command station below it.
+        MouseArea {
+            parent: centre
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Station.toggle()
+        }
+    }
+
+    StationPanel {
+        screen: bar.screen
     }
 
     Island {

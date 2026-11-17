@@ -33,7 +33,8 @@
                   --replace-fail \
                     'Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }' \
                     'Mod+Space hotkey-overlay-title="Run an Application: wofi" { spawn "wofi" "--show" "drun"; }
-                    Mod+Shift+W hotkey-overlay-title="Change the Wallpaper" { spawn "wallpaper"; }' \
+                    Mod+Shift+W hotkey-overlay-title="Change the Wallpaper" { spawn "wallpaper"; }
+                    Mod+S hotkey-overlay-title="Toggle the Command Station" { spawn "qs" "-c" "bar" "ipc" "call" "station" "toggle"; }' \
                   --replace-fail \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \

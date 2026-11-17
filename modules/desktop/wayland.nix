@@ -11,10 +11,79 @@
 
     home-manager.sharedModules = [
       (
-        { config, pkgs, ... }:
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
         let
           theme = "${config.xdg.stateHome}/theme";
           mono = config.stylix.fonts.monospace.name;
+
+          # The command station's readings, in sections the bar parses (Station.qml). It runs every
+          # two seconds, so it reads files with bash builtins rather than starting a process per
+          # file, and only the sensors the station shows: some (cros_ec, iwlwifi) take tens of
+          # milliseconds to answer.
+          stationProbe = pkgs.writeShellScript "station-probe" ''
+            PATH=${
+              lib.makeBinPath [
+                pkgs.coreutils
+                pkgs.iproute2
+              ]
+            }
+            value() { local v; read -r v < "$1" 2>/dev/null && echo "$v"; }
+
+            echo @stat
+            while read -r l; do [[ $l == cpu* ]] && echo "$l"; done < /proc/stat
+            echo @mem
+            while read -r l; do [[ $l == @(MemTotal|MemAvailable|SwapTotal|SwapFree):* ]] && echo "$l"; done < /proc/meminfo
+            echo @load; value /proc/loadavg
+            echo @uptime; value /proc/uptime
+            echo @freq
+            for f in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq; do value "$f"; done
+            echo @temp
+            for h in /sys/class/hwmon/hwmon*; do
+              name=$(value "$h/name")
+              case $name in
+                k10temp | coretemp | amdgpu | nvme) ;;
+                *) continue ;;
+              esac
+              for t in "$h"/temp*_input; do
+                [ -f "$t" ] || continue
+                label=$(value "''${t%_input}_label") || label=temp
+                case $label in Tctl | Package* | edge | Composite) echo "$name|$label|$(value "$t")" ;; esac
+              done
+            done
+            echo @gpu
+            for d in /sys/class/drm/card[0-9]*/device; do
+              [ -f "$d/gpu_busy_percent" ] || continue
+              echo "$(value "$d/gpu_busy_percent") $(value "$d/mem_info_vram_used") $(value "$d/mem_info_vram_total")"
+              break
+            done
+            echo @bat
+            for b in /sys/class/power_supply/BAT*; do
+              [ -d "$b" ] || continue
+              for f in capacity status power_now energy_now energy_full current_now charge_now charge_full voltage_now; do
+                [ -f "$b/$f" ] && echo "$f $(value "$b/$f")"
+              done
+              break
+            done
+            echo @route; ip -4 route show default
+            echo @addr; ip -4 -br addr
+            echo @net
+            { read -r; read -r; while IFS= read -r l; do echo "$l"; done; } < /proc/net/dev
+            echo @df; df -B1 --output=target,size,used / /boot 2>/dev/null | { read -r; while read -r l; do echo "$l"; done; }
+          '';
+
+          # What the station's header shows and only changes with a reboot or switch.
+          stationInfo = pkgs.writeShellScript "station-info" ''
+            read -r host < /proc/sys/kernel/hostname; echo "$host"
+            ${pkgs.coreutils}/bin/uname -r
+            # The file has no trailing newline, so it's read rather than printed.
+            read -r version < /run/current-system/nixos-version; echo "$version"
+            /run/current-system/sw/bin/nixos-version --configuration-revision 2>/dev/null || echo
+          '';
           sans = config.stylix.fonts.sansSerif.name;
         in
         {
@@ -83,6 +152,8 @@
                   readonly property string font: "${mono}"
                   readonly property string brightnessctl: "${pkgs.brightnessctl}/bin/brightnessctl"
                   readonly property string pavucontrol: "${pkgs.pavucontrol}/bin/pavucontrol"
+                  readonly property string stationProbe: "${stationProbe}"
+                  readonly property string stationInfo: "${stationInfo}"
               }
               QML
             '';
