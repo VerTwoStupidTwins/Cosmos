@@ -37,6 +37,12 @@
                     Mod+S hotkey-overlay-title="Toggle the Command Station" { spawn "qs" "-c" "bar" "ipc" "call" "station" "toggle"; }
                     Mod+N hotkey-overlay-title="Toggle Do Not Disturb" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "dnd"; }' \
                   --replace-fail \
+                    'XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }' \
+                    'XF86MonBrightnessUp allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set +10% && qs -c bar ipc call osd brightness"; }' \
+                  --replace-fail \
+                    'XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }' \
+                    'XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set 10%- && qs -c bar ipc call osd brightness"; }' \
+                  --replace-fail \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
                   --replace-fail \

@@ -54,6 +54,11 @@ ShellRoot {
         }
     }
 
+    // Volume, mic and brightness as they change, on the first screen.
+    Osd {
+        screen: Quickshell.screens[0]
+    }
+
     // Notifications pop up on the first screen.
     NotificationPopups {
         screen: Quickshell.screens[0]
