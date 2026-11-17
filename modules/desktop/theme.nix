@@ -6,7 +6,7 @@
 # statically, from the default wallpaper.
 #
 # Runtime: `wallpaper` sets an image with awww and has matugen render the colour files that
-# kitty, the Quickshell bar, wofi, hyprlock and niri include. A wallpaper built into the system uses
+# kitty, the Quickshell bar, hyprlock and niri include. A wallpaper built into the system uses
 # its cached palette; any other image (one added since the last rebuild, or a path given to
 # `wallpaper`) gets one from matugen's Material You colours, cached by the image's hash.
 { inputs, ... }:
@@ -119,11 +119,6 @@ in
                   ++ [ "accent" ];
 
                 templates = {
-                  # For wofi, which reads it each time it opens.
-                  "colors.css" = {
-                    text = lib.concatMapStrings (b: "@define-color ${b} ${c b};\n") bases;
-                  };
-
                   # The Quickshell bar watches this file and recolours itself.
                   "quickshell.json" = {
                     text = builtins.toJSON (lib.genAttrs bases c);
@@ -234,22 +229,19 @@ in
                     findutils
                     jq
                     matugen
-                    wofi
                   ];
                   text = ''
                     library="''${XDG_DATA_HOME:-$HOME/.local/share}/wallpapers"
                     default=$library/${defaultWallpaper}
                     state="''${XDG_STATE_HOME:-$HOME/.local/state}/theme"
                     cache="''${XDG_CACHE_HOME:-$HOME/.cache}/wallpaper-palettes"
-                    # The picker reads the checkout, so a wallpaper dropped in shows up before the
-                    # rebuild that caches its palette; matugen colours it until then.
-                    repo=${repoWallpapers}
-                    [[ -d $repo ]] || repo=$library
+                    # Wallpapers set from the checkout (the bar's picker lists it) are matched to
+                    # the library by name for their cached palettes.
                     mkdir -p "$state" "$cache"
 
                     usage() {
                       echo "usage: wallpaper [IMAGE | --restore | --render]"
-                      echo "  (none)     pick from the wallpapers in $repo"
+                      echo "  (none)     open the bar's wallpaper picker"
                       echo "  IMAGE      set IMAGE and theme the desktop from it"
                       echo "  --restore  set the current wallpaper again (run at login)"
                       echo "  --render   rewrite the colour files for the current wallpaper"
@@ -334,17 +326,9 @@ in
                       show "$img"
                     }
 
+                    # The picker is the Quickshell bar's (WallpaperPanel.qml); it runs `wallpaper IMAGE`.
                     pick() {
-                      local -A paths=()
-                      local img label choice
-                      while IFS= read -r -d "" img; do
-                        label=$(basename "$img")
-                        paths[''${label%.*}]=$img
-                      done < <(find -L "$repo" -maxdepth 1 -type f \
-                                 \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) \
-                                 -print0 2> /dev/null)
-                      choice=$(printf '%s\n' "''${!paths[@]}" | sort | wofi --dmenu --prompt Wallpaper) || exit 0
-                      [[ -n $choice ]] && apply "''${paths[$choice]}"
+                      ${config.programs.quickshell.package}/bin/qs -c bar ipc call wallpaper toggle
                     }
 
                     case "''${1:-}" in
@@ -362,34 +346,50 @@ in
                 };
               in
               {
-                home.packages = [ wallpaper ];
-                services.awww.enable = true;
-                xdg.dataFile.wallpapers.source = library;
-
-                # Rewrite the colour files on every switch, so template changes land straight away and
-                # the first login already has them.
-                home.activation.wallpaperTheme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-                  run ${wallpaper}/bin/wallpaper --render
-                '';
-
-                # matugen supplies these apps' colours at runtime; Stylix keeps their fonts.
-                stylix.targets = {
-                  kitty.colors.enable = false;
-                  wofi.enable = false;
-                  hyprlock.enable = false;
-                  hyprland.enable = false;
-                  hyprpaper.enable = false;
-                  # Needs declared Firefox profiles, and Firefox here keeps its own.
-                  firefox.enable = false;
+                options.cosmos = {
+                  wallpaper = lib.mkOption {
+                    type = lib.types.package;
+                    readOnly = true;
+                    description = "The `wallpaper` command, which the bar's picker runs.";
+                  };
+                  wallpaperDir = lib.mkOption {
+                    type = lib.types.str;
+                    readOnly = true;
+                    description = "The folder the wallpaper picker lists.";
+                  };
                 };
 
-                programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
-                programs.hyprlock.settings.source = "${stateDir}/hyprlock.conf";
+                config = {
+                  cosmos.wallpaper = wallpaper;
+                  cosmos.wallpaperDir = repoWallpapers;
+                  home.packages = [ wallpaper ];
+                  services.awww.enable = true;
+                  xdg.dataFile.wallpapers.source = library;
 
-                # Stylix still picks adw-gtk3 and the fonts; the colours come from the wallpaper.
-                xdg.configFile = lib.genAttrs [ "gtk-3.0/gtk.css" "gtk-4.0/gtk.css" ] (_: {
-                  source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${stateDir}/gtk.css");
-                });
+                  # Rewrite the colour files on every switch, so template changes land straight away and
+                  # the first login already has them.
+                  home.activation.wallpaperTheme = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+                    run ${wallpaper}/bin/wallpaper --render
+                  '';
+
+                  # matugen supplies these apps' colours at runtime; Stylix keeps their fonts.
+                  stylix.targets = {
+                    kitty.colors.enable = false;
+                    hyprlock.enable = false;
+                    hyprland.enable = false;
+                    hyprpaper.enable = false;
+                    # Needs declared Firefox profiles, and Firefox here keeps its own.
+                    firefox.enable = false;
+                  };
+
+                  programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
+                  programs.hyprlock.settings.source = "${stateDir}/hyprlock.conf";
+
+                  # Stylix still picks adw-gtk3 and the fonts; the colours come from the wallpaper.
+                  xdg.configFile = lib.genAttrs [ "gtk-3.0/gtk.css" "gtk-4.0/gtk.css" ] (_: {
+                    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${stateDir}/gtk.css");
+                  });
+                };
               }
             )
           ];

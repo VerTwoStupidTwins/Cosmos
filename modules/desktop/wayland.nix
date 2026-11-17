@@ -111,34 +111,6 @@
             };
           };
 
-          programs.wofi = {
-            enable = true;
-            settings = {
-              show = "drun";
-              prompt = "Search";
-              allow_images = true;
-              insensitive = true;
-              no_actions = true;
-              width = 600;
-              height = 400;
-              term = "kitty";
-            };
-            style = ''
-              @import url("file://${theme}/colors.css");
-
-              * { font-family: "${mono}"; font-size: 14px; }
-              window { background-color: @base00; border: 2px solid @accent; border-radius: 10px; }
-              #outer-box { padding: 6px; }
-              #input { margin: 4px 4px 8px; padding: 6px 10px; border: none; border-radius: 6px;
-                       background-color: @base01; color: @base05; }
-              #inner-box, #scroll { background-color: transparent; }
-              #entry { padding: 6px 10px; border-radius: 6px; }
-              #entry:selected { background-color: @base02; }
-              #text { color: @base05; }
-              #entry:selected #text { color: @accent; }
-            '';
-          };
-
           # The bar: Quickshell, from ./quickshell plus a generated Config.qml with the paths and
           # font it needs. Colours come from the theme's quickshell.json (theme.nix).
           programs.quickshell = {
@@ -162,6 +134,10 @@
                   readonly property string terminal: "${config.programs.kitty.package}/bin/kitty"
                   readonly property string systemdRun: "${pkgs.systemd}/bin/systemd-run"
                   readonly property string stationInfo: "${stationInfo}"
+                  readonly property string wallpaperCommand: "${config.cosmos.wallpaper}/bin/wallpaper"
+                  readonly property string wallpaperCurrent: "${theme}/current"
+                  readonly property string wallpaperDir: "${config.cosmos.wallpaperDir}"
+                  readonly property string wallpaperLibrary: "${config.xdg.dataHome}/wallpapers"
               }
               QML
             '';

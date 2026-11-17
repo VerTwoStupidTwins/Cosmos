@@ -40,6 +40,20 @@ ShellRoot {
         }
     }
 
+    // The wallpaper picker, on the first screen.
+    WallpaperPanel {
+        screen: Quickshell.screens[0]
+    }
+
+    // `qs -c bar ipc call wallpaper toggle`, which `wallpaper` with no image runs.
+    IpcHandler {
+        target: "wallpaper"
+
+        function toggle(): void {
+            Wallpapers.toggle();
+        }
+    }
+
     // Notifications pop up on the first screen.
     NotificationPopups {
         screen: Quickshell.screens[0]
