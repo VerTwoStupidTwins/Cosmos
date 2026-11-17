@@ -69,6 +69,25 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call media toggle` for the media plate, and play-pause / next / previous
+    // for the player the bar follows.
+    IpcHandler {
+        target: "media"
+
+        function toggle(): void {
+            Media.toggle();
+        }
+        function playPause(): void {
+            Media.active?.togglePlaying();
+        }
+        function next(): void {
+            Media.active?.next();
+        }
+        function previous(): void {
+            Media.active?.previous();
+        }
+    }
+
     // Notifications when the battery runs low.
     BatteryWatch {}
 
