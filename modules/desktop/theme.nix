@@ -6,7 +6,7 @@
 # statically, from the default wallpaper.
 #
 # Runtime: `wallpaper` sets an image with awww and has matugen render the colour files that
-# kitty, the Quickshell bar, wofi, mako, hyprlock and niri include. A wallpaper built into the system uses
+# kitty, the Quickshell bar, wofi, hyprlock and niri include. A wallpaper built into the system uses
 # its cached palette; any other image (one added since the last rebuild, or a path given to
 # `wallpaper`) gets one from matugen's Material You colours, cached by the image's hash.
 { inputs, ... }:
@@ -171,19 +171,6 @@ in
                     # kitty rereads its config on SIGUSR1. nixpkgs wraps kitty, so the process is
                     # named .kitty-wrapped.
                     hook = "${pkill} -USR1 -x '\\.?kitty(-wrapped)?' || true";
-                  };
-
-                  "mako" = {
-                    text = ''
-                      background-color=${c "base00"}
-                      text-color=${c "base05"}
-                      border-color=${c "accent"}
-                      progress-color=over ${c "base02"}
-
-                      [urgency=high]
-                      border-color=${c "base08"}
-                    '';
-                    hook = "${config.services.mako.package}/bin/makoctl reload || true";
                   };
 
                   # hyprlock reads this each time it starts.
@@ -389,7 +376,6 @@ in
                 stylix.targets = {
                   kitty.colors.enable = false;
                   wofi.enable = false;
-                  mako.enable = false;
                   hyprlock.enable = false;
                   hyprland.enable = false;
                   hyprpaper.enable = false;
@@ -398,7 +384,6 @@ in
                 };
 
                 programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
-                services.mako.settings.include = "${stateDir}/mako";
                 programs.hyprlock.settings.source = "${stateDir}/hyprlock.conf";
 
                 # Stylix still picks adw-gtk3 and the fonts; the colours come from the wallpaper.

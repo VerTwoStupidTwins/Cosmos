@@ -26,6 +26,23 @@ ShellRoot {
         }
     }
 
+    // Notifications pop up on the first screen.
+    NotificationPopups {
+        screen: Quickshell.screens[0]
+    }
+
+    // `qs -c bar ipc call notifications dnd`, and `dismiss` to clear the popups.
+    IpcHandler {
+        target: "notifications"
+
+        function dnd(): void {
+            Notifs.toggleDnd();
+        }
+        function dismiss(): void {
+            Notifs.dismissAll();
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 

@@ -59,6 +59,19 @@ PanelWindow {
         cutBottomLeft: 14
         stripRight: true
 
+        // Shown while do-not-disturb is on; click to turn it off.
+        Tag {
+            visible: Notifs.dnd
+            text: "DND"
+            color: Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.15)
+            border.color: Theme.warn
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Notifs.toggleDnd()
+            }
+        }
         Tray {
             bar: bar
         }

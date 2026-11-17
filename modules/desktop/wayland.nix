@@ -152,6 +152,7 @@
               Singleton {
                   readonly property string themeFile: "${theme}/quickshell.json"
                   readonly property string font: "${mono}"
+                  readonly property string sans: "${sans}"
                   readonly property string brightnessctl: "${pkgs.brightnessctl}/bin/brightnessctl"
                   readonly property string pavucontrol: "${pkgs.pavucontrol}/bin/pavucontrol"
                   readonly property string stationProbe: "${stationProbe}"
@@ -170,16 +171,7 @@
             X-Restart-Triggers = [ "${config.programs.quickshell.configs.bar}" ];
           };
 
-          services.mako = {
-            enable = true;
-            settings = {
-              font = "${sans} 11";
-              border-size = 2;
-              border-radius = 8;
-              padding = "10";
-              default-timeout = 5000;
-            };
-          };
+          # Notifications are the Quickshell bar's (Notifs.qml), not mako's.
 
           services.hyprpolkitagent.enable = true;
 
