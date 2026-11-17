@@ -76,6 +76,14 @@
         config.services.hermes-agent.backend.port
       ];
 
+      monitor = {
+        units = [
+          "hermes-agent"
+          "hermes-backend"
+        ];
+        ports.hermes-backend = config.services.hermes-agent.backend.port;
+      };
+
       # Lets twins read and edit the service's config and logs.
       users.users.twins.extraGroups = [ "hermes" ];
 

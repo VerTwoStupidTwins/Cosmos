@@ -51,6 +51,19 @@
         SUBSYSTEM=="drm", KERNEL=="renderD*", KERNELS=="${pciAddress}", SYMLINK+="dri/comfyui-render"
       '';
 
+      monitor = {
+        units = [
+          "podman-comfyui"
+          "comfyui-gate"
+        ];
+        ports = {
+          comfyui = port;
+          comfyui-gate = gatePort;
+        };
+        # The card at pciAddress.
+        models.image = "B580";
+      };
+
       virtualisation.podman.enable = true;
       virtualisation.oci-containers.backend = "podman";
 

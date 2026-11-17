@@ -12,16 +12,11 @@ use anyhow::{Context, Result, anyhow};
 use regex::Regex;
 use serde_json::{Map, Value, json};
 
+use crate::drift;
 use crate::edits;
 use crate::http;
+use crate::manifest::Manifest;
 use crate::repo;
-
-/// Cards by PCI device ID, so names and roles survive Vulkan renumbering.
-const CARDS: &[(&str, &str, &str)] = &[
-    ("0x744c", "RX 7900 XT", "7900 XT"),
-    ("0xe20b", "Arc B580", "B580"),
-    ("0xe212", "Arc Pro B50", "Pro B50"),
-];
 
 // Warning thresholds for the health report.
 const DISK_WARN: f64 = 85.0;
@@ -41,13 +36,15 @@ pub struct Config {
     pub journalctl: String,
     pub llama_swap_url: String,
     pub memory_socket: String,
-    pub units: Vec<String>,
-    pub disks: Vec<String>,
-    pub always_loaded: Vec<String>,
-    pub roles: BTreeMap<String, String>,
     pub revision_file: String,
     pub config_source: String,
-    pub managed_files: String,
+    pub manifest: String,
+}
+
+impl Config {
+    pub fn manifest(&self) -> Result<Manifest> {
+        Manifest::read(&self.manifest)
+    }
 }
 
 // ---- helpers
@@ -165,7 +162,7 @@ pub async fn system_info(cfg: &Config) -> Result<Value> {
     let cpu_threads =
         fs::read_to_string("/proc/cpuinfo").map(|c| c.lines().filter(|l| l.starts_with("processor")).count()).unwrap_or(0);
 
-    let disks: Map<String, Value> = cfg.disks.iter().map(|m| (m.clone(), disk_usage(m))).collect();
+    let disks: Map<String, Value> = cfg.manifest()?.disks.iter().map(|m| (m.clone(), disk_usage(m))).collect();
     let (mut cpu, mut nvme) = (Map::new(), Map::new());
     for (name, _, path) in hwmon_by_name() {
         match name.as_str() {
@@ -220,6 +217,7 @@ fn parse_devices(text: &str) -> Vec<(String, String, i64, i64)> {
 }
 
 pub async fn gpu_info(cfg: &Config) -> Result<Value> {
+    let manifest = cfg.manifest()?;
     let devices = parse_devices(&run(&cfg.llama_server, &["--list-devices"], Duration::from_secs(60)).await?);
     let sensors: BTreeMap<String, (String, String)> = hwmon_by_name()
         .into_iter()
@@ -229,19 +227,22 @@ pub async fn gpu_info(cfg: &Config) -> Result<Value> {
 
     let mut cards = Vec::new();
     for (pci, (driver, path)) in sensors {
-        let device_id = read(format!("/sys/bus/pci/devices/{pci}/device")).unwrap_or_default();
-        let (card_name, short) = CARDS
-            .iter()
-            .find(|(id, _, _)| *id == device_id)
-            .map(|(_, name, short)| (name.to_string(), short.to_string()))
-            .unwrap_or_else(|| (device_id.clone(), device_id.clone()));
+        // Cards by PCI ID, so names and roles survive Vulkan renumbering.
+        let dev = |f: &str| read(format!("/sys/bus/pci/devices/{pci}/{f}")).unwrap_or_default();
+        let pci_id = format!("{}:{}", dev("vendor"), dev("device"));
+        let known = manifest.card_by_pci(&pci_id);
+        let short = known.map_or(pci_id.clone(), |(short, _)| short.clone());
         let mut card = json!({
-            "card": card_name,
-            "role": cfg.roles.get(&short).cloned().unwrap_or_default(),
+            "card": known.map_or(pci_id.clone(), |(_, c)| c.name.clone()),
+            "short": short,
+            "role": known.map_or(String::new(), |(_, c)| c.models.join(", ")),
             "pci": pci,
             "temps_c": temps(&path),
         });
         let c = card.as_object_mut().unwrap();
+        if let Some((_, k)) = known.filter(|(_, k)| !k.note.is_empty()) {
+            c.insert("note".into(), json!(k.note));
+        }
         if let Some((_, vk, total, free)) = devices.iter().find(|(name, ..)| name.contains(&short)) {
             c.insert("vulkan".into(), json!(vk));
             c.insert("vram_total_mib".into(), json!(total));
@@ -272,8 +273,9 @@ pub async fn model_info(cfg: &Config) -> Result<Value> {
         .iter()
         .filter_map(|m| Some((m["model"].as_str()?.to_owned(), m["state"].clone())))
         .collect();
+    let always_loaded = cfg.manifest()?.always_loaded;
     let missing: Vec<&String> =
-        cfg.always_loaded.iter().filter(|m| states.get(*m).and_then(Value::as_str) != Some("ready")).collect();
+        always_loaded.iter().filter(|m| states.get(*m).and_then(Value::as_str) != Some("ready")).collect();
     Ok(json!({ "loaded": states, "missing_always_loaded": missing }))
 }
 
@@ -281,13 +283,23 @@ pub async fn model_info(cfg: &Config) -> Result<Value> {
 /// name a lower level of their own aren't errors.
 static SELF_LABELLED_MINOR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(INFO|DEBUG)\b").unwrap());
 
+/// A Python warning, such as `functional.py:504: UserWarning: ...`. The indented line after it is its source line.
+static PYTHON_WARNING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b\w*Warning: ").unwrap());
+
 fn filter_journal(text: &str, priority: &str, lines: Option<usize>) -> Vec<String> {
-    let out: Vec<String> = text
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter(|l| priority == "info" || !SELF_LABELLED_MINOR.is_match(l))
-        .map(str::to_owned)
-        .collect();
+    let mut out = Vec::new();
+    let mut after_warning = false;
+    for l in text.lines().filter(|l| !l.trim().is_empty()) {
+        if priority != "info" {
+            let source_line = after_warning && l.starts_with(char::is_whitespace);
+            after_warning = PYTHON_WARNING.is_match(l);
+            // Progress bars redraw themselves with carriage returns.
+            if SELF_LABELLED_MINOR.is_match(l) || after_warning || source_line || l.contains('\r') {
+                continue;
+            }
+        }
+        out.push(l.to_owned());
+    }
     match lines {
         Some(n) if out.len() > n => out[out.len() - n..].to_vec(),
         _ => out,
@@ -329,17 +341,18 @@ pub async fn services_info(cfg: &Config) -> Result<Value> {
         .filter_map(|l| l.split_whitespace().next().map(str::to_owned))
         .collect();
     // Every unit is checked at once; the results keep the configured order.
+    let units = cfg.manifest()?.units;
     let mut tasks = tokio::task::JoinSet::new();
-    for (i, unit) in cfg.units.iter().enumerate() {
+    for (i, unit) in units.iter().enumerate() {
         let (cfg, unit) = (cfg.clone(), unit.clone());
         tasks.spawn(async move { (i, unit_info(&cfg, &unit).await) });
     }
-    let mut results = vec![None; cfg.units.len()];
+    let mut results = vec![None; units.len()];
     while let Some(joined) = tasks.join_next().await {
         let (i, info) = joined?;
         results[i] = Some(info?);
     }
-    let services: Map<String, Value> = cfg.units.iter().cloned().zip(results.into_iter().map(Option::unwrap)).collect();
+    let services: Map<String, Value> = units.iter().cloned().zip(results.into_iter().map(Option::unwrap)).collect();
     Ok(json!({ "services": services, "failed_units": failed }))
 }
 
@@ -416,15 +429,30 @@ fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memo
 }
 
 pub async fn health_report(cfg: &Config) -> Value {
-    let (system, gpus, models, services, memory) = tokio::join!(
+    let manifest = cfg.manifest();
+    let drift_check = async {
+        match &manifest {
+            Ok(m) => drift::drift(m).await,
+            Err(e) => Err(anyhow!("{e:#}")),
+        }
+    };
+    let (system, gpus, models, services, memory, drift) = tokio::join!(
         safely(system_info(cfg)),
         safely(gpu_info(cfg)),
         safely(model_info(cfg)),
         safely(services_info(cfg)),
         safely(memory_info(cfg)),
+        safely(drift_check),
     );
-    let edits = safely(async { edits::edits(&cfg.managed_files, &cfg.config_source) }).await;
+    let edits = safely(async {
+        match &manifest {
+            Ok(m) => edits::edits(&m.managed_files, &cfg.config_source),
+            Err(e) => Err(anyhow!("{e:#}")),
+        }
+    })
+    .await;
     let mut warnings = warnings(&system, &gpus, &models, &services, &memory);
+    warnings.extend(drift::warnings(&drift, &gpus, manifest.as_ref().ok()));
     warnings.extend(edits::warnings(&edits));
     json!({
         "checked_at": chrono::Local::now().format("%Y-%m-%d %H:%M %:z").to_string(),
@@ -435,6 +463,7 @@ pub async fn health_report(cfg: &Config) -> Value {
         "models": models,
         "services": services,
         "memory": memory,
+        "config_drift": drift,
         "hermes_edits": edits,
     })
 }
@@ -462,9 +491,10 @@ mod tests {
 
     #[test]
     fn drops_self_labelled_minor_lines_below_info() {
-        let text = "real error\n\nINFO: chatty container\nanother error\n";
+        let text = "real error\n\nINFO: chatty container\n\r  4%|##  | 1/25 [00:04<01:43]\n\
+                    functional.py:504: UserWarning: pass the indexing argument.\n  return _VF.meshgrid(tensors)\nanother error\n";
         assert_eq!(filter_journal(text, "err", None), ["real error", "another error"]);
-        assert_eq!(filter_journal(text, "info", None).len(), 3);
+        assert_eq!(filter_journal(text, "info", None).len(), 6);
         assert_eq!(filter_journal(text, "err", Some(1)), ["another error"]);
     }
 

@@ -14,6 +14,8 @@
       #   sudo -u hermes -H ob sync-setup --vault Wiki --path /var/lib/hermes/wiki --device-name lugh
       environment.systemPackages = [ pkgs.obsidian-headless ];
 
+      monitor.units = [ "obsidian-sync" ];
+
       # Setgid, so files Hermes and the sync create stay in the hermes group, which twins is in.
       systemd.tmpfiles.rules = [ "d ${wiki} 2770 hermes hermes -" ];
 

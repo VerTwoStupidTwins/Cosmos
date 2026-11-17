@@ -2,7 +2,12 @@
 { inputs, ... }:
 {
   flake.modules.nixos.llm =
-    { lib, pkgs, ... }:
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
     let
       # llama-swap talks to the API only, so the server's web UI is left out. Its build broke upstream on
       # 2026-11-14 when it started importing a llama-brand module that the Nix build doesn't fetch.
@@ -51,12 +56,17 @@
       transcriptionDevice = "Vulkan1";
 
       # Numbering changes when GPUs move between slots, so startup stops if a model would land on the wrong card.
+      # Cards by their short names in gpu.nix, which --list-devices includes in each card's name.
       expectedCards = {
-        ${mainDevice} = "RX 7900 XT";
+        ${mainDevice} = "7900 XT";
         ${helperDevice} = "B580";
         ${smallModelDevice} = "Pro B50";
         ${transcriptionDevice} = "Pro B50";
       };
+      card =
+        device:
+        assert config.monitor.cards ? ${expectedCards.${device}};
+        expectedCards.${device};
 
       checkDevices = pkgs.writeShellScript "llama-swap-check-devices" ''
         devices=$(${llama-server} --list-devices 2>&1; env ${lib.escapeShellArgs syclEnv} ${sycl-server} --list-devices 2>&1)
@@ -96,6 +106,8 @@
       # MOSS-Image in ComfyUI's single-file formats, from Comfy-Org/MOSS-Image, and the community 8-step LoRA.
       comfyuiUrl = "http://127.0.0.1:8188";
 
+      kokoroPort = 8880;
+
       kokoroPython = pkgs.python3.withPackages (p: [
         p.kokoro
         # Kokoro's text processing would otherwise try to download this when it starts.
@@ -109,6 +121,26 @@
       ];
 
       systemd.tmpfiles.rules = [ "d /models 0775 twins users -" ];
+
+      monitor = {
+        units = [
+          "llama-swap"
+          "kokoro"
+        ];
+        ports = {
+          llama-swap = config.services.llama-swap.port;
+          kokoro = kokoroPort;
+        };
+        models = {
+          main = card mainDevice;
+          helper = card helperDevice;
+          decision = card smallModelDevice;
+          embedding = card smallModelDevice;
+          reranker = card smallModelDevice;
+          transcription = card transcriptionDevice;
+        };
+        inherit checkDevices;
+      };
 
       systemd.services.llama-swap = {
         serviceConfig.ExecStartPre = checkDevices;
@@ -130,7 +162,7 @@
         serviceConfig = {
           ExecStart = lib.concatStringsSep " " [
             "${kokoroPython}/bin/python3 -I ${./kokoro-server.py}"
-            "--port 8880"
+            "--port ${toString kokoroPort}"
             "--model-dir ${voiceModels}/kokoro"
             "--ffmpeg ${lib.getExe pkgs.ffmpeg-headless}"
           ];

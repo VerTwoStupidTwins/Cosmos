@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
@@ -19,13 +19,6 @@ pub struct Managed {
     saved: String,
     /// Live path relative to `home` → its source, relative to the repo root.
     files: std::collections::BTreeMap<String, String>,
-}
-
-impl Managed {
-    pub fn read(file: &str) -> Result<Self> {
-        let text = fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
-        serde_json::from_str(&text).with_context(|| format!("parsing {file}"))
-    }
 }
 
 fn saved_files(dir: &Path, out: &mut Vec<Value>) {
@@ -51,8 +44,7 @@ fn saved_files(dir: &Path, out: &mut Vec<Value>) {
     }
 }
 
-pub fn edits(managed_file: &str, source: &str) -> Result<Value> {
-    let m = Managed::read(managed_file)?;
+pub fn edits(m: &Managed, source: &str) -> Result<Value> {
     let files: Vec<Value> = m
         .files
         .iter()
@@ -111,10 +103,7 @@ mod tests {
         fs::write(d.join("home/skills/other/SKILL.md"), "same").unwrap();
         fs::write(d.join("saved/skills/wiki/SKILL.md.2026-11-16-183000"), "older edit").unwrap();
         fs::write(d.join("saved/.installed/skills/wiki/SKILL.md"), "original").unwrap();
-        let manifest = d.join("managed.json");
-        fs::write(
-            &manifest,
-            json!({
+        let managed: Managed = serde_json::from_value(json!({
                 "home": d.join("home"),
                 "saved": d.join("saved"),
                 "files": {
@@ -122,12 +111,10 @@ mod tests {
                     "skills/other/SKILL.md": "modules/other.md",
                     "skills/gone/SKILL.md": "modules/gone.md",
                 },
-            })
-            .to_string(),
-        )
+        }))
         .unwrap();
 
-        let out = edits(manifest.to_str().unwrap(), d.join("repo").to_str().unwrap()).unwrap();
+        let out = edits(&managed, d.join("repo").to_str().unwrap()).unwrap();
         let statuses: Vec<&str> = out["files"].as_array().unwrap().iter().map(|f| f["status"].as_str().unwrap()).collect();
         assert_eq!(statuses, ["missing", "unchanged", "edited"]);
         let saved = out["saved_before_switch"].as_array().unwrap();

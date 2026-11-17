@@ -4,12 +4,12 @@
 //! config tools read the commit lugh was built from and the copy of the config that commit holds. None of them
 //! runs a shell or changes anything, and logs come only from listed services.
 
+mod drift;
 mod edits;
 mod http;
+mod manifest;
 mod probes;
 mod repo;
-
-use std::collections::BTreeMap;
 
 use anyhow::Result;
 use clap::Parser;
@@ -37,31 +37,15 @@ struct Args {
     llama_swap_url: String,
     #[arg(long)]
     memory_socket: String,
-    /// Services to watch, comma-separated.
-    #[arg(long)]
-    units: String,
-    /// Mount points to watch, comma-separated.
-    #[arg(long)]
-    disks: String,
-    /// Models that should always be loaded, comma-separated.
-    #[arg(long)]
-    always_loaded: String,
-    /// JSON object of card short name to role.
-    #[arg(long)]
-    roles: String,
     /// A file holding the commit the running system was built from.
     #[arg(long)]
     revision_file: String,
     /// A directory holding the config the running system was built from.
     #[arg(long)]
     config_source: String,
-    /// A JSON file naming the files the config manages in Hermes' home, and where switches save Hermes' edits.
+    /// A JSON file of what the running system should be running, written by Nix.
     #[arg(long)]
-    managed_files: String,
-}
-
-fn list(s: &str) -> Vec<String> {
-    s.split(',').filter(|x| !x.is_empty()).map(str::to_owned).collect()
+    manifest: String,
 }
 
 fn ok(value: Value) -> CallToolResult {
@@ -190,8 +174,12 @@ impl Monitor {
     /// Recent log lines from one of lugh's key services.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn service_logs(&self, Parameters(req): Parameters<LogsRequest>) -> CallToolResult {
-        if !self.cfg.units.contains(&req.unit) {
-            return error(format!("Unknown unit. Choose one of: {}", self.cfg.units.join(", ")));
+        let units = match self.cfg.manifest() {
+            Ok(m) => m.units,
+            Err(e) => return error(e),
+        };
+        if !units.contains(&req.unit) {
+            return error(format!("Unknown unit. Choose one of: {}", units.join(", ")));
         }
         if !["err", "warning", "info"].contains(&req.priority.as_str()) {
             return error("priority must be err, warning or info");
@@ -220,7 +208,17 @@ impl Monitor {
     /// switch, and ones saved before a switch replaced them. Both need bringing into the repo to last.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn hermes_edits(&self) -> CallToolResult {
-        or_error(edits::edits(&self.cfg.managed_files, &self.cfg.config_source))
+        or_error(self.cfg.manifest().and_then(|m| edits::edits(&m.managed_files, &self.cfg.config_source)))
+    }
+
+    /// Whether lugh runs what its config declares: every declared port listening, Hermes' MCP servers running, and
+    /// the cards numbered the way the models expect. service_status and model_status cover services and models.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn config_drift(&self) -> CallToolResult {
+        match self.cfg.manifest() {
+            Ok(m) => or_error(drift::drift(&m).await),
+            Err(e) => error(e),
+        }
     }
 
     // ---- config
@@ -261,7 +259,7 @@ impl ServerHandler for Monitor {
                 "Read-only checks for lugh, the server Hermes runs on. Use health_report for a summary and the other \
                  health tools for detail. To explain why lugh is set up a certain way, or what it's configured to \
                  do, use config_search and config_read on its NixOS config: the comments there give the reasons. \
-                 deployed_revision says which commit is running. Nothing here can change the system.",
+                 deployed_revision says which commit is running, and config_drift whether lugh runs what that config declares. Nothing here can change the system.",
             )
     }
 }
@@ -269,7 +267,6 @@ impl ServerHandler for Monitor {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let roles: BTreeMap<String, String> = serde_json::from_str(&args.roles)?;
     let monitor = Monitor {
         cfg: Config {
             llama_server: args.llama_server,
@@ -277,13 +274,9 @@ async fn main() -> Result<()> {
             journalctl: args.journalctl,
             llama_swap_url: args.llama_swap_url,
             memory_socket: args.memory_socket,
-            units: list(&args.units),
-            disks: list(&args.disks),
-            always_loaded: list(&args.always_loaded),
-            roles,
             revision_file: args.revision_file,
             config_source: args.config_source,
-            managed_files: args.managed_files,
+            manifest: args.manifest,
         },
         tool_router: Monitor::tool_router(),
     };

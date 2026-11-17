@@ -41,6 +41,12 @@
       '';
     in
     {
+      # Postgres goes when the way back is no longer needed.
+      monitor.units = [
+        "hermes-memory"
+        "postgresql"
+      ];
+
       # Postgres held the memories until the Rust service. It stays, untouched, as the way back for a while.
       services.postgresql = {
         enable = true;
