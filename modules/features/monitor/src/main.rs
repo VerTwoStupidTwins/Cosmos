@@ -7,6 +7,7 @@
 
 mod drift;
 mod edits;
+mod hardware;
 mod http;
 mod manifest;
 mod probes;
@@ -163,6 +164,14 @@ impl Monitor {
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn gpu_status(&self) -> CallToolResult {
         ok(json!({ "gpus": safely(probes::gpu_info(&self.cfg)).await }))
+    }
+
+    /// Trouble below the services: kernel faults, hardware errors, storage errors, out-of-memory kills and crashed
+    /// processes since boot and in the previous boot, whether the previous boot shut down cleanly, btrfs error
+    /// counters, and NVMe health.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn hardware_status(&self) -> CallToolResult {
+        ok(safely(hardware::hardware_info(&self.cfg)).await)
     }
 
     /// The models llama-swap has loaded, and any that should always be loaded but aren't.

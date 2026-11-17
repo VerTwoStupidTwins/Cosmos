@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 
 use crate::drift;
 use crate::edits;
+use crate::hardware;
 use crate::http;
 use crate::manifest::Manifest;
 use crate::repo;
@@ -51,7 +52,7 @@ impl Config {
 // ---- helpers
 
 /// Runs a program and returns what it printed, like the Python monitor's subprocess call.
-async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<String> {
+pub(crate) async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<String> {
     let output = tokio::time::timeout(timeout, tokio::process::Command::new(program).args(args).kill_on_drop(true).output())
         .await
         .map_err(|_| anyhow!("TimeoutExpired: {program} took longer than {} seconds", timeout.as_secs()))?
@@ -59,7 +60,7 @@ async fn run(program: &str, args: &[&str], timeout: Duration) -> Result<String> 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
-fn read(path: impl AsRef<Path>) -> Option<String> {
+pub(crate) fn read(path: impl AsRef<Path>) -> Option<String> {
     fs::read_to_string(path).ok().map(|s| s.trim().to_owned())
 }
 
@@ -453,8 +454,9 @@ pub async fn health_report(cfg: &Config) -> Value {
             Err(e) => Err(anyhow!("{e:#}")),
         }
     };
-    let (system, gpus, models, services, memory, drift) = tokio::join!(
+    let (system, hardware, gpus, models, services, memory, drift) = tokio::join!(
         safely(system_info(cfg)),
+        safely(hardware::hardware_info(cfg)),
         where_present(has_cards, gpu_info(cfg)),
         where_present(cfg.llama_swap_url.is_some(), model_info(cfg)),
         safely(services_info(cfg)),
@@ -468,6 +470,7 @@ pub async fn health_report(cfg: &Config) -> Value {
     let none = Value::Null;
     let (g, mo, me) = (gpus.as_ref().unwrap_or(&none), models.as_ref().unwrap_or(&none), memory.as_ref().unwrap_or(&none));
     let mut warnings = warnings(&system, g, mo, &services, me);
+    warnings.extend(hardware::warnings(&hardware));
     warnings.extend(drift::warnings(&drift, g, m));
     if let Some(e) = &edits {
         warnings.extend(edits::warnings(e));
@@ -477,6 +480,7 @@ pub async fn health_report(cfg: &Config) -> Value {
         "status": if warnings.is_empty() { "ok" } else { "attention" },
         "warnings": warnings,
         "system": system,
+        "hardware": hardware,
     });
     let r = report.as_object_mut().unwrap();
     for (key, value) in [("gpus", gpus), ("models", models)] {

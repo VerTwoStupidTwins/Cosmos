@@ -40,6 +40,9 @@ pub struct Manifest {
     pub mcp_servers: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub disks: Vec<String>,
+    /// Where a root timer saves each NVMe drive's health as JSON, since reading it needs root.
+    #[serde(default)]
+    pub nvme_health_dir: Option<String>,
     /// Files the config manages in Hermes' home, on the host Hermes runs on.
     #[serde(default)]
     pub managed_files: Option<Managed>,

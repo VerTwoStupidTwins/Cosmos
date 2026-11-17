@@ -53,6 +53,9 @@ in
       };
 
       m = config.monitor;
+
+      # Reading NVMe health needs root, so this saves it where the monitor, which runs unprivileged, can read it.
+      nvmeHealthDir = "/run/host-monitor/nvme";
       # Only the host Hermes runs on has it.
       hermesOn = config.services.hermes-agent.enable or false;
       hermes = config.services.hermes-agent;
@@ -72,6 +75,7 @@ in
           "/"
           "/boot"
         ];
+        nvme_health_dir = nvmeHealthDir;
       }
       // lib.optionalAttrs hermesOn {
         mcp_servers = lib.mapAttrs (_: s: [ s.command ] ++ s.args or [ ]) (
@@ -107,6 +111,38 @@ in
         "host-monitor/revision".text = lib.defaultTo "unknown" config.system.configurationRevision;
         "host-monitor/config".source = configSource;
         "host-monitor/manifest.json".text = builtins.toJSON manifest;
+      };
+
+      systemd.services.host-monitor-nvme = {
+        description = "Save NVMe health for the host monitor";
+        path = [ pkgs.nvme-cli ];
+        serviceConfig = {
+          Type = "oneshot";
+          RuntimeDirectory = "host-monitor/nvme";
+          RuntimeDirectoryPreserve = true;
+          RuntimeDirectoryMode = "0755";
+        };
+        # One file per controller (nvme0, nvme1, …), replaced whole so the monitor never reads half of one.
+        script = ''
+          for dev in /dev/nvme[0-9]*; do
+            [ -c "$dev" ] || continue
+            name=$(basename "$dev")
+            if nvme smart-log "$dev" -o json > ${nvmeHealthDir}/.$name.tmp; then
+              mv ${nvmeHealthDir}/.$name.tmp ${nvmeHealthDir}/$name.json
+            else
+              rm -f ${nvmeHealthDir}/.$name.tmp
+            fi
+          done
+        '';
+      };
+      systemd.timers.host-monitor-nvme = {
+        wantedBy = [ "timers.target" ];
+        # OnActiveSec covers the switch that adds the timer, after boot is long past.
+        timerConfig = {
+          OnBootSec = "1min";
+          OnActiveSec = "1min";
+          OnUnitActiveSec = "1h";
+        };
       };
 
       monitor.command = [
