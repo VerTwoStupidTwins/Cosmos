@@ -23,6 +23,20 @@
       };
 
       helperTask = localTask "helper";
+
+      hermesHome = "${config.services.hermes-agent.stateDir}/.hermes";
+      skillsDir = "${hermesHome}/skills";
+      # Hermes' edits to files the config manages, saved before a switch replaces them. Outside its home, so Hermes
+      # doesn't load them as skills. lugh-monitor reports them, and the repo is where they belong.
+      savedEdits = "${config.services.hermes-agent.stateDir}/edits";
+      managedFiles = lib.attrNames config.services.hermes-agent.hermesHomeFiles;
+
+      # Hermes copies its bundled skills out of the Nix store with the store's read-only modes, so it can't edit or
+      # patch them. The modes aren't part of the hash Hermes uses to spot user edits, so this doesn't stop updates.
+      # Skills a new Hermes version adds stay read-only until its next start or switch.
+      unlockSkills = ''
+        find ${skillsDir} -user hermes \( -type d -o -type f \) ! -perm -u+w,g+w -exec chmod u+w,g+w {} + || true
+      '';
     in
     {
       imports = [ inputs.hermes-agent.nixosModules.default ];
@@ -64,6 +78,49 @@
 
       # Lets twins read and edit the service's config and logs.
       users.users.twins.extraGroups = [ "hermes" ];
+
+      # With twins in the group, Hermes counts a group-writable home as unsafe and refuses to reach its gateway, which
+      # fails every cron job. The module makes the home 2770 at boot (tmpfiles) and on every switch (activation), so
+      # both are overridden: tmpfiles keeps the first line for a path, and this script runs after the module's.
+      # Subdirectories stay group-writable, and twins can still edit config.yaml in place.
+      systemd.tmpfiles.rules = lib.mkBefore [ "d ${hermesHome} 2750 hermes hermes - -" ];
+      system.activationScripts.hermes-home-private = lib.stringAfter [ "hermes-agent-setup" ] ''
+        chmod 2750 ${hermesHome}
+        if [ -d ${skillsDir} ]; then
+          # The module makes the folders for hermesHomeFiles, such as skills/research/llm-wiki, as root. Hermes can
+          # then add files beside the llm-wiki skill, but its edits to SKILL.md itself last only until the next switch.
+          find ${skillsDir} ! -user hermes ! -type l -exec chown hermes:hermes {} + || true
+          ${unlockSkills}
+        fi
+        # What was just installed, to compare with at the next switch.
+        for f in ${lib.escapeShellArgs managedFiles}; do
+          if [ -f "${hermesHome}/$f" ]; then
+            install -D -m 0640 -o hermes -g hermes "${hermesHome}/$f" "${savedEdits}/.installed/$f"
+          fi
+        done
+        # install -D makes folders as root. twins, in the group, clears saved edits once they're in the repo.
+        if [ -d ${savedEdits} ]; then
+          chown -R hermes:hermes ${savedEdits}
+          find ${savedEdits} -type d -exec chmod 2770 {} +
+        fi
+      '';
+
+      # Runs before the module replaces the files it manages: one that differs from what the last switch installed was
+      # edited by Hermes, so a copy is kept.
+      system.activationScripts.hermes-save-edits = lib.stringAfter [ "users" ] ''
+        for f in ${lib.escapeShellArgs managedFiles}; do
+          live="${hermesHome}/$f"
+          last="${savedEdits}/.installed/$f"
+          if [ -f "$live" ] && [ -f "$last" ] && ! ${pkgs.diffutils}/bin/cmp -s "$live" "$last"; then
+            install -D -m 0640 -o hermes -g hermes "$live" "${savedEdits}/$f.$(date +%Y-%m-%d-%H%M%S)"
+            echo "hermes: saved Hermes' edits to $f in ${savedEdits} before replacing it" >&2
+          fi
+        done
+      '';
+      system.activationScripts.hermes-agent-setup.deps = [ "hermes-save-edits" ];
+
+      # Hermes copies new bundled skills as it starts, so each start also unlocks the ones the previous start copied.
+      systemd.services.hermes-agent.preStart = lib.mkAfter unlockSkills;
 
       services.hermes-agent = {
         enable = true;
