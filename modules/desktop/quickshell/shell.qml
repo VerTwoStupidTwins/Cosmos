@@ -59,12 +59,17 @@ ShellRoot {
         screen: Quickshell.screens[0]
     }
 
+    // The notification log, on the first screen.
+    NotificationLog {
+        screen: Quickshell.screens[0]
+    }
+
     // Notifications pop up on the first screen.
     NotificationPopups {
         screen: Quickshell.screens[0]
     }
 
-    // `qs -c bar ipc call notifications dnd`, and `dismiss` to clear the popups.
+    // `qs -c bar ipc call notifications dnd`, `dismiss` to clear the popups, `log` for the log.
     IpcHandler {
         target: "notifications"
 
@@ -73,6 +78,9 @@ ShellRoot {
         }
         function dismiss(): void {
             Notifs.dismissAll();
+        }
+        function log(): void {
+            Notifs.toggleLog();
         }
     }
 

@@ -59,17 +59,29 @@ PanelWindow {
         cutBottomLeft: 14
         stripRight: true
 
-        // Shown while do-not-disturb is on; click to turn it off.
-        Tag {
-            visible: Notifs.dnd
-            text: "DND"
-            color: Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.15)
-            border.color: Theme.warn
+        // Notifications since the log was last opened, or DND while do-not-disturb is on.
+        // Click for the log; right-click toggles do-not-disturb.
+        Row {
+            spacing: 6
+
+            Tag {
+                anchors.verticalCenter: parent.verticalCenter
+                text: Notifs.dnd ? "DND" : "LOG"
+                color: Notifs.dnd ? Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.15) : "transparent"
+                border.color: Notifs.dnd ? Theme.warn : Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.7)
+            }
+            Label {
+                anchors.verticalCenter: parent.verticalCenter
+                text: String(Math.min(Notifs.unread, 99)).padStart(2, "0")
+                color: Notifs.unread > 0 ? Theme.fg : Theme.muted
+            }
 
             MouseArea {
+                parent: parent
                 anchors.fill: parent
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
                 cursorShape: Qt.PointingHandCursor
-                onClicked: Notifs.toggleDnd()
+                onClicked: mouse => mouse.button === Qt.RightButton ? Notifs.toggleDnd() : Notifs.toggleLog()
             }
         }
         Tray {
