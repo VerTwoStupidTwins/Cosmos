@@ -167,7 +167,10 @@ pub async fn system_info(cfg: &Config) -> Result<Value> {
     let (mut cpu, mut nvme) = (Map::new(), Map::new());
     for (name, _, path) in hwmon_by_name() {
         match name.as_str() {
+            // AMD reports Tctl and each chiplet; Intel reports the package and every core, of which the package is
+            // enough.
             "k10temp" => cpu = temps(&path),
+            "coretemp" => cpu = temps(&path).into_iter().filter(|(label, _)| label.starts_with("Package")).collect(),
             "nvme" => nvme = temps(&path),
             _ => {}
         }
@@ -391,9 +394,9 @@ fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memo
         if available < MEM_AVAILABLE_WARN {
             w.push(format!("Only {}% of RAM is available", num(available)));
         }
-        let tctl = system["cpu_temps_c"]["Tctl"].as_f64().unwrap_or(0.0);
-        if tctl >= CPU_TEMP_WARN {
-            w.push(format!("CPU is at {} °C", num(tctl)));
+        let cpu = max_temp(&system["cpu_temps_c"]);
+        if cpu >= CPU_TEMP_WARN {
+            w.push(format!("CPU is at {} °C", num(cpu)));
         }
         let nvme = max_temp(&system["nvme_temps_c"]);
         if nvme >= NVME_TEMP_WARN {
