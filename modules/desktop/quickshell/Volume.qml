@@ -1,4 +1,5 @@
-// The default output. Scroll to change the volume, right click to mute, left click for pavucontrol.
+// The default output. Scroll to change the volume, right click to mute, left click for the audio
+// plate, middle click for pavucontrol.
 import QtQuick
 import Quickshell
 import Quickshell.Services.Pipewire
@@ -25,6 +26,8 @@ Readout {
         if (button === Qt.RightButton) {
             if (root.ready) root.sink.audio.muted = !root.sink.audio.muted;
         } else if (button === Qt.LeftButton) {
+            Panels.toggle("audio");
+        } else if (button === Qt.MiddleButton) {
             Quickshell.execDetached([Config.pavucontrol]);
         }
     }

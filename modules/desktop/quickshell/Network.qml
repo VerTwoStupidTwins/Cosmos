@@ -15,4 +15,7 @@ Readout {
     value: wired ? 1 : network ? network.signalStrength : 0
     reading: wired ? "WIRED" : network ? network.name : "NO LINK"
     tone: wired || network ? Theme.accent : Theme.urgent
+
+    // A click opens the network plate.
+    onPressed: Panels.toggle("network")
 }

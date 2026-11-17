@@ -1,5 +1,5 @@
 // The media players over MPRIS, and which one the bar follows: the one picked last while it's
-// around, otherwise the one playing, otherwise the first. Also whether the media plate is open.
+// around, otherwise the one playing, otherwise the first.
 pragma Singleton
 
 import QtQuick
@@ -9,7 +9,7 @@ import Quickshell.Services.Mpris
 Singleton {
     id: root
 
-    property bool open: false
+    readonly property bool open: Panels.open === "media"
     // The identity of the player picked with cycle().
     property string picked: ""
 
@@ -21,7 +21,7 @@ Singleton {
         ?? null
 
     function toggle() {
-        open = !open;
+        Panels.toggle("media");
     }
 
     function cycle() {

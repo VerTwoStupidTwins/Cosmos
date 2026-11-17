@@ -32,7 +32,7 @@ PanelWindow {
     Item {
         id: keys
         focus: true
-        Keys.onEscapePressed: Media.open = false
+        Keys.onEscapePressed: Panels.open = ""
         Keys.onSpacePressed: panel.player?.togglePlaying()
         Keys.onLeftPressed: panel.player?.previous()
         Keys.onRightPressed: panel.player?.next()

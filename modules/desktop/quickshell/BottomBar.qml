@@ -58,6 +58,12 @@ PanelWindow {
     MediaPanel {
         screen: bar.screen
     }
+    NetworkPanel {
+        screen: bar.screen
+    }
+    AudioPanel {
+        screen: bar.screen
+    }
 
     Island {
         anchors.right: parent.right
