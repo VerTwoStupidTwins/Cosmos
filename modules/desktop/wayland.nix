@@ -12,6 +12,31 @@
     services.upower.enable = true; # battery for the bar
 
     home-manager.sharedModules = [
+      # nixpkgs' NetBird module renames netbird-ui to netbird-ui-<client> throughout its desktop
+      # file, the store path in Icon= included, so the icon points at a path that doesn't exist.
+      # This copy, which takes precedence, has the real one.
+      (
+        { osConfig, lib, ... }:
+        let
+          netbird = osConfig.services.netbird;
+        in
+        # The wrapper follows the global ui.enable (on with a graphical session), not the client's.
+        lib.mkIf (netbird.clients ? wt0 && netbird.ui.enable) {
+          xdg.dataFile."applications/netbird-wt0.desktop".text = lib.generators.toINI { } {
+            "Desktop Entry" = {
+              Name = "NetBird @ netbird-wt0";
+              Comment = "NetBird desktop client";
+              Exec = "env WEBKIT_DISABLE_DMABUF_RENDERER=1 netbird-ui-wt0";
+              Icon = "${netbird.ui.package}/share/icons/hicolor/256x256/apps/netbird.png";
+              Type = "Application";
+              Terminal = false;
+              Categories = "Utility;";
+              Keywords = "netbird;";
+              StartupWMClass = "org.wails.netbird";
+            };
+          };
+        }
+      )
       (
         {
           config,
@@ -133,6 +158,7 @@
                   readonly property string coreutils: "${pkgs.coreutils}/bin"
                   readonly property string terminal: "${config.programs.kitty.package}/bin/kitty"
                   readonly property string systemdRun: "${pkgs.systemd}/bin/systemd-run"
+                  readonly property string notifySend: "${pkgs.libnotify}/bin/notify-send"
                   readonly property string stationInfo: "${stationInfo}"
                   readonly property string wallpaperCommand: "${config.cosmos.wallpaper}/bin/wallpaper"
                   readonly property string wallpaperCurrent: "${theme}/current"

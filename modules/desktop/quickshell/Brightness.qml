@@ -35,8 +35,17 @@ Readout {
         onTriggered: read.running = true
     }
 
+    Process {
+        id: set
+        onExited: {
+            poll.restart();
+            OsdBus.brightness();
+        }
+    }
+
     onScrolled: delta => {
-        Quickshell.execDetached([Config.brightnessctl, "--class=backlight", "set", delta > 0 ? "5%+" : "5%-"]);
-        poll.restart();
+        if (set.running) return;
+        set.command = [Config.brightnessctl, "--class=backlight", "--quiet", "set", delta > 0 ? "5%+" : "5%-"];
+        set.running = true;
     }
 }

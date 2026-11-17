@@ -54,6 +54,9 @@ ShellRoot {
         }
     }
 
+    // Notifications when the battery runs low.
+    BatteryWatch {}
+
     // Volume, mic and brightness as they change, on the first screen.
     Osd {
         screen: Quickshell.screens[0]

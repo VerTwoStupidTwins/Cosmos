@@ -94,6 +94,10 @@ PanelWindow {
             readBrightness.running = true;
         }
     }
+    Connections {
+        target: OsdBus
+        function onBrightness() { readBrightness.running = true; }
+    }
     Process {
         id: readBrightness
         command: [Config.brightnessctl, "--machine-readable", "--class=backlight"]
