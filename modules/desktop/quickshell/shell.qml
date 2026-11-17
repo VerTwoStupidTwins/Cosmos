@@ -54,6 +54,21 @@ ShellRoot {
         }
     }
 
+    // The power menu, on the first screen; the battery readout and Mod+Shift+E open it.
+    PowerMenu {
+        screen: Quickshell.screens[0]
+        locker: locker
+    }
+
+    // `qs -c bar ipc call power toggle`, for a keybind.
+    IpcHandler {
+        target: "power"
+
+        function toggle(): void {
+            Power.toggle();
+        }
+    }
+
     // Notifications when the battery runs low.
     BatteryWatch {}
 

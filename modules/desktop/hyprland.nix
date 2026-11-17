@@ -43,7 +43,7 @@
             hl.bind(mod .. " + Space", hl.dsp.exec_cmd("qs -c bar ipc call launcher toggle"))
             hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd("wallpaper"))
             hl.bind(mod .. " + L", hl.dsp.exec_cmd("loginctl lock-session"))
-            hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
+            hl.bind(mod .. " + SHIFT + E", hl.dsp.exec_cmd("qs -c bar ipc call power toggle"))
 
             -- Windows
             hl.bind(mod .. " + Q", hl.dsp.window.close())

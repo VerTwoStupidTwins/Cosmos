@@ -44,6 +44,9 @@
                     'XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }' \
                     'XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set 10%- && qs -c bar ipc call osd brightness"; }' \
                   --replace-fail \
+                    'Mod+Shift+E { quit; }' \
+                    'Mod+Shift+E hotkey-overlay-title="Power Menu" { spawn "qs" "-c" "bar" "ipc" "call" "power" "toggle"; }' \
+                  --replace-fail \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
                   --replace-fail \

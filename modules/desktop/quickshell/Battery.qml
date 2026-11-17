@@ -17,5 +17,8 @@ Readout {
     tag: "PWR"
     value: percent / 100
     reading: String(percent).padStart(3, "0") + (charging ? "+" : "")
+    // A click opens the power menu.
+    onPressed: Power.toggle()
+
     tone: charging ? Theme.good : percent <= 10 ? Theme.urgent : percent <= 25 ? Theme.warn : Theme.accent
 }
