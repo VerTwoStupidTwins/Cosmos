@@ -1,5 +1,6 @@
 // Three plates floating over the top edge: workspaces and target window on the left, the
-// clock in the centre, status readouts on the right.
+// clock in the centre, the notification log and tray on the right. Media and the status
+// readouts are on the bottom bar (BottomBar.qml).
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -25,18 +26,8 @@ PanelWindow {
         Workspaces {}
         Divider {}
         WindowTitle {
-            Layout.maximumWidth: bar.width * (Media.active ? 0.14 : 0.28)
+            Layout.maximumWidth: bar.width * 0.28
         }
-        Divider {
-            visible: Media.active !== null
-        }
-        MediaReadout {
-            Layout.maximumWidth: 260
-        }
-    }
-
-    MediaPanel {
-        screen: bar.screen
     }
 
     Island {
@@ -102,14 +93,5 @@ PanelWindow {
         Tray {
             bar: bar
         }
-        // The OSD shows volume and brightness as they change, so here they're just numbers.
-        Volume {
-            showGauge: false
-        }
-        Brightness {
-            showGauge: false
-        }
-        Network {}
-        Battery {}
     }
 }

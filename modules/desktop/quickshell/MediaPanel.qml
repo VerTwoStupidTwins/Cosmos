@@ -1,7 +1,7 @@
-// The media plate: drops down under the bar's left plate with the track's art, title, artist and
+// The media plate: rises over the bottom bar's left plate with the track's art, title, artist and
 // album, a seekable progress strip, and previous / play-pause / next, plus shuffle and loop where
 // the player has them. With more than one player, the header's tag switches between them.
-// Click the bar's MED readout, or run `qs -c bar ipc call media toggle`; Esc closes.
+// Click the bottom bar's MED readout, or run `qs -c bar ipc call media toggle`; Esc closes.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -14,9 +14,9 @@ PanelWindow {
     readonly property var player: Media.active
 
     visible: Media.open && player !== null
-    anchors.top: true
+    anchors.bottom: true
     anchors.left: true
-    margins.top: 42
+    margins.bottom: 42
     margins.left: 8
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
@@ -43,10 +43,9 @@ PanelWindow {
         width: parent.width
         title: "MEDIA"
         status: panel.player ? panel.player.identity.toUpperCase() + (Media.players.length > 1 ? "  ·  " + (Media.players.indexOf(panel.player) + 1) + "/" + Media.players.length : "") : ""
-        cutTopRight: 10
-        cutBottomLeft: 14
-        cutBottomRight: 0
-        stripRight: true
+        cutTopRight: 14
+        cutBottomLeft: 4
+        cutBottomRight: 10
         padding: 14
 
         // Clicking the header switches players.

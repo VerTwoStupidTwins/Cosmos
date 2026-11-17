@@ -1,4 +1,5 @@
-// The bar's entry point: one bar on every screen, each with its own command station.
+// The bar's entry point: a top and a bottom bar on every screen, the top one with its own
+// command station.
 import Quickshell
 import Quickshell.Io
 
@@ -125,6 +126,15 @@ ShellRoot {
         model: Quickshell.screens
 
         Bar {
+            required property var modelData
+            screen: modelData
+        }
+    }
+
+    Variants {
+        model: Quickshell.screens
+
+        BottomBar {
             required property var modelData
             screen: modelData
         }
