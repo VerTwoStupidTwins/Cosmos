@@ -32,7 +32,7 @@
                     'Mod+Return hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' \
                   --replace-fail \
                     'Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }' \
-                    'Mod+Space hotkey-overlay-title="Run an Application: wofi" { spawn "wofi" "--show" "drun"; }
+                    'Mod+Space hotkey-overlay-title="Run an Application" { spawn "qs" "-c" "bar" "ipc" "call" "launcher" "toggle"; }
                     Mod+Shift+W hotkey-overlay-title="Change the Wallpaper" { spawn "wallpaper"; }
                     Mod+S hotkey-overlay-title="Toggle the Command Station" { spawn "qs" "-c" "bar" "ipc" "call" "station" "toggle"; }
                     Mod+N hotkey-overlay-title="Toggle Do Not Disturb" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "dnd"; }' \

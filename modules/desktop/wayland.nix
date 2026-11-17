@@ -159,6 +159,8 @@
                   readonly property string stationProbe: "${stationProbe}"
                   readonly property string wallpaper: "${theme}/wallpaper"
                   readonly property string coreutils: "${pkgs.coreutils}/bin"
+                  readonly property string terminal: "${config.programs.kitty.package}/bin/kitty"
+                  readonly property string systemdRun: "${pkgs.systemd}/bin/systemd-run"
                   readonly property string stationInfo: "${stationInfo}"
               }
               QML

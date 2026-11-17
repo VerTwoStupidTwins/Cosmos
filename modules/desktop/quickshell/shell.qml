@@ -26,6 +26,20 @@ ShellRoot {
         }
     }
 
+    // The application launcher, on the first screen.
+    LauncherPanel {
+        screen: Quickshell.screens[0]
+    }
+
+    // `qs -c bar ipc call launcher toggle`, for a keybind.
+    IpcHandler {
+        target: "launcher"
+
+        function toggle(): void {
+            Launcher.toggle();
+        }
+    }
+
     // Notifications pop up on the first screen.
     NotificationPopups {
         screen: Quickshell.screens[0]

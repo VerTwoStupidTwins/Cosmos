@@ -40,7 +40,7 @@
 
             -- Apps and session
             hl.bind(mod .. " + Return", hl.dsp.exec_cmd("kitty"))
-            hl.bind(mod .. " + Space", hl.dsp.exec_cmd("wofi --show drun"))
+            hl.bind(mod .. " + Space", hl.dsp.exec_cmd("qs -c bar ipc call launcher toggle"))
             hl.bind(mod .. " + SHIFT + W", hl.dsp.exec_cmd("wallpaper"))
             hl.bind(mod .. " + L", hl.dsp.exec_cmd("loginctl lock-session"))
             hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
