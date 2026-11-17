@@ -3,7 +3,8 @@ keys:
   - &thoth age1y3fzcwatkggphukr49hl22h2y88zvlgve430m6rsw24tdusz7qqq6nc42a 
   - &lugh  age1az7jws43wyt0nq8v2l0gkchkw078fmuyqprrjt6xpa5d2ppmrvpqy6dmng
   - &tenjin age1axxuhlnen0jxyel5qwp9357mnely5t09slm89ec4400vqxlqvdwspql6dk
+  - &kobold age1yv6c0pwr5kjac2uewgkh0k808hk6u2rsd6dxlar6pzzkhr78kcyq5ah85u
 creation_rules:
   - path_regex: secrets/.*\.yaml$
     key_groups:
-      - age: [*admin, *thoth, *lugh, *tenjin]
+      - age: [*admin, *thoth, *lugh, *tenjin, *kobold]
