@@ -140,6 +140,8 @@
           transcription = card transcriptionDevice;
         };
         inherit checkDevices;
+        llamaServer = llama-server;
+        llamaSwapUrl = "http://127.0.0.1:${toString config.services.llama-swap.port}";
       };
 
       systemd.services.llama-swap = {

@@ -1,4 +1,4 @@
-//! What lugh is running, from the Cosmos repository: the commit it was built from, and a read-only copy of the
+//! What the host is running, from the Cosmos repository: the commit it was built from, and a read-only copy of the
 //! NixOS config that commit holds.
 //!
 //! Both are read from /etc on every call, so they always describe the system that's active now, and Hermes' own

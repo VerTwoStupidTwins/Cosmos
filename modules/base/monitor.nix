@@ -52,6 +52,36 @@
           description = "Which card, by short name, each model runs on. Together these are each card's role.";
         };
 
+        llamaServer = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "llama-server, whose --list-devices gives each card's free memory.";
+        };
+
+        llamaSwapUrl = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "llama-swap's address, for which models are loaded.";
+        };
+
+        memorySocket = mkOption {
+          type = types.nullOr types.str;
+          default = null;
+          description = "The memory service's socket, on the host Hermes runs on.";
+        };
+
+        allowHermes = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Let Hermes, from another host, run this host's monitor over SSH, and nothing else.";
+        };
+
+        command = mkOption {
+          type = types.listOf types.str;
+          readOnly = true;
+          description = "The monitor's command line on this host, set by the monitor module.";
+        };
+
         checkDevices = mkOption {
           type = types.nullOr types.path;
           default = null;

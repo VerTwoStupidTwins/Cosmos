@@ -46,6 +46,7 @@
         "hermes-memory"
         "postgresql"
       ];
+      monitor.memorySocket = "${socketDir}/api.sock";
 
       # Postgres held the memories until the Rust service. It stays, untouched, as the way back for a while.
       services.postgresql = {

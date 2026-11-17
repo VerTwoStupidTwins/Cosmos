@@ -31,11 +31,12 @@ const SYSTEM_PROFILE: &str = "/nix/var/nix/profiles/system";
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub llama_server: String,
+    /// The three below exist only on the host with the models and Hermes.
+    pub llama_server: Option<String>,
     pub systemctl: String,
     pub journalctl: String,
-    pub llama_swap_url: String,
-    pub memory_socket: String,
+    pub llama_swap_url: Option<String>,
+    pub memory_socket: Option<String>,
     pub revision_file: String,
     pub config_source: String,
     pub manifest: String,
@@ -218,7 +219,11 @@ fn parse_devices(text: &str) -> Vec<(String, String, i64, i64)> {
 
 pub async fn gpu_info(cfg: &Config) -> Result<Value> {
     let manifest = cfg.manifest()?;
-    let devices = parse_devices(&run(&cfg.llama_server, &["--list-devices"], Duration::from_secs(60)).await?);
+    // Free memory per card comes from llama-server, where there is one.
+    let devices = match &cfg.llama_server {
+        Some(server) => parse_devices(&run(server, &["--list-devices"], Duration::from_secs(60)).await?),
+        None => Vec::new(),
+    };
     let sensors: BTreeMap<String, (String, String)> = hwmon_by_name()
         .into_iter()
         .filter(|(name, _, _)| name == "amdgpu" || name == "xe")
@@ -266,7 +271,8 @@ pub async fn gpu_info(cfg: &Config) -> Result<Value> {
 // ---- models and services
 
 pub async fn model_info(cfg: &Config) -> Result<Value> {
-    let running = http::get_json(&format!("{}/running", cfg.llama_swap_url)).await?;
+    let url = cfg.llama_swap_url.as_deref().context("this host has no llama-swap")?;
+    let running = http::get_json(&format!("{url}/running")).await?;
     let states: Map<String, Value> = running["running"]
         .as_array()
         .context("llama-swap's /running has no list")?
@@ -357,7 +363,8 @@ pub async fn services_info(cfg: &Config) -> Result<Value> {
 }
 
 pub async fn memory_info(cfg: &Config) -> Result<Value> {
-    http::get_json_unix(&cfg.memory_socket, "/health").await
+    let socket = cfg.memory_socket.as_deref().context("this host has no memory service")?;
+    http::get_json_unix(socket, "/health").await
 }
 
 // ---- the report
@@ -428,8 +435,15 @@ fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memo
     w
 }
 
+/// Runs a check only where the host has what it looks at; elsewhere it's left out of the report.
+async fn where_present(present: bool, check: impl Future<Output = Result<Value>>) -> Option<Value> {
+    if present { Some(safely(check).await) } else { None }
+}
+
 pub async fn health_report(cfg: &Config) -> Value {
     let manifest = cfg.manifest();
+    let m = manifest.as_ref().ok();
+    let has_cards = m.is_some_and(|m| !m.cards.is_empty());
     let drift_check = async {
         match &manifest {
             Ok(m) => drift::drift(m).await,
@@ -438,34 +452,44 @@ pub async fn health_report(cfg: &Config) -> Value {
     };
     let (system, gpus, models, services, memory, drift) = tokio::join!(
         safely(system_info(cfg)),
-        safely(gpu_info(cfg)),
-        safely(model_info(cfg)),
+        where_present(has_cards, gpu_info(cfg)),
+        where_present(cfg.llama_swap_url.is_some(), model_info(cfg)),
         safely(services_info(cfg)),
-        safely(memory_info(cfg)),
+        where_present(cfg.memory_socket.is_some(), memory_info(cfg)),
         safely(drift_check),
     );
-    let edits = safely(async {
-        match &manifest {
-            Ok(m) => edits::edits(&m.managed_files, &cfg.config_source),
-            Err(e) => Err(anyhow!("{e:#}")),
-        }
-    })
-    .await;
-    let mut warnings = warnings(&system, &gpus, &models, &services, &memory);
-    warnings.extend(drift::warnings(&drift, &gpus, manifest.as_ref().ok()));
-    warnings.extend(edits::warnings(&edits));
-    json!({
+    let edits = match m.and_then(|m| m.managed_files.as_ref()) {
+        Some(managed) => Some(safely(async { edits::edits(managed, &cfg.config_source) }).await),
+        None => None,
+    };
+    let none = Value::Null;
+    let (g, mo, me) = (gpus.as_ref().unwrap_or(&none), models.as_ref().unwrap_or(&none), memory.as_ref().unwrap_or(&none));
+    let mut warnings = warnings(&system, g, mo, &services, me);
+    warnings.extend(drift::warnings(&drift, g, m));
+    if let Some(e) = &edits {
+        warnings.extend(edits::warnings(e));
+    }
+    let mut report = json!({
         "checked_at": chrono::Local::now().format("%Y-%m-%d %H:%M %:z").to_string(),
         "status": if warnings.is_empty() { "ok" } else { "attention" },
         "warnings": warnings,
         "system": system,
-        "gpus": gpus,
-        "models": models,
-        "services": services,
-        "memory": memory,
-        "config_drift": drift,
-        "hermes_edits": edits,
-    })
+    });
+    let r = report.as_object_mut().unwrap();
+    for (key, value) in [("gpus", gpus), ("models", models)] {
+        if let Some(v) = value {
+            r.insert(key.into(), v);
+        }
+    }
+    r.insert("services".into(), services);
+    if let Some(v) = memory {
+        r.insert("memory".into(), v);
+    }
+    r.insert("config_drift".into(), drift);
+    if let Some(v) = edits {
+        r.insert("hermes_edits".into(), v);
+    }
+    report
 }
 
 #[cfg(test)]

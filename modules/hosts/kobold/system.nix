@@ -10,7 +10,11 @@ in
       nixos.systemd-boot
       nixos.server
       nixos.builder
+      nixos.monitor
     ];
+
+    # Hermes, on lugh, checks on kobold through its monitor.
+    monitor.allowHermes = true;
 
     nixpkgs.hostPlatform = "x86_64-linux";
     hardware.facter.reportPath = ./facter.json;

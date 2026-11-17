@@ -1,8 +1,9 @@
-//! A read-only MCP server that reports lugh's health to Hermes and lets it look up lugh's NixOS config.
+//! A read-only MCP server that reports a homelab host's health to Hermes and lets it look up the host's NixOS config.
 //!
-//! The health tools read status from /proc, /sys, systemd, the journal, llama-swap and the memory service. The
-//! config tools read the commit lugh was built from and the copy of the config that commit holds. None of them
-//! runs a shell or changes anything, and logs come only from listed services.
+//! The health tools read status from /proc, /sys, systemd and the journal, and on the host with the models, from
+//! llama-swap and the memory service too; tools for what a host doesn't have are left out. The config tools read the
+//! commit the host was built from and the copy of the config that commit holds. None of them runs a shell or changes
+//! anything, and logs come only from listed services. Hermes runs it directly on its own host and over SSH elsewhere.
 
 mod drift;
 mod edits;
@@ -11,7 +12,7 @@ mod manifest;
 mod probes;
 mod repo;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -27,16 +28,20 @@ use probes::{Config, safely};
 
 #[derive(Parser)]
 struct Args {
+    /// The host's name, for Hermes.
     #[arg(long)]
-    llama_server: String,
+    host: String,
     #[arg(long)]
     systemctl: String,
     #[arg(long)]
     journalctl: String,
+    /// The three below only on the host with the models and Hermes.
     #[arg(long)]
-    llama_swap_url: String,
+    llama_server: Option<String>,
     #[arg(long)]
-    memory_socket: String,
+    llama_swap_url: Option<String>,
+    #[arg(long)]
+    memory_socket: Option<String>,
     /// A file holding the commit the running system was built from.
     #[arg(long)]
     revision_file: String,
@@ -62,6 +67,7 @@ fn or_error(result: Result<Value>) -> CallToolResult {
 
 #[derive(Clone)]
 struct Monitor {
+    host: String,
     cfg: Config,
     tool_router: ToolRouter<Self>,
 }
@@ -147,7 +153,7 @@ fn clamp(n: i64, max: usize) -> usize {
 impl Monitor {
     // ---- health
 
-    /// Uptime, load, memory, CPU and NVMe temperatures, disk usage, and when lugh was last rebuilt and from which commit.
+    /// Uptime, load, memory, CPU and NVMe temperatures, disk usage, and when the host was last rebuilt and from which commit.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn system_status(&self) -> CallToolResult {
         ok(safely(probes::system_info(&self.cfg)).await)
@@ -165,13 +171,13 @@ impl Monitor {
         ok(safely(probes::model_info(&self.cfg)).await)
     }
 
-    /// The state, restart count and last-24-hour error count of lugh's key services, and any failed unit.
+    /// The state, restart count and last-24-hour error count of the host's key services, and any failed unit.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn service_status(&self) -> CallToolResult {
         ok(safely(probes::services_info(&self.cfg)).await)
     }
 
-    /// Recent log lines from one of lugh's key services.
+    /// Recent log lines from one of the host's key services.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn service_logs(&self, Parameters(req): Parameters<LogsRequest>) -> CallToolResult {
         let units = match self.cfg.manifest() {
@@ -208,10 +214,11 @@ impl Monitor {
     /// switch, and ones saved before a switch replaced them. Both need bringing into the repo to last.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn hermes_edits(&self) -> CallToolResult {
-        or_error(self.cfg.manifest().and_then(|m| edits::edits(&m.managed_files, &self.cfg.config_source)))
+        let managed = self.cfg.manifest().and_then(|m| m.managed_files.context("this host doesn't run Hermes"));
+        or_error(managed.and_then(|m| edits::edits(&m, &self.cfg.config_source)))
     }
 
-    /// Whether lugh runs what its config declares: every declared port listening, Hermes' MCP servers running, and
+    /// Whether the host runs what its config declares: every declared port listening, Hermes' MCP servers running, and
     /// the cards numbered the way the models expect. service_status and model_status cover services and models.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn config_drift(&self) -> CallToolResult {
@@ -223,26 +230,26 @@ impl Monitor {
 
     // ---- config
 
-    /// The commit of the Cosmos repository lugh's running system was built from, and whether it had uncommitted changes.
+    /// The commit of the Cosmos repository the host's running system was built from, and whether it had uncommitted changes.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn deployed_revision(&self) -> CallToolResult {
         ok(repo::deployed_revision(&self.cfg.revision_file, &self.cfg.config_source))
     }
 
-    /// The files in lugh's running NixOS config, optionally under one directory.
+    /// The files in the host's running NixOS config, optionally under one directory.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn config_files(&self, Parameters(req): Parameters<FilesRequest>) -> CallToolResult {
         or_error(repo::list(&self.cfg.config_source, &req.path))
     }
 
-    /// Searches lugh's running NixOS config line by line. Comments in it explain why things are set up the way they are.
+    /// Searches the host's running NixOS config line by line. Comments in it explain why things are set up the way they are.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn config_search(&self, Parameters(req): Parameters<SearchRequest>) -> CallToolResult {
         let max = clamp(req.max_results, repo::MAX_MATCHES);
         or_error(repo::search(&self.cfg.config_source, &req.pattern, &req.path, req.ignore_case, max))
     }
 
-    /// Reads part of one file of lugh's running NixOS config, with line numbers.
+    /// Reads part of one file of the host's running NixOS config, with line numbers.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn config_read(&self, Parameters(req): Parameters<ReadRequest>) -> CallToolResult {
         let start = req.start_line.max(1) as usize;
@@ -253,33 +260,49 @@ impl Monitor {
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for Monitor {
     fn get_info(&self) -> ServerConfig {
+        let host = &self.host;
+        let hermes = if self.cfg.memory_socket.is_some() { ", the server Hermes runs on" } else { "" };
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("lugh-monitor", env!("CARGO_PKG_VERSION")))
-            .with_instructions(
-                "Read-only checks for lugh, the server Hermes runs on. Use health_report for a summary and the other \
-                 health tools for detail. To explain why lugh is set up a certain way, or what it's configured to \
-                 do, use config_search and config_read on its NixOS config: the comments there give the reasons. \
-                 deployed_revision says which commit is running, and config_drift whether lugh runs what that config declares. Nothing here can change the system.",
-            )
+            .with_server_info(Implementation::new(format!("{host}-monitor"), env!("CARGO_PKG_VERSION")))
+            .with_instructions(format!(
+                "Read-only checks for {host}{hermes}. Use health_report for a summary and the other health tools for \
+                 detail. To explain why {host} is set up a certain way, or what it's configured to do, use \
+                 config_search and config_read on its NixOS config: the comments there give the reasons. \
+                 deployed_revision says which commit is running, and config_drift whether {host} runs what that \
+                 config declares. Nothing here can change the system."
+            ))
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let monitor = Monitor {
-        cfg: Config {
-            llama_server: args.llama_server,
-            systemctl: args.systemctl,
-            journalctl: args.journalctl,
-            llama_swap_url: args.llama_swap_url,
-            memory_socket: args.memory_socket,
-            revision_file: args.revision_file,
-            config_source: args.config_source,
-            manifest: args.manifest,
-        },
-        tool_router: Monitor::tool_router(),
+    let cfg = Config {
+        llama_server: args.llama_server,
+        systemctl: args.systemctl,
+        journalctl: args.journalctl,
+        llama_swap_url: args.llama_swap_url,
+        memory_socket: args.memory_socket,
+        revision_file: args.revision_file,
+        config_source: args.config_source,
+        manifest: args.manifest,
     };
+    // Tools for what this host doesn't have are left out, so Hermes never sees them. The manifest's contents can
+    // change with a switch, but the tool list is read once, when Hermes starts the monitor.
+    let mut tool_router = Monitor::tool_router();
+    let manifest = cfg.manifest().ok();
+    let absent = [
+        ("gpu_status", manifest.as_ref().is_some_and(|m| m.cards.is_empty())),
+        ("model_status", cfg.llama_swap_url.is_none()),
+        ("memory_status", cfg.memory_socket.is_none()),
+        ("hermes_edits", manifest.as_ref().is_some_and(|m| m.managed_files.is_none())),
+    ];
+    for (tool, missing) in absent {
+        if missing {
+            tool_router.remove_route(tool);
+        }
+    }
+    let monitor = Monitor { host: args.host, cfg, tool_router };
     monitor.serve(stdio()).await?.waiting().await?;
     Ok(())
 }

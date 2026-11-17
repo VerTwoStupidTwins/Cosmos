@@ -13,6 +13,7 @@ in
       nixos.llm
       nixos.comfyui
       nixos.hermes
+      nixos.monitor
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";

@@ -1,8 +1,8 @@
 [package]
-name = "lugh-monitor"
+name = "host-monitor"
 version = "0.1.0"
 edition = "2024"
-description = "Read-only health checks and config lookups for lugh, served to Hermes as an MCP server over stdio"
+description = "Read-only health checks and config lookups for a homelab host, served to Hermes as an MCP server over stdio"
 publish = false
 
 [dependencies]

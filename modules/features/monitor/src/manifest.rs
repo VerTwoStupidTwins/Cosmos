@@ -1,4 +1,4 @@
-//! What lugh should be running, written by Nix from the modules that set it up (see modules/base/monitor.nix).
+//! What this host should be running, written by Nix from the modules that set it up (see modules/base/monitor.nix).
 //!
 //! It's read on every call, like the revision, so it always describes the active system.
 
@@ -24,16 +24,25 @@ pub struct Card {
 
 #[derive(Deserialize)]
 pub struct Manifest {
+    #[serde(default)]
     pub units: Vec<String>,
+    #[serde(default)]
     pub ports: BTreeMap<String, u16>,
     /// By short name, which is also how llama-server --list-devices names them.
+    #[serde(default)]
     pub cards: BTreeMap<String, Card>,
+    #[serde(default)]
     pub always_loaded: Vec<String>,
+    #[serde(default)]
     pub check_devices: Option<String>,
-    /// Name → command.
-    pub mcp_servers: BTreeMap<String, String>,
+    /// Hermes' MCP servers, name → command line, on the host Hermes runs on.
+    #[serde(default)]
+    pub mcp_servers: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     pub disks: Vec<String>,
-    pub managed_files: Managed,
+    /// Files the config manages in Hermes' home, on the host Hermes runs on.
+    #[serde(default)]
+    pub managed_files: Option<Managed>,
 }
 
 impl Manifest {

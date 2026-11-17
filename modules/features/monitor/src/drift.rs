@@ -1,4 +1,4 @@
-//! Whether lugh runs what its config declares, beyond the services and models the other checks cover: listening
+//! Whether the host runs what its config declares, beyond the services and models the other checks cover: listening
 //! ports, Hermes' MCP servers, the order the cards are numbered in, and cards that should hold models but don't.
 
 use std::collections::BTreeSet;
@@ -52,17 +52,18 @@ fn base_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// Whether some process runs this MCP server. A wrapper script that execs its server, as github's does, leaves the
-/// server's own name, which starts with the wrapper's.
-fn server_running(command: &str, processes: &[Vec<String>]) -> bool {
+/// Whether some process runs this MCP server: one started with exactly its command line. A wrapper script that execs
+/// its server, as github's does, leaves the server's own name instead, which starts with the wrapper's.
+fn server_running(command: &[String], processes: &[Vec<String>]) -> bool {
+    let Some(program) = command.first() else { return false };
     // A script written straight into the store is named after its hash, as in /nix/store/<hash>-github-mcp.
-    let name = base_name(command);
+    let name = base_name(program);
     let wrapper = match name.split_once('-') {
         Some((hash, rest)) if hash.len() == 32 => rest,
         _ => name,
     };
     processes.iter().any(|argv| {
-        argv.iter().any(|a| a == command) || argv.first().is_some_and(|p| base_name(p).starts_with(wrapper))
+        argv.as_slice() == command || (command.len() == 1 && argv.first().is_some_and(|p| base_name(p).starts_with(wrapper)))
     })
 }
 
@@ -114,7 +115,7 @@ pub async fn drift(manifest: &Manifest) -> Result<Value> {
 pub fn warnings(drift: &Value, gpus: &Value, manifest: Option<&Manifest>) -> Vec<String> {
     let mut w = Vec::new();
     if let Some(e) = drift.get("error").and_then(Value::as_str) {
-        w.push(format!("Could not check lugh against its config: {e}"));
+        w.push(format!("Could not check the host against its config: {e}"));
         return w;
     }
     for (name, p) in drift["ports"].as_object().into_iter().flatten() {
@@ -188,13 +189,17 @@ mod tests {
 
     #[test]
     fn recognises_mcp_servers() {
+        let cmd = |parts: &[&str]| parts.iter().map(|p| p.to_string()).collect::<Vec<_>>();
         let processes = vec![
-            vec!["/nix/store/aaaa-lugh-monitor-0.1.0/bin/lugh-monitor".to_owned(), "--manifest".to_owned()],
-            vec!["/nix/store/bbbb-github-mcp-server-1.0/bin/github-mcp-server".to_owned(), "stdio".to_owned()],
+            cmd(&["/nix/store/aaaa-host-monitor-0.1.0/bin/host-monitor", "--host", "lugh"]),
+            cmd(&["/nix/store/bbbb-github-mcp-server-1.0/bin/github-mcp-server", "stdio"]),
+            cmd(&["/nix/store/cccc-openssh/bin/ssh", "-i", "/run/secrets/builder-key", "nix-ssh@kobold.netbird.cloud"]),
         ];
-        assert!(server_running("/nix/store/aaaa-lugh-monitor-0.1.0/bin/lugh-monitor", &processes));
+        assert!(server_running(&cmd(&["/nix/store/aaaa-host-monitor-0.1.0/bin/host-monitor", "--host", "lugh"]), &processes));
         let wrapper = format!("/nix/store/{}-github-mcp", "3".repeat(32));
-        assert!(server_running(&wrapper, &processes));
-        assert!(!server_running("/nix/store/cccc-other/bin/other", &processes));
+        assert!(server_running(&cmd(&[&wrapper]), &processes));
+        // Another ssh, such as a remote build's, isn't the kobold monitor.
+        assert!(!server_running(&cmd(&["/nix/store/cccc-openssh/bin/ssh", "-i", "/run/secrets/monitor-ssh-key", "monitor@kobold.netbird.cloud"]), &processes));
     }
+
 }
