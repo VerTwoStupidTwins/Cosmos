@@ -67,11 +67,13 @@ in
             // machine
           )
           [
-            {
-              hostName = "kobold.netbird.cloud";
-              maxJobs = 10;
-              speedFactor = 16;
-            }
+            # kobold is out until its memory corruption is fixed (2026-11-17): it damaged files in its own store, so
+            # what it builds can't be trusted. Put this back after a clean memtest and a reinstall.
+            # {
+            #   hostName = "kobold.netbird.cloud";
+            #   maxJobs = 10;
+            #   speedFactor = 16;
+            # }
             {
               hostName = "lugh.netbird.cloud";
               maxJobs = 12;
