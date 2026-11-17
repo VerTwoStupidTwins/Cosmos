@@ -12,6 +12,20 @@ ShellRoot {
         }
     }
 
+    // Named apart from the IPC function below, which would otherwise shadow it.
+    Lock {
+        id: locker
+    }
+
+    // `qs -c bar ipc call lock lock`, which hypridle runs for `loginctl lock-session`.
+    IpcHandler {
+        target: "lock"
+
+        function lock(): void {
+            locker.lock();
+        }
+    }
+
     Variants {
         model: Quickshell.screens
 

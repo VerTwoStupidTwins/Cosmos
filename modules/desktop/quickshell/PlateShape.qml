@@ -13,6 +13,8 @@ Item {
     // Which end the status strip sits at.
     property bool stripRight: false
     property real fillOpacity: 0.9
+    property bool showStrip: true
+    property color frameColor: Theme.accent
 
     // The outline, inset by half a pixel so a 1px stroke lands on whole pixels.
     readonly property var outline: {
@@ -46,7 +48,7 @@ Item {
         // The plate and its accent frame.
         ShapePath {
             fillColor: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, root.fillOpacity)
-            strokeColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.6)
+            strokeColor: Qt.rgba(root.frameColor.r, root.frameColor.g, root.frameColor.b, 0.6)
             strokeWidth: 1
             joinStyle: ShapePath.MiterJoin
 
@@ -58,6 +60,7 @@ Item {
 
     // Status strip along the top edge, with a short tick beside it.
     Row {
+        visible: root.showStrip
         y: -1
         x: root.stripRight ? root.width - root.cutTopRight - width - 10 : root.cutTopLeft + 10
         spacing: 3

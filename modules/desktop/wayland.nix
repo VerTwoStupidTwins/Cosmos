@@ -7,6 +7,8 @@
     key = "cosmos/desktop/wayland";
 
     programs.hyprlock.enable = true; # registers the PAM service hyprlock needs
+    # The Quickshell lock screen checks passwords through this one (Lock.qml).
+    security.pam.services.quickshell = { };
     services.upower.enable = true; # battery for the bar
 
     home-manager.sharedModules = [
@@ -153,6 +155,8 @@
                   readonly property string brightnessctl: "${pkgs.brightnessctl}/bin/brightnessctl"
                   readonly property string pavucontrol: "${pkgs.pavucontrol}/bin/pavucontrol"
                   readonly property string stationProbe: "${stationProbe}"
+                  readonly property string wallpaper: "${theme}/wallpaper"
+                  readonly property string coreutils: "${pkgs.coreutils}/bin"
                   readonly property string stationInfo: "${stationInfo}"
               }
               QML
@@ -222,7 +226,8 @@
             enable = true;
             settings = {
               general = {
-                lock_cmd = "pidof hyprlock || hyprlock";
+                # The Quickshell lock screen, or hyprlock when the bar isn't running to show it.
+                lock_cmd = "${config.programs.quickshell.package}/bin/qs -c bar ipc call lock lock || pidof hyprlock || hyprlock";
                 before_sleep_cmd = "loginctl lock-session";
               };
               listener = [
