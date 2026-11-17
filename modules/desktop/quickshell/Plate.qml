@@ -27,7 +27,7 @@ Item {
         cutBottomRight: root.cutBottomRight
         cutBottomLeft: root.cutBottomLeft
         stripRight: root.stripRight
-        fillOpacity: 0.92
+        fillOpacity: 0.97
     }
 
     RowLayout {

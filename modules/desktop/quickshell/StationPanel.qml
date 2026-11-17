@@ -134,10 +134,11 @@ PanelWindow {
             columnSpacing: 8
             rowSpacing: 8
 
-            readonly property real cell: (width - columnSpacing) / 2
-
             Plate {
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "CPU"
                 status: panel.percent(Station.cpu)
@@ -166,7 +167,10 @@ PanelWindow {
             }
 
             Plate {
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "MEM"
                 status: panel.percent(Station.memTotal ? Station.memUsed / Station.memTotal : 0)
@@ -179,7 +183,8 @@ PanelWindow {
                 }
                 Gauge {
                     Layout.fillWidth: true
-                    segments: 40
+                    // As many 3px segments as fit, so the gauge spans the plate.
+                    segments: Math.max(10, Math.floor((parent.width + 2) / 5))
                     value: Station.memTotal ? Station.memUsed / Station.memTotal : 0
                 }
                 Stat {
@@ -195,7 +200,10 @@ PanelWindow {
 
             Plate {
                 visible: Station.gpuBusy >= 0
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "GPU"
                 status: panel.percent(Math.max(0, Station.gpuBusy))
@@ -217,7 +225,10 @@ PanelWindow {
 
             Plate {
                 visible: Station.battery >= 0
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "PWR"
                 status: panel.pad(Station.battery) + "%"
@@ -227,7 +238,8 @@ PanelWindow {
 
                 Gauge {
                     Layout.fillWidth: true
-                    segments: 40
+                    // As many 3px segments as fit, so the gauge spans the plate.
+                    segments: Math.max(10, Math.floor((parent.width + 2) / 5))
                     value: Station.battery / 100
                     color: Station.batteryStatus === "Charging" ? Theme.good
                         : Station.battery <= 10 ? Theme.urgent : Station.battery <= 25 ? Theme.warn : Theme.accent
@@ -247,7 +259,10 @@ PanelWindow {
             }
 
             Plate {
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "NET"
                 status: Station.netDevice ? Station.netDevice.toUpperCase() : "NO ROUTE"
@@ -285,7 +300,10 @@ PanelWindow {
             }
 
             Plate {
-                Layout.preferredWidth: grid.cell
+                // Equal preferred widths plus fillWidth split the row evenly; without fillWidth
+                // the grid can't grow past what its plates ask for, and sits left.
+                Layout.preferredWidth: 1
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 title: "DSK"
                 status: Station.nvmeTemp >= 0 ? "NVME " + panel.temp(Station.nvmeTemp) : ""
@@ -309,7 +327,8 @@ PanelWindow {
                         }
                         Gauge {
                             Layout.fillWidth: true
-                            segments: 40
+                            // As many 3px segments as fit, so the gauge spans the plate.
+                    segments: Math.max(10, Math.floor((parent.width + 2) / 5))
                             value: parent.used
                             color: parent.used >= 0.95 ? Theme.urgent : parent.used >= 0.85 ? Theme.warn : Theme.accent
                         }
