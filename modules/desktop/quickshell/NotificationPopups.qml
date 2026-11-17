@@ -7,7 +7,17 @@ import Quickshell.Wayland
 PanelWindow {
     id: popups
 
-    visible: list.count > 0
+    readonly property bool any: Notifs.server.trackedNotifications.values.length > 0
+
+    // From the model, not the list: a list in a hidden window never reports its count changing, so
+    // the window would never show. It stays up a moment after the last card, for its slide-out.
+    visible: any || linger.running
+    onAnyChanged: if (!any) linger.restart()
+
+    Timer {
+        id: linger
+        interval: 260
+    }
     anchors.top: true
     anchors.right: true
     margins.top: 44

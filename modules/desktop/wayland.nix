@@ -95,6 +95,7 @@
             grim
             slurp
             wl-clipboard
+            libnotify # notify-send, for scripts to reach the bar's notifications
           ];
 
           programs.kitty = {

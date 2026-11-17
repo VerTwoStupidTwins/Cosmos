@@ -12,17 +12,38 @@ Item {
     id: root
 
     required property var notification
-    readonly property bool critical: notification.urgency === NotificationUrgency.Critical
-    readonly property bool low: notification.urgency === NotificationUrgency.Low
+
+    // The notification's content, kept here: when it closes, the card still slides out, and by then
+    // the notification itself is gone. Each binding stops updating once it is null.
+    property string appName
+    property string appIcon
+    property string image
+    property string summary
+    property string body
+    property int urgency: NotificationUrgency.Normal
+    property real expireTimeout: -1
+    property bool resident: false
+    property var actions: []
+
+    Binding on appName { when: root.notification !== null; value: root.notification?.appName ?? ""; restoreMode: Binding.RestoreNone }
+    Binding on appIcon { when: root.notification !== null; value: root.notification?.appIcon ?? ""; restoreMode: Binding.RestoreNone }
+    Binding on image { when: root.notification !== null; value: root.notification?.image ?? ""; restoreMode: Binding.RestoreNone }
+    Binding on summary { when: root.notification !== null; value: root.notification?.summary ?? ""; restoreMode: Binding.RestoreNone }
+    Binding on body { when: root.notification !== null; value: root.notification?.body ?? ""; restoreMode: Binding.RestoreNone }
+    Binding on urgency { when: root.notification !== null; value: root.notification?.urgency ?? NotificationUrgency.Normal; restoreMode: Binding.RestoreNone }
+    Binding on expireTimeout { when: root.notification !== null; value: root.notification?.expireTimeout ?? -1; restoreMode: Binding.RestoreNone }
+    Binding on resident { when: root.notification !== null; value: root.notification?.resident ?? false; restoreMode: Binding.RestoreNone }
+    Binding on actions { when: root.notification !== null; value: Array.from(root.notification?.actions ?? []); restoreMode: Binding.RestoreNone }
+
+    readonly property bool critical: urgency === NotificationUrgency.Critical
+    readonly property bool low: urgency === NotificationUrgency.Low
     readonly property color tone: critical ? Theme.urgent : Theme.accent
     // Seconds on screen: the sender's choice when it gives one, otherwise by urgency.
-    readonly property real lifetime: notification.expireTimeout > 0 ? notification.expireTimeout / 1000 : low ? 4 : 7
-    readonly property bool expires: !critical && !notification.resident
-    readonly property var defaultAction: notification.actions.find(a => a.identifier === "default") ?? null
-    readonly property var buttons: notification.actions.filter(a => a.identifier !== "default")
-    readonly property string picture: notification.image
-        ? notification.image
-        : notification.appIcon ? Quickshell.iconPath(notification.appIcon, true) : ""
+    readonly property real lifetime: expireTimeout > 0 ? expireTimeout / 1000 : low ? 4 : 7
+    readonly property bool expires: !critical && !resident
+    readonly property var defaultAction: actions.find(a => a.identifier === "default") ?? null
+    readonly property var buttons: actions.filter(a => a.identifier !== "default")
+    readonly property string picture: image ? image : appIcon ? Quickshell.iconPath(appIcon, true) : ""
     readonly property date arrived: new Date()
 
     property real remaining: 1
@@ -59,7 +80,7 @@ Item {
         from: 1
         to: 0
         duration: root.lifetime * 1000
-        onFinished: root.notification.expire()
+        onFinished: root.notification?.expire()
     }
 
     HoverHandler {
@@ -72,7 +93,7 @@ Item {
         cursorShape: root.defaultAction ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: mouse => {
             if (mouse.button === Qt.LeftButton && root.defaultAction) root.defaultAction.invoke();
-            root.notification.dismiss();
+            root.notification?.dismiss();
         }
     }
 
@@ -114,7 +135,7 @@ Item {
                 spacing: 8
 
                 Tag {
-                    text: root.critical ? "ALERT" : (root.notification.appName || "SYS").toUpperCase().slice(0, 18)
+                    text: root.critical ? "ALERT" : (root.appName || "SYS").toUpperCase().slice(0, 18)
                     border.color: Qt.rgba(root.tone.r, root.tone.g, root.tone.b, 0.7)
                 }
                 Item {
@@ -130,7 +151,7 @@ Item {
             Label {
                 Layout.fillWidth: true
                 visible: text !== ""
-                text: root.notification.summary
+                text: root.summary
                 color: root.critical ? Theme.urgent : Theme.fg
                 font.pixelSize: 13
                 font.bold: true
@@ -139,7 +160,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 visible: text !== ""
-                text: root.notification.body
+                text: root.body
                 textFormat: Text.StyledText
                 color: Theme.dim
                 font.family: Config.sans
@@ -184,7 +205,7 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 parent.modelData.invoke();
-                                root.notification.dismiss();
+                                root.notification?.dismiss();
                             }
                         }
                     }
