@@ -1,7 +1,7 @@
 # modules/features/lugh-monitor.nix
 { inputs, ... }:
 {
-  # Read-only health checks for Hermes, as an MCP server it starts itself.
+  # Read-only health checks and config lookups for Hermes, as an MCP server it starts itself.
   flake.modules.nixos.hermes =
     {
       config,
@@ -10,9 +10,26 @@
       ...
     }:
     let
-      python = pkgs.python3.withPackages (p: [ p.mcp ]);
+      monitor = pkgs.rustPlatform.buildRustPackage {
+        pname = "lugh-monitor";
+        version = "0.1.0";
+        src = ./lugh-monitor;
+        cargoLock.lockFile = ./lugh-monitor/Cargo.lock;
+        meta.mainProgram = "lugh-monitor";
+      };
+
       # The same build as llm.nix, which explains the missing web UI.
       llama-cpp = (inputs.llama-cpp.packages.${pkgs.stdenv.hostPlatform.system}.vulkan.override { useWebUi = false; }).overrideAttrs { webui = null; };
+
+      # The config this system was built from, for the config tools. Secrets stay out, and so do the wallpapers.
+      configSource = lib.fileset.toSource {
+        root = ../..;
+        fileset = lib.fileset.intersection (lib.fileset.unions [
+          ../../flake.nix
+          ../../flake.lock
+          ../../modules
+        ]) (lib.fileset.fileFilter (file: !lib.any file.hasExt [ "png" "jpg" "jpeg" "webp" "gif" ]) ../..);
+      };
 
       # Its logs are the only ones the monitor will show.
       units = [
@@ -43,11 +60,24 @@
       # The monitor's log tool reads the journal.
       users.users.hermes.extraGroups = [ "systemd-journal" ];
 
+      # The monitor reads these on every call, so it describes whichever system is active, even though Hermes keeps
+      # running across switches. As arguments, they'd also rewrite Hermes' config with every commit.
+      environment.etc = {
+        "lugh-monitor/revision".text = lib.defaultTo "unknown" config.system.configurationRevision;
+        "lugh-monitor/config".source = configSource;
+        # Files the config manages in Hermes' home that come from the repo, so Hermes' edits to them can be found.
+        "lugh-monitor/managed-files.json".text = builtins.toJSON {
+          home = "${config.services.hermes-agent.stateDir}/.hermes";
+          saved = "${config.services.hermes-agent.stateDir}/edits";
+          files = lib.mapAttrs (_: source: lib.removePrefix "./" (lib.path.removePrefix ../.. source)) (
+            lib.filterAttrs (_: builtins.isPath) config.services.hermes-agent.hermesHomeFiles
+          );
+        };
+      };
+
       services.hermes-agent.mcpServers.lugh-monitor = {
-        command = "${python}/bin/python3";
+        command = lib.getExe monitor;
         args = [
-          "-I"
-          "${./lugh-monitor.py}"
           "--llama-server"
           (lib.getExe' llama-cpp "llama-server")
           "--systemctl"
@@ -66,6 +96,12 @@
           (lib.concatStringsSep "," config.services.llama-swap.settings.hooks.on_startup.preload)
           "--roles"
           (builtins.toJSON roles)
+          "--revision-file"
+          "/etc/lugh-monitor/revision"
+          "--config-source"
+          "/etc/lugh-monitor/config"
+          "--managed-files"
+          "/etc/lugh-monitor/managed-files.json"
         ];
       };
     };

@@ -1,0 +1,25 @@
+[package]
+name = "lugh-monitor"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only health checks and config lookups for lugh, served to Hermes as an MCP server over stdio"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+rustix = { version = "1", features = ["fs"] }
+serde = { version = "1", features = ["derive"] }
+# Keeps keys in the order they're written, as the Python monitor did.
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time", "net", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
