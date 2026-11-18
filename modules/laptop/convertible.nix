@@ -5,16 +5,22 @@
 # so a laptop on a desk never rotates. libinput already turns the keyboard and touchpad off in
 # tablet mode.
 {
-  flake.modules.nixos.convertible = {
-    # On cros-ec Chromebooks the kernel labels the accelerometers accel-display and accel-base,
-    # which iio-sensor-proxy uses to pick the screen's.
-    hardware.sensor.iio.enable = true;
+  flake.modules.nixos.convertible =
+    { pkgs, ... }:
+    {
+      # On cros-ec Chromebooks the kernel labels the accelerometers accel-display and accel-base,
+      # which iio-sensor-proxy uses to pick the screen's.
+      hardware.sensor.iio.enable = true;
 
-    # The tablet-mode switch, and the pen garage where there is one, at fixed paths the logged-in
-    # user can read: the bar watches the first with evtest, and the second is there for later.
-    services.udev.extraRules = ''
-      SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Tablet Mode Switch", SYMLINK+="input/tablet-mode", TAG+="uaccess"
-      SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PRP0001:01", SYMLINK+="input/pen-garage", TAG+="uaccess"
-    '';
-  };
+      # The tablet-mode switch, and the pen garage where there is one, at fixed paths the logged-in
+      # user can read: the bar watches the first with evtest, and the second is there for later.
+      # Its own file, numbered before 73-seat-late.rules, which is where uaccess tags take effect;
+      # services.udev.extraRules lands in 99-local.rules, too late for that.
+      services.udev.packages = [
+        (pkgs.writeTextDir "lib/udev/rules.d/70-convertible.rules" ''
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Tablet Mode Switch", SYMLINK+="input/tablet-mode", TAG+="uaccess"
+          SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="PRP0001:01", SYMLINK+="input/pen-garage", TAG+="uaccess"
+        '')
+      ];
+    };
 }

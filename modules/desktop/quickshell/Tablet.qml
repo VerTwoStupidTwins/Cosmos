@@ -43,8 +43,9 @@ Singleton {
         return c.toString().slice(1);
     }
 
-    // Where the switch is now, at start…
+    // Where the switch is now, at start and whenever the watcher (re)connects…
     Process {
+        id: query
         running: root.available
         command: [Config.evtest, "--query", root.device, "EV_SW", "SW_TABLET_MODE"]
         // evtest --query exits 10 when the switch is on, 0 when it's off.
@@ -67,7 +68,10 @@ Singleton {
     Timer {
         id: retry
         interval: 5000
-        onTriggered: watcher.running = root.available
+        onTriggered: {
+            query.running = root.available;
+            watcher.running = root.available;
+        }
     }
 
     Process {
