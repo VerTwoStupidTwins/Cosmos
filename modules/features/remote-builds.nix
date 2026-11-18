@@ -13,6 +13,9 @@ in
     {
       sops.secrets.nix-signing-key.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       nix.settings.secret-key-files = [ config.sops.secrets.nix-signing-key.path ];
+      # Builders take each other's builds too, so one can build the other's system (nh --build-host lugh
+      # --target-host kobold) and copy it straight across.
+      nix.settings.trusted-public-keys = signingKeys;
 
       nix.sshServe = {
         enable = true;
