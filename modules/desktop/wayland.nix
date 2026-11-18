@@ -11,6 +11,10 @@
     security.pam.services.quickshell = { };
     services.upower.enable = true; # battery for the bar
 
+    # Electron and Chromium apps (Obsidian, 1Password, Discord) run natively on Wayland instead of
+    # through XWayland: sharp at fractional scales, and pens arrive as pens, with pressure.
+    environment.sessionVariables.NIXOS_OZONE_WL = "1";
+
     home-manager.sharedModules = [
       # nixpkgs' NetBird module renames netbird-ui to netbird-ui-<client> throughout its desktop
       # file, the store path in Icon= included, so the icon points at a path that doesn't exist.
