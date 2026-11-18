@@ -51,11 +51,15 @@ PanelWindow {
             parent: centre
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            onClicked: Station.toggle()
+            // Closes the lab page if that's what's down, otherwise toggles the station.
+            onClicked: Homelab.open ? Homelab.open = false : Station.toggle()
         }
     }
 
     StationPanel {
+        screen: bar.screen
+    }
+    LabPanel {
         screen: bar.screen
     }
 

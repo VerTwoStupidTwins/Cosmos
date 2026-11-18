@@ -13,6 +13,15 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call lab toggle` for the homelab page, Mod+B.
+    IpcHandler {
+        target: "lab"
+
+        function toggle(): void {
+            Homelab.toggle();
+        }
+    }
+
     // Named apart from the IPC function below, which would otherwise shadow it.
     Lock {
         id: locker
