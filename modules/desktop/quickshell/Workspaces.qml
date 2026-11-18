@@ -1,6 +1,9 @@
 // Workspaces over ext-workspace, which niri and Hyprland both speak, as slanted plates
-// numbered 01, 02… Click one to switch to it.
+// numbered 01, 02…, with the icons of the apps on each under niri (Niri.qml). Click one to
+// switch to it.
 import QtQuick
+import Quickshell
+import Quickshell.Widgets
 import Quickshell.WindowManager
 
 Row {
@@ -28,9 +31,22 @@ Row {
             required property var modelData
             readonly property bool lit: modelData.active || modelData.urgent
             readonly property color tone: modelData.urgent ? Theme.urgent : Theme.accent
+            // Up to three distinct apps' icons, then a count of the rest.
+            readonly property var apps: Niri.appsOn(modelData.name)
+            readonly property var shownApps: apps.slice(0, 3)
+            readonly property int more: apps.length - shownApps.length
 
-            width: 28
+            function iconFor(appId) {
+                const entry = DesktopEntries.heuristicLookup(appId);
+                return Quickshell.iconPath(entry?.icon || appId, true);
+            }
+
+            width: 28 + (shownApps.length > 0 ? shownApps.length * 15 + (more > 0 ? 16 : 0) + 2 : 0)
             height: 18
+
+            Behavior on width {
+                NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+            }
 
             // The plate, slanted like a panel line; the number stays upright.
             Rectangle {
@@ -45,11 +61,39 @@ Row {
             }
 
             Label {
-                anchors.centerIn: parent
+                id: number
+                x: 7
+                anchors.verticalCenter: parent.verticalCenter
                 text: String(button.modelData.name).padStart(2, "0")
                 color: button.lit ? Theme.bg : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.6)
                 font.pixelSize: 11
                 font.bold: button.lit
+            }
+
+            Row {
+                anchors.left: number.right
+                anchors.leftMargin: 5
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 3
+
+                Repeater {
+                    model: button.shownApps
+
+                    IconImage {
+                        required property string modelData
+                        implicitSize: 12
+                        source: button.iconFor(modelData)
+                        asynchronous: true
+                        // Dimmed on inactive workspaces, like the number.
+                        opacity: button.lit ? 1 : 0.6
+                    }
+                }
+                Label {
+                    visible: button.more > 0
+                    text: "+" + button.more
+                    color: button.lit ? Theme.bg : Theme.dim
+                    font.pixelSize: 9
+                }
             }
 
             MouseArea {

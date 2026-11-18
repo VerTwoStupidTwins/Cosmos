@@ -1,6 +1,6 @@
 // Three plates floating over the top edge: workspaces and target window on the left, the
-// clock in the centre; capture indicators, caffeine, the notification log and the tray on the
-// right. Media and the status readouts are on the bottom bar (BottomBar.qml).
+// clock in the centre; capture indicators, recording, night light, caffeine, the notification
+// log and the tray on the right. Media and the status readouts are on the bottom bar (BottomBar.qml).
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -69,6 +69,56 @@ PanelWindow {
 
         // Red while an app records from the mic, uses a camera or captures the screen.
         PrivacyReadout {}
+
+        // Recording: REC and the time, pulsing; click to stop.
+        Item {
+            visible: Recorder.recording
+            implicitWidth: rec.implicitWidth
+            implicitHeight: rec.implicitHeight
+
+            Row {
+                id: rec
+                spacing: 5
+
+                Tag {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "REC"
+                    color: Qt.rgba(Theme.urgent.r, Theme.urgent.g, Theme.urgent.b, 0.3)
+                    border.color: Theme.urgent
+
+                    SequentialAnimation on opacity {
+                        running: Recorder.recording
+                        loops: Animation.Infinite
+                        NumberAnimation { to: 0.4; duration: 600 }
+                        NumberAnimation { to: 1; duration: 600 }
+                    }
+                }
+                Label {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: Media.time(Recorder.elapsed)
+                    color: Theme.urgent
+                }
+            }
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Recorder.stop()
+            }
+        }
+
+        // Night light: lit warm while the screen is tinted. Click to toggle.
+        Tag {
+            text: "NGT"
+            color: NightLight.on ? Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.2) : "transparent"
+            border.color: NightLight.on ? Theme.warn : Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.3)
+            opacity: NightLight.on ? 1 : 0.6
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: NightLight.toggle()
+            }
+        }
 
         // Caffeine: dim while off, lit while the screen is kept awake. Click to toggle.
         Tag {

@@ -1,6 +1,6 @@
-// Screenshots: niri takes them (its picker, saved to ~/Pictures/Screenshots and copied); this
-// follows niri's event stream and posts a notification for each one, with a thumbnail and the
-// path, for 7 seconds. Clicking it opens the shot in satty to annotate, saving beside it as
+// Screenshots: niri takes them (its picker, saved to ~/Pictures/Screenshots and copied); for each
+// one niri announces (Niri.qml), this posts a notification with a thumbnail and the path, for 7
+// seconds. Clicking it opens the shot in satty to annotate, saving beside it as
 // "<name>-annotated.png".
 import QtQuick
 import Quickshell
@@ -24,26 +24,9 @@ Scope {
             Config.satty, "--filename", path, "--output-filename", out, "--copy-command", Config.wlCopy]);
     }
 
-    // Only under niri; restarted if the stream ends (as when niri reloads).
-    Process {
-        id: events
-        running: Quickshell.env("NIRI_SOCKET") !== ""
-        command: ["niri", "msg", "--json", "event-stream"]
-        stdout: SplitParser {
-            onRead: line => {
-                if (!line.includes("ScreenshotCaptured")) return;
-                try {
-                    const path = JSON.parse(line).ScreenshotCaptured?.path;
-                    if (path) root.announce(path);
-                } catch (e) {}
-            }
-        }
-        onExited: restart.start()
-    }
-    Timer {
-        id: restart
-        interval: 2000
-        onTriggered: events.running = true
+    Connections {
+        target: Niri
+        function onScreenshotCaptured(path) { root.announce(path); }
     }
 
     // notify-send waits while its card is up and prints "default" when it's clicked.

@@ -98,6 +98,31 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call recorder region|screen` starts a recording (or stops the one running),
+    // `stop` stops it.
+    IpcHandler {
+        target: "recorder"
+
+        function region(): void {
+            Recorder.toggle("region");
+        }
+        function screen(): void {
+            Recorder.toggle("screen");
+        }
+        function stop(): void {
+            Recorder.stop();
+        }
+    }
+
+    // `qs -c bar ipc call nightlight toggle`.
+    IpcHandler {
+        target: "nightlight"
+
+        function toggle(): void {
+            NightLight.toggle();
+        }
+    }
+
     // A notification for each screenshot niri takes; clicking it opens satty.
     Screenshots {}
 

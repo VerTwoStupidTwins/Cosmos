@@ -39,7 +39,9 @@
                     Mod+Shift+N hotkey-overlay-title="Show the Notification Log" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "log"; }
                     Mod+Shift+S hotkey-overlay-title="Screenshot a Region" { screenshot; }
                     Mod+Ctrl+S hotkey-overlay-title="Screenshot the Window" { screenshot-window; }
-                    Mod+Ctrl+Shift+S hotkey-overlay-title="Screenshot the Screen" { screenshot-screen; }' \
+                    Mod+Ctrl+Shift+S hotkey-overlay-title="Screenshot the Screen" { screenshot-screen; }
+                    Mod+Alt+S hotkey-overlay-title="Record a Region (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "region"; }
+                    Mod+Alt+Shift+S hotkey-overlay-title="Record the Screen (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "screen"; }' \
                   --replace-fail \
                     'XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }' \
                     'XF86MonBrightnessUp allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set +10% && qs -c bar ipc call osd brightness"; }' \
