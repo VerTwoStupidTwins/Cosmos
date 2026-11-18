@@ -114,6 +114,11 @@ ShellRoot {
         }
     }
 
+    // What to do while a recording's region is being picked.
+    RecorderHint {
+        screen: Quickshell.screens[0]
+    }
+
     // `qs -c bar ipc call nightlight toggle`.
     IpcHandler {
         target: "nightlight"

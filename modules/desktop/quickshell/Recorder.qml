@@ -13,6 +13,8 @@ Singleton {
 
     readonly property bool busy: recorder.running
     property bool recording: false
+    // While slurp waits for a region (RecorderHint.qml says so on screen).
+    property bool picking: false
     property real started: 0
     property int elapsed: 0
     property string file: ""
@@ -31,11 +33,12 @@ Singleton {
             return;
         }
         file = dir + "/Recording from " + Qt.formatDateTime(new Date(), "yyyy-MM-dd HH-mm-ss") + ".mp4";
-        const slurp = [Config.slurp, "-c", hex(Theme.accent, "ff"), "-b", "#00000066", "-s", "#00000000", "-w", "2"]
+        const slurp = [Config.slurp, "-c", hex(Theme.accent, "ff"), "-b", "#000000aa", "-s", "#00000000", "-w", "2"]
             .map(a => "'" + a + "'").join(" ");
         const geometry = mode === "region" ? 'g=$(' + slurp + ') || exit 1; set -- -g "$g"' : "set --";
         recorder.command = [Config.bash, "-c", geometry + '; mkdir -p "$DIR" && echo START && exec "$WF" "$@" -c h264_vaapi -d /dev/dri/renderD128 --audio=@DEFAULT_MONITOR@ -f "$FILE"'];
         recorder.environment = { DIR: dir, FILE: file, WF: Config.wfRecorder };
+        picking = mode === "region";
         recorder.running = true;
     }
 
@@ -53,12 +56,16 @@ Singleton {
         stdout: SplitParser {
             onRead: line => {
                 if (line !== "START") return;
+                root.picking = false;
+                Quickshell.execDetached([Config.notifySend, "--app-name=Recorder", "--urgency=low", "--expire-time=2500",
+                    "Recording", "Same key again, or click REC in the bar, to stop."]);
                 root.started = Date.now();
                 root.elapsed = 0;
                 root.recording = true;
             }
         }
         onExited: {
+            root.picking = false;
             if (root.recording) notifier.createObject(root, { path: root.file });
             root.recording = false;
         }
