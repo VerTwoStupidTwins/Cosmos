@@ -86,6 +86,14 @@ in
               package = pkgs.nerd-fonts.jetbrains-mono;
               name = "JetBrainsMono Nerd Font";
             };
+            # A full icon theme, so apps that send icon names (udiskie's drives, tray items) get them;
+            # hicolor alone has almost none.
+            icons = {
+              enable = true;
+              package = pkgs.papirus-icon-theme;
+              dark = "Papirus-Dark";
+              light = "Papirus-Light";
+            };
           };
 
           home-manager.sharedModules = [

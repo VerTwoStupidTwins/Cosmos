@@ -46,7 +46,12 @@ Item {
     readonly property bool expires: !critical && !resident
     readonly property var defaultAction: actions.find(a => a.identifier === "default") ?? null
     readonly property var buttons: actions.filter(a => a.identifier !== "default")
-    readonly property string picture: image ? image : appIcon ? Quickshell.iconPath(appIcon, true) : ""
+    // An image-path hint can be an icon name (udiskie sends "drive-removable-media"); check those
+    // against the theme so a missing one falls back instead of drawing the missing-icon checkerboard.
+    readonly property string picture: {
+        const named = image.startsWith("image://icon/") ? Quickshell.iconPath(image.slice(13), true) : image;
+        return named || (appIcon ? Quickshell.iconPath(appIcon, true) : "");
+    }
     readonly property date arrived: new Date()
 
     // Running an action already closes the notification; only dismiss one that's still up.
