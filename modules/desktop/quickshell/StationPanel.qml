@@ -18,7 +18,7 @@ PanelWindow {
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
     color: "transparent"
 
-    implicitWidth: 760
+    implicitWidth: 840
     implicitHeight: content.implicitHeight + 4
 
     function pad(n, width) {
@@ -335,6 +335,219 @@ PanelWindow {
                     }
                 }
             }
+        }
+
+        // The homelab: each lab host's monitor, checked while the station is open (Homelab.qml).
+        Plate {
+            Layout.fillWidth: true
+            visible: Homelab.available
+            title: "LAB"
+            status: Homelab.checking ? "CHECKING…"
+                : Homelab.checkedAt.getTime() > 0 ? "CHECKED " + Qt.formatTime(Homelab.checkedAt, "HH:mm") : ""
+            statusTone: Theme.dim
+            cutTopLeft: 4
+            cutTopRight: 14
+            cutBottomLeft: 14
+            cutBottomRight: 4
+
+            Label {
+                visible: Homelab.hosts.length === 0
+                text: Homelab.checking ? "ASKING THE LAB…" : "NO REPORT YET"
+                color: Theme.muted
+                font.pixelSize: 10
+                font.letterSpacing: 3
+            }
+
+            Repeater {
+                model: Homelab.hosts
+
+                LabHost {
+                    required property var modelData
+                    required property int index
+                    entry: modelData
+                    first: index === 0
+                }
+            }
+        }
+    }
+
+    component LabHost: ColumnLayout {
+        id: host
+
+        required property var entry
+        property bool first: false
+        readonly property var r: entry.report ?? null
+        readonly property var sys: r?.system ?? ({})
+        readonly property var warnings: r?.warnings ?? []
+        readonly property real cpuTemp: hottest(sys.cpu_temps_c)
+        readonly property real memUsed: sys.memory ? 100 - sys.memory.available_percent : -1
+        readonly property real diskUsed: sys.disks?.["/"]?.used_percent ?? -1
+        readonly property var models: r?.models?.loaded ? Object.values(r.models.loaded) : []
+        readonly property string state: !r ? "DOWN" : r.status === "ok" ? "OK" : "ATTN"
+        readonly property color tone: state === "OK" ? Theme.good : state === "ATTN" ? Theme.warn : Theme.urgent
+
+        function hottest(temps) {
+            return temps ? Math.max(-1, ...Object.values(temps)) : -1;
+        }
+        // Why SSH didn't get a report, in a word.
+        function reason(error) {
+            if (/Permission denied/.test(error)) return "ACCESS DENIED";
+            if (/resolve/i.test(error)) return "NOT ON THE MESH";
+            if (/timed out|No route|refused|closed|reset/i.test(error)) return "UNREACHABLE";
+            return "NO ANSWER";
+        }
+
+        Layout.fillWidth: true
+        spacing: 5
+
+        Rectangle {
+            visible: !host.first
+            Layout.fillWidth: true
+            Layout.topMargin: 2
+            Layout.bottomMargin: 2
+            implicitHeight: 1
+            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 10
+
+            Label {
+                text: host.entry.host.toUpperCase()
+                color: Theme.accent
+                font.pixelSize: 15
+                font.bold: true
+                font.letterSpacing: 3
+            }
+            Rectangle {
+                implicitWidth: stateLabel.implicitWidth + 10
+                implicitHeight: 15
+                color: Qt.rgba(host.tone.r, host.tone.g, host.tone.b, 0.15)
+                border.width: 1
+                border.color: host.tone
+
+                Label {
+                    id: stateLabel
+                    anchors.centerIn: parent
+                    text: host.state
+                    color: host.tone
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.letterSpacing: 1.5
+                }
+            }
+            Label {
+                visible: !host.r
+                Layout.fillWidth: true
+                text: host.reason(host.entry.error ?? "") + "  ·  " + (host.entry.error ?? "")
+                color: Theme.dim
+                font.pixelSize: 10
+                elide: Text.ElideRight
+            }
+            Item {
+                visible: !!host.r
+                Layout.fillWidth: true
+            }
+            Label {
+                visible: !!host.r
+                text: [
+                    host.models.length ? "MODELS " + host.models.filter(m => m === "ready").length + "/" + host.models.length : "",
+                    host.sys.last_rebuild?.revision ? "REV " + host.sys.last_rebuild.revision.slice(0, 7) : "",
+                    host.sys.uptime_days !== undefined ? "UP " + host.sys.uptime_days.toFixed(1) + "D" : ""
+                ].filter(s => s).join("  ·  ")
+                color: Theme.dim
+                font.pixelSize: 10
+                font.letterSpacing: 1
+            }
+        }
+
+        // Readings: CPU, memory, root disk, and each GPU's memory and temperature.
+        Flow {
+            visible: !!host.r
+            Layout.fillWidth: true
+            spacing: 12
+
+            Reading {
+                key: "CPU"
+                value: panel.temp(host.cpuTemp)
+                tone: panel.heat(host.cpuTemp, 75, 90)
+            }
+            Reading {
+                key: "MEM"
+                value: host.memUsed >= 0 ? panel.pad(host.memUsed) + "%" : "--"
+                fraction: host.memUsed / 100
+            }
+            Reading {
+                key: "DSK"
+                value: host.diskUsed >= 0 ? panel.pad(host.diskUsed) + "%" : "--"
+                fraction: host.diskUsed / 100
+            }
+            Repeater {
+                model: host.r?.gpus ?? []
+
+                Reading {
+                    required property var modelData
+                    readonly property real used: modelData.vram_total_mib ? 1 - modelData.vram_free_mib / modelData.vram_total_mib : -1
+
+                    key: modelData.short.toUpperCase()
+                    value: used >= 0 ? panel.pad(used * 100) + "%  " + panel.temp(host.hottest(modelData.temps_c)) : "--"
+                    fraction: used
+                    tone: panel.heat(host.hottest(modelData.temps_c), 80, 95)
+                }
+            }
+        }
+
+        // What needs looking at, as the monitor words it.
+        Repeater {
+            model: host.warnings.slice(0, 2)
+
+            Label {
+                required property string modelData
+                Layout.fillWidth: true
+                text: "▲ " + modelData
+                color: Theme.warn
+                font.pixelSize: 10
+                elide: Text.ElideRight
+            }
+        }
+        Label {
+            visible: host.warnings.length > 2
+            text: "+" + (host.warnings.length - 2) + " MORE"
+            color: Theme.muted
+            font.pixelSize: 9
+            font.letterSpacing: 2
+        }
+    }
+
+    // A key, its value, and a small gauge when it's a fraction.
+    component Reading: Row {
+        property string key
+        property string value
+        property real fraction: -1
+        property color tone: Theme.fg
+
+        spacing: 6
+
+        Label {
+            anchors.verticalCenter: parent.verticalCenter
+            text: parent.key
+            color: Theme.muted
+            font.pixelSize: 9
+            font.letterSpacing: 1.5
+        }
+        Gauge {
+            visible: parent.fraction >= 0
+            anchors.verticalCenter: parent.verticalCenter
+            segments: 6
+            value: Math.max(0, parent.fraction)
+            color: parent.fraction >= 0.95 ? Theme.urgent : parent.fraction >= 0.85 ? Theme.warn : Theme.accent
+        }
+        Label {
+            anchors.verticalCenter: parent.verticalCenter
+            text: parent.value
+            color: parent.tone
+            font.pixelSize: 11
         }
     }
 }

@@ -76,6 +76,18 @@
           description = "Let Hermes, from another host, run this host's monitor over SSH, and nothing else.";
         };
 
+        allowStation = mkOption {
+          type = types.bool;
+          default = false;
+          description = "Let the desktop bar's homelab plate, from tenjin, run this host's monitor over SSH, and nothing else.";
+        };
+
+        labCommand = mkOption {
+          type = types.nullOr types.path;
+          default = null;
+          description = "On a desktop: a script printing each homelab host's health report, one JSON object per line, for the bar.";
+        };
+
         command = mkOption {
           type = types.listOf types.str;
           readOnly = true;

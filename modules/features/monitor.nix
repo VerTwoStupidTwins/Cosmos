@@ -8,6 +8,14 @@ let
   remotes = {
     kobold = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFsW8D98Mo2cYCc5ijPszxHPy0qBBnpV4bD/Gxb+ki/U";
   };
+
+  # The desktop bar's key (its private half is in secrets/tenjin.yaml), and the hosts its homelab
+  # plate checks, by host key. Each of them sets monitor.allowStation.
+  stationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw0/t1en+PuDl7iQiW/6f0DLorwLSHcLP+WdOtpYIxw station-monitor";
+  labHosts = {
+    lugh = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOW2xA+/CR6trd2iH4bdORyeIjswgoLc8ZglHjEyOeCD";
+    inherit (remotes) kobold;
+  };
 in
 {
   # Read-only health checks and config lookups for a host, as an MCP server for Hermes. What the host should be running
@@ -164,19 +172,80 @@ in
       ++ optionalArg "--llama-swap-url" m.llamaSwapUrl
       ++ optionalArg "--memory-socket" m.memorySocket;
 
-      # Hermes, from its own host, logs in as monitor and gets the monitor on stdin and stdout, whatever it asks to run.
-      users.users.monitor = lib.mkIf m.allowHermes {
+      # Hermes, from its own host, and the desktop bar log in as monitor and get the monitor on stdin and stdout,
+      # whatever they ask to run.
+      users.users.monitor = lib.mkIf (m.allowHermes || m.allowStation) {
         isSystemUser = true;
         group = "monitor";
         # The log tool reads the journal.
         extraGroups = [ "systemd-journal" ];
         # sshd runs the forced command through the user's shell.
         shell = pkgs.bashInteractive;
-        openssh.authorizedKeys.keys = [
-          ''restrict,command="${lib.escapeShellArgs m.command}" ${hermesKey}''
-        ];
+        openssh.authorizedKeys.keys = map (key: ''restrict,command="${lib.escapeShellArgs m.command}" ${key}'') (
+          lib.optional m.allowHermes hermesKey ++ lib.optional m.allowStation stationKey
+        );
       };
-      users.groups.monitor = lib.mkIf m.allowHermes { };
+      users.groups.monitor = lib.mkIf (m.allowHermes || m.allowStation) { };
+    };
+
+  # On a desktop: the bar's homelab plate asks each lab host's monitor for its health report, over SSH
+  # with its own key, which those hosts only let run the monitor.
+  flake.modules.nixos.monitor-station =
+    {
+      config,
+      lib,
+      pkgs,
+      ...
+    }:
+    let
+      knownHosts = pkgs.writeText "lab-known-hosts" (
+        lib.concatStrings (lib.mapAttrsToList (host: key: "${host}.netbird.cloud ${key}\n") labHosts)
+      );
+      # An MCP session: initialize, then health_report (id 2). stdin stays open until the answer
+      # arrives, since the monitor stops reading when it closes.
+      requests = pkgs.writeText "lab-requests" ''
+        {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"station","version":"1"}}}
+        {"jsonrpc":"2.0","method":"notifications/initialized"}
+        {"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"health_report","arguments":{}}}
+      '';
+    in
+    {
+      sops.secrets.station-monitor-key = {
+        sopsFile = ../../secrets/tenjin.yaml;
+        owner = "twins";
+        mode = "0400";
+      };
+
+      # One line per host: {"host": …, "report": {…}}, or {"host": …, "error": "…"} when it didn't answer.
+      monitor.labCommand = pkgs.writeShellScript "homelab-status" ''
+        PATH=${
+          lib.makeBinPath [
+            pkgs.coreutils
+            pkgs.gnugrep
+            pkgs.jq
+            pkgs.openssh
+          ]
+        }
+        tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+        check() {
+          local host=$1 done=$tmp/$1.done
+          { cat ${requests}; while [ ! -e "$done" ]; do sleep 0.3; done; } |
+            timeout 30 ssh -i ${config.sops.secrets.station-monitor-key.path} -o BatchMode=yes -o IdentitiesOnly=yes \
+              -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${knownHosts} -o ConnectTimeout=6 \
+              "monitor@$host.netbird.cloud" 2> "$tmp/$host.err" |
+            { grep -m1 '"id":2' > "$tmp/$host.out"; touch "$done"; }
+          if [ -s "$tmp/$host.out" ] &&
+            jq -c --arg host "$host" '{host: $host, report: (.result.content[0].text | fromjson)}' "$tmp/$host.out" > "$tmp/$host.json" 2>/dev/null; then
+            :
+          else
+            jq -nc --arg host "$host" --arg error "$(grep -v '^Warning' "$tmp/$host.err" | tr -d '\r' | tail -n1)" \
+              '{host: $host, error: (if $error == "" then "no answer" else $error end)}' > "$tmp/$host.json"
+          fi
+        }
+        for host in ${lib.concatStringsSep " " (lib.attrNames labHosts)}; do check "$host" & done
+        wait
+        cat "$tmp"/*.json
+      '';
     };
 
   # On the host Hermes runs on: its own monitor, run directly, and the other hosts', run over SSH.
