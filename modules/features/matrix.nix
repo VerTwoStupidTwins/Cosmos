@@ -32,6 +32,15 @@
         };
       };
 
+      # No copy-on-write for the database: on btrfs, RocksDB's preallocated write-ahead logs can't reserve
+      # space and pin old extents. The attribute only reaches files made after it's set, which is why it's
+      # set on the directory before Tuwunel first fills it. DynamicUser keeps the real directory under
+      # /var/lib/private.
+      systemd.tmpfiles.rules = [
+        "d /var/lib/private/tuwunel 0700 - - -"
+        "h /var/lib/private/tuwunel - - - - +C"
+      ];
+
       sops.secrets.matrix-registration-token = {
         sopsFile = ../../secrets/kobold.yaml;
         owner = config.services.matrix-tuwunel.user;
@@ -47,6 +56,9 @@
         certs.${domain} = {
           dnsProvider = "spaceship";
           environmentFile = config.sops.secrets.spaceship-api.path;
+          # lego checks the challenge record through the system resolver otherwise, and systemd-resolved
+          # answered NXDOMAIN (cached from before the record existed) until lego gave up.
+          dnsResolver = "1.1.1.1:53";
           group = config.services.nginx.group;
         };
       };
