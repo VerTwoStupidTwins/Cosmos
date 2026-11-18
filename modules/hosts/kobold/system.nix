@@ -13,6 +13,7 @@ in
         nixos.server
         nixos.builder
         nixos.monitor
+        nixos.matrix
       ];
 
       # Hermes, on lugh, checks on kobold through its monitor.
