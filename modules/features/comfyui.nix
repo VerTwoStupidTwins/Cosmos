@@ -44,6 +44,7 @@
         version = "0.1.0";
         src = ./comfyui/gate;
         cargoLock.lockFile = ./comfyui/gate/Cargo.lock;
+        meta.mainProgram = "comfyui-gate";
       };
     in
     {
