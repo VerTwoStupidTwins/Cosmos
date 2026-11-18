@@ -1,9 +1,10 @@
 // Three plates floating over the top edge: workspaces and target window on the left, the
-// clock in the centre, the notification log and tray on the right. Media and the status
-// readouts are on the bottom bar (BottomBar.qml).
+// clock in the centre; capture indicators, caffeine, the notification log and the tray on the
+// right. Media and the status readouts are on the bottom bar (BottomBar.qml).
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Wayland
 
 PanelWindow {
     id: bar
@@ -15,6 +16,12 @@ PanelWindow {
     }
     implicitHeight: 40
     color: "transparent"
+
+    // Caffeine: holding an idle inhibitor keeps the screen awake.
+    IdleInhibitor {
+        window: bar
+        enabled: Caffeine.on
+    }
 
     Island {
         anchors.left: parent.left
@@ -59,6 +66,23 @@ PanelWindow {
         cutTopRight: 4
         cutBottomLeft: 14
         stripRight: true
+
+        // Red while an app records from the mic, uses a camera or captures the screen.
+        PrivacyReadout {}
+
+        // Caffeine: dim while off, lit while the screen is kept awake. Click to toggle.
+        Tag {
+            text: "CAF"
+            color: Caffeine.on ? Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.2) : "transparent"
+            border.color: Caffeine.on ? Theme.warn : Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.3)
+            opacity: Caffeine.on ? 1 : 0.6
+
+            MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: Caffeine.toggle()
+            }
+        }
 
         // Notifications since the log was last opened, or DND while do-not-disturb is on.
         // Click for the log; right-click toggles do-not-disturb.

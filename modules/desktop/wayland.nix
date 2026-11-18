@@ -159,6 +159,8 @@
                   readonly property string terminal: "${config.programs.kitty.package}/bin/kitty"
                   readonly property string systemdRun: "${pkgs.systemd}/bin/systemd-run"
                   readonly property string notifySend: "${pkgs.libnotify}/bin/notify-send"
+                  readonly property string wlCopy: "${pkgs.wl-clipboard}/bin/wl-copy"
+                  readonly property string xdgOpen: "${pkgs.xdg-utils}/bin/xdg-open"
                   readonly property string stationInfo: "${stationInfo}"
                   readonly property string wallpaperCommand: "${config.cosmos.wallpaper}/bin/wallpaper"
                   readonly property string wallpaperCurrent: "${theme}/current"

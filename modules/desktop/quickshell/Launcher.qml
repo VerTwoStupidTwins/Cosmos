@@ -42,7 +42,67 @@ Singleton {
         return i === query.length ? 100 - name.length / 10 : -1;
     }
 
+    // A leading character switches mode: "=" calculates, ">" runs a shell command in kitty, "?"
+    // searches the web. Each gives one row, marked `special`, which launch() runs.
+    function special(text) {
+        const mode = text.charAt(0), rest = text.slice(1).trim();
+        if (mode === "=") {
+            const value = calculate(rest);
+            return [{
+                special: true, glyph: "=", id: "", icon: "",
+                name: value === null ? (rest || "…") : "= " + value,
+                genericName: value === null ? "CALCULATOR · + - * / % ^ ( ) AND Math FUNCTIONS" : "CALCULATOR · ENTER COPIES " + value,
+                run: () => { if (value !== null) Quickshell.execDetached([Config.wlCopy, String(value)]); }
+            }];
+        }
+        if (mode === ">") {
+            return rest === "" ? [] : [{
+                special: true, glyph: ">", id: "", icon: "",
+                name: rest,
+                genericName: "RUN IN KITTY",
+                run: () => detach([Config.terminal, "--hold", "sh", "-c", rest])
+            }];
+        }
+        if (mode === "?") {
+            return rest === "" ? [] : [{
+                special: true, glyph: "?", id: "", icon: "",
+                name: rest,
+                genericName: "SEARCH THE WEB · DUCKDUCKGO",
+                run: () => detach([Config.xdgOpen, "https://duckduckgo.com/?q=" + encodeURIComponent(rest)])
+            }];
+        }
+        return null;
+    }
+
+    // Arithmetic and Math's functions and constants (sqrt, sin, log, pi, e…), with ^ as power.
+    // Anything else, including any other name, isn't evaluated.
+    function calculate(expr) {
+        if (expr === "" || !/^[0-9a-zA-Z_+\-*\/%^().,\s]+$/.test(expr)) return null;
+        let ok = true;
+        const js = expr.replace(/\^/g, "**").replace(/[a-zA-Z_][a-zA-Z_0-9]*/g, id => {
+            const key = id === "pi" ? "PI" : id === "e" ? "E" : id;
+            if (!(key in Math)) ok = false;
+            return "Math." + key;
+        });
+        if (!ok) return null;
+        try {
+            const value = new Function("return (" + js + ");")();
+            return typeof value === "number" && isFinite(value) ? Number(value.toPrecision(12)) : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function detach(command) {
+        Quickshell.execDetached({
+            command: [Config.systemdRun, "--user", "--scope", "--collect", "--quiet", "--slice=app.slice", "--"].concat(command),
+            workingDirectory: Quickshell.env("HOME")
+        });
+    }
+
     function search(text) {
+        const rows = special(text.trim());
+        if (rows !== null) return rows;
         const query = text.trim().toLowerCase();
         const uses = e => Math.min(usage[e.id] ?? 0, 50);
         if (query === "") {
@@ -58,6 +118,11 @@ Singleton {
     // Each app gets its own systemd scope: the bar is a user service, and anything it started
     // directly would be stopped with it whenever it restarts, as it does on every switch.
     function launch(entry) {
+        if (entry.special) {
+            entry.run();
+            open = false;
+            return;
+        }
         const command = entry.runInTerminal ? [Config.terminal, "-e"].concat(Array.from(entry.command)) : Array.from(entry.command);
         Quickshell.execDetached({
             command: [Config.systemdRun, "--user", "--scope", "--collect", "--quiet", "--slice=app.slice", "--"].concat(command),

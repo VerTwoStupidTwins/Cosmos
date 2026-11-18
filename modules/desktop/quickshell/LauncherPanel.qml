@@ -1,5 +1,6 @@
 // The application launcher: a RUN plate over a dimmed screen, with a search field and the
 // matching apps below it. ↑/↓, Tab or Ctrl+J/K move, Enter launches, Esc or a click outside closes.
+// Starting with = calculates, > runs a shell command in kitty, ? searches the web (Launcher.qml).
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -156,7 +157,7 @@ PanelWindow {
                 anchors.leftMargin: 14
                 anchors.verticalCenter: parent.verticalCenter
                 visible: field.text.length === 0
-                text: "SEARCH APPLICATIONS"
+                text: "SEARCH APPLICATIONS  ·  = CALC  ·  > RUN  ·  ? WEB"
                 color: Theme.muted
                 font.pixelSize: 12
                 font.letterSpacing: 3
@@ -229,7 +230,7 @@ PanelWindow {
 
                             Label {
                                 anchors.centerIn: parent
-                                text: row.modelData.name.charAt(0).toUpperCase()
+                                text: row.modelData.glyph ?? row.modelData.name.charAt(0).toUpperCase()
                                 color: Theme.accent
                                 font.pixelSize: 14
                                 font.bold: true

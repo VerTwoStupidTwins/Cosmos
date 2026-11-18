@@ -89,6 +89,15 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call caffeine toggle`, to keep the screen awake.
+    IpcHandler {
+        target: "caffeine"
+
+        function toggle(): void {
+            Caffeine.toggle();
+        }
+    }
+
     // Notifications when the battery runs low.
     BatteryWatch {}
 
