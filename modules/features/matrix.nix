@@ -3,7 +3,7 @@
   # A Matrix homeserver for the homelab: Tuwunel behind nginx, reachable only over NetBird. It doesn't federate, and
   # accounts are made with a registration token. Hermes talks to it as @hermes:matrix.gatica.one.
   flake.modules.nixos.matrix =
-    { config, ... }:
+    { config, pkgs, ... }:
     let
       # Also the server name, so IDs look like @twins:matrix.gatica.one and apps find the server from the ID alone.
       # It can't change once the server has users.
@@ -13,6 +13,11 @@
     {
       services.matrix-tuwunel = {
         enable = true;
+        # nixpkgs' Rust setup now steers crates to system libraries, pointing them at paths that don't exist
+        # where there is none (JEMALLOC_OVERRIDE, AWS_LC_SYS_USE_SYSTEM…), and Tuwunel's jemalloc and AWS-LC
+        # crates stop there (Hydra fails the same way). Without that step they build their own, as Tuwunel's
+        # own build does.
+        package = pkgs.matrix-tuwunel.overrideAttrs { dontCargoUseSystemLibs = true; };
         settings.global = {
           server_name = domain;
           address = [ "127.0.0.1" ];
