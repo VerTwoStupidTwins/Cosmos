@@ -6,7 +6,18 @@ import Quickshell
 import Quickshell.Wayland
 
 PanelWindow {
-    visible: Recorder.picking
+    // Shown a moment after slurp's overlay, so niri stacks it above rather than under the dimming.
+    visible: Recorder.picking && delay.done
+
+    Timer {
+        id: delay
+        property bool done: false
+        interval: 350
+        running: Recorder.picking
+        onRunningChanged: if (running) done = false
+        onTriggered: done = true
+    }
+
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "quickshell-recorder-hint"

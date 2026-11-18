@@ -35,7 +35,9 @@ Singleton {
         file = dir + "/Recording from " + Qt.formatDateTime(new Date(), "yyyy-MM-dd HH-mm-ss") + ".mp4";
         const slurp = [Config.slurp, "-c", hex(Theme.accent, "ff"), "-b", "#000000aa", "-s", "#00000000", "-w", "2"]
             .map(a => "'" + a + "'").join(" ");
-        const geometry = mode === "region" ? 'g=$(' + slurp + ') || exit 1; set -- -g "$g"' : "set --";
+        // slurp reads predefined boxes from stdin when it isn't a terminal, and the bar's stdin is
+        // a pipe that never closes, so it gets /dev/null.
+        const geometry = mode === "region" ? 'g=$(' + slurp + ' < /dev/null) || exit 1; set -- -g "$g"' : "set --";
         recorder.command = [Config.bash, "-c", geometry + '; mkdir -p "$DIR" && echo START && exec "$WF" "$@" -c h264_vaapi -d /dev/dri/renderD128 --audio=@DEFAULT_MONITOR@ -f "$FILE"'];
         recorder.environment = { DIR: dir, FILE: file, WF: Config.wfRecorder };
         picking = mode === "region";
