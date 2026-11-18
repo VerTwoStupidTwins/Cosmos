@@ -105,6 +105,26 @@ in
           flag
           value
         ];
+
+      # The monitor without the memory check, for the desktop bar: the memory service's socket is
+      # Hermes' alone, so as the monitor user that check could only fail.
+      stationCommand = [
+        (lib.getExe monitor)
+        "--host"
+        config.networking.hostName
+        "--systemctl"
+        "${pkgs.systemd}/bin/systemctl"
+        "--journalctl"
+        "${pkgs.systemd}/bin/journalctl"
+        "--revision-file"
+        "/etc/host-monitor/revision"
+        "--config-source"
+        "/etc/host-monitor/config"
+        "--manifest"
+        "/etc/host-monitor/manifest.json"
+      ]
+      ++ optionalArg "--llama-server" m.llamaServer
+      ++ optionalArg "--llama-swap-url" m.llamaSwapUrl;
     in
     {
       # The system services Hermes is reached through, where this host has them.
@@ -153,24 +173,7 @@ in
         };
       };
 
-      monitor.command = [
-        (lib.getExe monitor)
-        "--host"
-        config.networking.hostName
-        "--systemctl"
-        "${pkgs.systemd}/bin/systemctl"
-        "--journalctl"
-        "${pkgs.systemd}/bin/journalctl"
-        "--revision-file"
-        "/etc/host-monitor/revision"
-        "--config-source"
-        "/etc/host-monitor/config"
-        "--manifest"
-        "/etc/host-monitor/manifest.json"
-      ]
-      ++ optionalArg "--llama-server" m.llamaServer
-      ++ optionalArg "--llama-swap-url" m.llamaSwapUrl
-      ++ optionalArg "--memory-socket" m.memorySocket;
+      monitor.command = stationCommand ++ optionalArg "--memory-socket" m.memorySocket;
 
       # Hermes, from its own host, and the desktop bar log in as monitor and get the monitor on stdin and stdout,
       # whatever they ask to run.
@@ -181,9 +184,11 @@ in
         extraGroups = [ "systemd-journal" ];
         # sshd runs the forced command through the user's shell.
         shell = pkgs.bashInteractive;
-        openssh.authorizedKeys.keys = map (key: ''restrict,command="${lib.escapeShellArgs m.command}" ${key}'') (
-          lib.optional m.allowHermes hermesKey ++ lib.optional m.allowStation stationKey
-        );
+        openssh.authorizedKeys.keys =
+          map (key: ''restrict,command="${lib.escapeShellArgs m.command}" ${key}'') (
+            lib.optional m.allowHermes hermesKey
+          )
+          ++ lib.optional m.allowStation ''restrict,command="${lib.escapeShellArgs stationCommand}" ${stationKey}'';
       };
       users.groups.monitor = lib.mkIf (m.allowHermes || m.allowStation) { };
     };
