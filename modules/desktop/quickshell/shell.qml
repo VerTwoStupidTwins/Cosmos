@@ -114,6 +114,20 @@ ShellRoot {
         }
     }
 
+    // Clipboard history, on the first screen.
+    ClipboardPanel {
+        screen: Quickshell.screens[0]
+    }
+
+    // `qs -c bar ipc call clipboard toggle`, for Mod+Ctrl+V.
+    IpcHandler {
+        target: "clipboard"
+
+        function toggle(): void {
+            Panels.clipboard = !Panels.clipboard;
+        }
+    }
+
     // What to do while a recording's region is being picked.
     RecorderHint {
         screen: Quickshell.screens[0]

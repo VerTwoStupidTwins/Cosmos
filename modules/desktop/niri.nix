@@ -40,6 +40,7 @@
                     Mod+Shift+S hotkey-overlay-title="Screenshot a Region" { screenshot; }
                     Mod+Ctrl+S hotkey-overlay-title="Screenshot the Window" { screenshot-window; }
                     Mod+Ctrl+Shift+S hotkey-overlay-title="Screenshot the Screen" { screenshot-screen; }
+                    Mod+Ctrl+V hotkey-overlay-title="Clipboard History" { spawn "qs" "-c" "bar" "ipc" "call" "clipboard" "toggle"; }
                     Mod+Alt+S hotkey-overlay-title="Record a Region (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "region"; }
                     Mod+Alt+Shift+S hotkey-overlay-title="Record the Screen (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "screen"; }' \
                   --replace-fail \

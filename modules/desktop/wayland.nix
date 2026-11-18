@@ -167,6 +167,7 @@
                   readonly property string wfRecorder: "${pkgs.wf-recorder}/bin/wf-recorder"
                   readonly property string gammastep: "${pkgs.gammastep}/bin/gammastep"
                   readonly property string ffmpeg: "${pkgs.ffmpeg}/bin/ffmpeg"
+                  readonly property string cliphist: "${config.services.cliphist.package}/bin/cliphist"
                   readonly property string stationInfo: "${stationInfo}"
                   readonly property string wallpaperCommand: "${config.cosmos.wallpaper}/bin/wallpaper"
                   readonly property string wallpaperCurrent: "${theme}/current"
@@ -185,6 +186,12 @@
           };
 
           # Notifications are the Quickshell bar's (Notifs.qml), not mako's.
+
+          # Clipboard history: every copy, text and images, for the bar's picker (ClipboardPanel.qml).
+          services.cliphist = {
+            enable = true;
+            allowImages = true;
+          };
 
           services.hyprpolkitagent.enable = true;
 

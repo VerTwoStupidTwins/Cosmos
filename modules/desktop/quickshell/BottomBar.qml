@@ -64,6 +64,9 @@ PanelWindow {
     AudioPanel {
         screen: bar.screen
     }
+    BluetoothPanel {
+        screen: bar.screen
+    }
 
     Island {
         anchors.right: parent.right
@@ -82,6 +85,7 @@ PanelWindow {
             showGauge: false
         }
         Network {}
+        BluetoothReadout {}
         Battery {}
     }
 }
