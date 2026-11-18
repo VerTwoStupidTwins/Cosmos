@@ -168,6 +168,10 @@
                   readonly property string wfRecorder: "${pkgs.wf-recorder}/bin/wf-recorder"
                   readonly property string gammastep: "${pkgs.gammastep}/bin/gammastep"
                   readonly property string ffmpeg: "${pkgs.ffmpeg}/bin/ffmpeg"
+                  readonly property string lsblk: "${lib.getExe' pkgs.util-linux "lsblk"}"
+                  readonly property string findmnt: "${lib.getExe' pkgs.util-linux "findmnt"}"
+                  readonly property string udevadm: "${lib.getExe' pkgs.systemd "udevadm"}"
+                  readonly property string udisksctl: "${lib.getExe' pkgs.udisks "udisksctl"}"
                   readonly property string cliphist: "${config.services.cliphist.package}/bin/cliphist"
                   readonly property string stationInfo: "${stationInfo}"
                   // Empty where the bar can't reach the homelab (Homelab.qml).
@@ -196,7 +200,7 @@
             allowImages = true;
           };
 
-          services.hyprpolkitagent.enable = true;
+          # The polkit agent is the Quickshell bar's (PolkitPanel.qml), not hyprpolkitagent's.
 
           # $base00…$base0f come from the theme's hyprlock.conf, sourced first.
           programs.hyprlock = {

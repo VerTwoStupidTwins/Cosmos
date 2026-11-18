@@ -67,6 +67,9 @@ PanelWindow {
     BluetoothPanel {
         screen: bar.screen
     }
+    DrivesPanel {
+        screen: bar.screen
+    }
 
     Island {
         anchors.right: parent.right
@@ -86,6 +89,7 @@ PanelWindow {
         }
         Network {}
         BluetoothReadout {}
+        DrivesReadout {}
         Battery {}
     }
 }

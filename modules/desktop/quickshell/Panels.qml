@@ -1,4 +1,4 @@
-// Which of the bottom bar's plates is open: "media", "network", "audio", "bluetooth" or none. One at a time,
+// Which of the bottom bar's plates is open: "media", "network", "audio", "bluetooth", "drives" or none. One at a time,
 // since they all rise from the same edge.
 pragma Singleton
 

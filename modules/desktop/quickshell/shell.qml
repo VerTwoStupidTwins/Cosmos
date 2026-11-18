@@ -89,6 +89,20 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call drives toggle` for the drives plate.
+    IpcHandler {
+        target: "drives"
+
+        function toggle(): void {
+            Panels.toggle("drives");
+        }
+    }
+
+    // Password prompts for polkit (udisksctl, systemctl, pkexec…), on the first screen.
+    PolkitPanel {
+        screen: Quickshell.screens[0]
+    }
+
     // `qs -c bar ipc call caffeine toggle`, to keep the screen awake.
     IpcHandler {
         target: "caffeine"

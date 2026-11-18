@@ -1,6 +1,6 @@
 # modules/desktop/files.nix
 # Files on the desktop: Thunar, with gvfs for the trash, network shares and phones, udisks2 and
-# udiskie so USB drives mount on their own (a notification says so, and the bar's tray lists
+# udiskie so USB drives mount on their own (a notification says so, and the bar's DRV plate lists
 # them), tumbler for thumbnails, and File Roller behind Thunar's "Extract here".
 {
   flake.modules.nixos.desktop =
@@ -26,12 +26,14 @@
           {
             home.packages = [ pkgs.file-roller ];
 
-            # Mounts drives as they're plugged in, under /run/media/twins; its tray icon unmounts them.
+            # Mounts drives as they're plugged in, under /run/media/twins; the bar's DRV plate
+            # unmounts and ejects them.
             services.udiskie = {
               enable = true;
               automount = true;
               notify = true;
-              tray = "auto";
+              # The bar's DRV readout and plate stand in for its tray icon.
+              tray = "never";
             };
 
             # This file is read-only once managed here, so the link handlers apps had written into it

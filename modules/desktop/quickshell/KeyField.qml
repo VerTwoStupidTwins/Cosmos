@@ -1,5 +1,6 @@
 // The lock screen's password field: an angular slot that shows a square for each character
-// typed and a blinking block cursor, never the text itself.
+// typed and a blinking block cursor, never the text itself (unless `reveal`, for prompts that
+// aren't secret). Esc clears it, or with nothing typed sends escaped().
 import QtQuick
 import QtQuick.Layouts
 
@@ -9,8 +10,11 @@ Item {
     property alias text: input.text
     property bool busy: false
     property bool failed: false
+    property bool reveal: false
+    property string placeholder: "ENTER KEY"
 
     signal accepted()
+    signal escaped()
 
     function focusInput() {
         input.forceActiveFocus();
@@ -32,12 +36,15 @@ Item {
         id: input
         anchors.fill: parent
         opacity: 0
-        echoMode: TextInput.Password
+        echoMode: root.reveal ? TextInput.Normal : TextInput.Password
         cursorVisible: false
         readOnly: root.busy
         focus: true
         onAccepted: root.accepted()
-        Keys.onEscapePressed: text = ""
+        Keys.onEscapePressed: {
+            if (text !== "") text = "";
+            else root.escaped();
+        }
     }
 
     Row {
@@ -46,9 +53,16 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: 6
 
+        Label {
+            visible: root.reveal
+            anchors.verticalCenter: parent.verticalCenter
+            text: input.text
+            font.pixelSize: 13
+        }
+
         Repeater {
             // Past a field's worth, more squares wouldn't tell anyone anything.
-            model: Math.min(input.text.length, 28)
+            model: root.reveal ? 0 : Math.min(input.text.length, 28)
 
             Rectangle {
                 width: 8
@@ -78,7 +92,7 @@ Item {
         anchors.leftMargin: 32
         anchors.verticalCenter: parent.verticalCenter
         visible: input.text.length === 0 && !root.busy
-        text: "ENTER KEY"
+        text: root.placeholder
         color: Theme.muted
         font.pixelSize: 12
         font.letterSpacing: 3
