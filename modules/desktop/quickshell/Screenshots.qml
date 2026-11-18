@@ -51,6 +51,8 @@ Scope {
         id: notifier
 
         Process {
+            id: notify
+
             required property string path
 
             running: true
@@ -58,7 +60,7 @@ Scope {
                 "--hint=string:image-path:file://" + path, "--hint=boolean:x-cosmos-preview:true",
                 "--action=default=Annotate", "Screenshot saved · click to annotate", root.shown(path)]
             stdout: StdioCollector {
-                onStreamFinished: if (text.trim() === "default") root.annotate(parent.path)
+                onStreamFinished: if (text.trim() === "default") root.annotate(notify.path)
             }
             onExited: destroy()
         }

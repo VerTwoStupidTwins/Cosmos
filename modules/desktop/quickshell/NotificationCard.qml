@@ -49,6 +49,11 @@ Item {
     readonly property string picture: image ? image : appIcon ? Quickshell.iconPath(appIcon, true) : ""
     readonly property date arrived: new Date()
 
+    // Running an action already closes the notification; only dismiss one that's still up.
+    function close() {
+        if (root.notification?.tracked) root.notification.dismiss();
+    }
+
     property real remaining: 1
 
     implicitWidth: 380
@@ -96,7 +101,7 @@ Item {
         cursorShape: root.defaultAction ? Qt.PointingHandCursor : Qt.ArrowCursor
         onClicked: mouse => {
             if (mouse.button === Qt.LeftButton && root.defaultAction) root.defaultAction.invoke();
-            root.notification?.dismiss();
+            root.close();
         }
     }
 
@@ -232,7 +237,7 @@ Item {
                             cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 parent.modelData.invoke();
-                                root.notification?.dismiss();
+                                root.close();
                             }
                         }
                     }
