@@ -233,6 +233,17 @@ PanelWindow {
                                 linkColor: Theme.accent
                                 onLinkActivated: link => Qt.openUrlExternally(link)
                             }
+                            // A screenshot's thumbnail, while the file is still there.
+                            Image {
+                                Layout.preferredWidth: 160
+                                Layout.preferredHeight: status === Image.Ready ? 90 : 0
+                                Layout.topMargin: status === Image.Ready ? 2 : 0
+                                visible: status === Image.Ready
+                                source: entry.modelData.image ?? ""
+                                sourceSize.width: 320
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                            }
                         }
                     }
                 }

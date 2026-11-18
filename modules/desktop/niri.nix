@@ -36,7 +36,10 @@
                     Mod+Shift+W hotkey-overlay-title="Change the Wallpaper" { spawn "wallpaper"; }
                     Mod+S hotkey-overlay-title="Toggle the Command Station" { spawn "qs" "-c" "bar" "ipc" "call" "station" "toggle"; }
                     Mod+N hotkey-overlay-title="Toggle Do Not Disturb" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "dnd"; }
-                    Mod+Shift+N hotkey-overlay-title="Show the Notification Log" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "log"; }' \
+                    Mod+Shift+N hotkey-overlay-title="Show the Notification Log" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "log"; }
+                    Mod+Shift+S hotkey-overlay-title="Screenshot a Region" { screenshot; }
+                    Mod+Ctrl+S hotkey-overlay-title="Screenshot the Window" { screenshot-window; }
+                    Mod+Ctrl+Shift+S hotkey-overlay-title="Screenshot the Screen" { screenshot-screen; }' \
                   --replace-fail \
                     'XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }' \
                     'XF86MonBrightnessUp allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set +10% && qs -c bar ipc call osd brightness"; }' \

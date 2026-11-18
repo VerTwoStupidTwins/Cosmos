@@ -51,6 +51,8 @@ Singleton {
             id: Date.now() + "-" + n.id,
             app: n.appName,
             icon: n.appIcon,
+            // Images that are files (screenshots) are worth keeping; generated ones die with it.
+            image: n.image.startsWith("file:") ? n.image : "",
             summary: n.summary,
             body: n.body,
             urgency: n.urgency,
@@ -89,6 +91,9 @@ Singleton {
         keepOnReload: true
 
         onNotification: n => {
+            // niri announces every screenshot itself, with no way to turn it off; Screenshots.qml
+            // posts a fuller one (path, annotate on click), so niri's is dropped.
+            if (n.appName === "niri" && n.summary === "Screenshot captured") return;
             root.remember(n);
             // Untracked notifications are dropped, which is how do-not-disturb silences them.
             if (root.dnd && n.urgency !== NotificationUrgency.Critical) return;

@@ -24,6 +24,8 @@ Item {
     property real expireTimeout: -1
     property bool resident: false
     property var actions: []
+    // Senders set x-cosmos-preview for an image worth seeing large, as Screenshots.qml does.
+    property bool preview: false
 
     Binding on appName { when: root.notification !== null; value: root.notification?.appName ?? ""; restoreMode: Binding.RestoreNone }
     Binding on appIcon { when: root.notification !== null; value: root.notification?.appIcon ?? ""; restoreMode: Binding.RestoreNone }
@@ -33,6 +35,7 @@ Item {
     Binding on urgency { when: root.notification !== null; value: root.notification?.urgency ?? NotificationUrgency.Normal; restoreMode: Binding.RestoreNone }
     Binding on expireTimeout { when: root.notification !== null; value: root.notification?.expireTimeout ?? -1; restoreMode: Binding.RestoreNone }
     Binding on resident { when: root.notification !== null; value: root.notification?.resident ?? false; restoreMode: Binding.RestoreNone }
+    Binding on preview { when: root.notification !== null; value: root.notification?.hints?.["x-cosmos-preview"] === true; restoreMode: Binding.RestoreNone }
     Binding on actions { when: root.notification !== null; value: Array.from(root.notification?.actions ?? []); restoreMode: Binding.RestoreNone }
 
     readonly property bool critical: urgency === NotificationUrgency.Critical
@@ -104,9 +107,9 @@ Item {
         width: parent.width - 28
         spacing: 12
 
-        // The image or icon, framed like a display inset.
+        // The image or icon, framed like a display inset (unless it's shown large below).
         Item {
-            visible: root.picture !== ""
+            visible: root.picture !== "" && !root.preview
             Layout.alignment: Qt.AlignTop
             Layout.topMargin: 22
             implicitWidth: 40
@@ -170,6 +173,30 @@ Item {
                 elide: Text.ElideRight
                 linkColor: Theme.accent
                 onLinkActivated: link => Qt.openUrlExternally(link)
+            }
+            // A large preview, framed like a display inset.
+            Item {
+                Layout.fillWidth: true
+                Layout.topMargin: 4
+                visible: root.preview && root.image !== ""
+                implicitHeight: visible ? Math.round(width * 9 / 16) : 0
+
+                PlateShape {
+                    anchors.fill: parent
+                    cutTopLeft: 8
+                    cutBottomRight: 8
+                    fillOpacity: 0.5
+                    showStrip: false
+                    frameColor: Qt.rgba(root.tone.r, root.tone.g, root.tone.b, 0.5)
+                }
+                Image {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    source: root.preview ? root.image : ""
+                    sourceSize.width: 700
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                }
             }
             Flow {
                 Layout.fillWidth: true

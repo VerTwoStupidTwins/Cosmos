@@ -98,6 +98,9 @@ ShellRoot {
         }
     }
 
+    // A notification for each screenshot niri takes; clicking it opens satty.
+    Screenshots {}
+
     // Notifications when the battery runs low.
     BatteryWatch {}
 
