@@ -48,6 +48,8 @@
         let
           theme = "${config.xdg.stateHome}/theme";
           mono = config.stylix.fonts.monospace.name;
+          # Set by the convertible module (2-in-1s).
+          convertible = osConfig.hardware.sensor.iio.enable;
 
           # The command station's readings, in sections the bar parses (Station.qml). It runs every
           # two seconds, so it reads files with bash builtins rather than starting a process per
@@ -180,6 +182,12 @@
                   readonly property string wallpaperCurrent: "${theme}/current"
                   readonly property string wallpaperDir: "${config.cosmos.wallpaperDir}"
                   readonly property string wallpaperLibrary: "${config.xdg.dataHome}/wallpapers"
+                  // 2-in-1s (the convertible module): tablet mode, rotation and the on-screen
+                  // keyboard (Tablet.qml). Empty elsewhere.
+                  readonly property bool convertible: ${lib.boolToString convertible}
+                  readonly property string evtest: "${lib.optionalString convertible (lib.getExe pkgs.evtest)}"
+                  readonly property string iioNiri: "${lib.optionalString convertible (lib.getExe pkgs.iio-niri)}"
+                  readonly property string wvkbd: "${lib.optionalString convertible (lib.getExe' pkgs.wvkbd "wvkbd-mobintl")}"
               }
               QML
             '';

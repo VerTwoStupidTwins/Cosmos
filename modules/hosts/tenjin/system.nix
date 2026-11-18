@@ -9,6 +9,7 @@ in
     imports = [
       nixos.systemd-boot
       nixos.laptop
+      nixos.convertible
       nixos.snapshots
       nixos.desktop
       nixos.niri

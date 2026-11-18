@@ -124,6 +124,31 @@ PanelWindow {
             }
         }
 
+        // Tablet mode only: ROT follows the accelerometer (LCK while rotation is locked), KBD
+        // shows or hides the on-screen keyboard. Tap to toggle.
+        Tag {
+            visible: Tablet.active
+            text: Tablet.rotationLocked ? "LCK" : "ROT"
+            color: Tablet.rotationLocked ? Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.2) : "transparent"
+            border.color: Tablet.rotationLocked ? Theme.warn : Theme.accent
+
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: -6
+                onClicked: Tablet.toggleRotationLock()
+            }
+        }
+        Tag {
+            visible: Tablet.active
+            text: "KBD"
+
+            MouseArea {
+                anchors.fill: parent
+                anchors.margins: -6
+                onClicked: Tablet.toggleKeyboard()
+            }
+        }
+
         // Caffeine: dim while off, lit while the screen is kept awake. Click to toggle.
         Tag {
             text: "CAF"

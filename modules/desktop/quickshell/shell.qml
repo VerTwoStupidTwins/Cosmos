@@ -98,6 +98,22 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call tablet rotation|keyboard` lock rotation or toggle the on-screen keyboard
+    // in tablet mode; `toggle` pretends the laptop was folded (or unfolded), for testing.
+    IpcHandler {
+        target: "tablet"
+
+        function rotation(): void {
+            Tablet.toggleRotationLock();
+        }
+        function keyboard(): void {
+            Tablet.toggleKeyboard();
+        }
+        function toggle(): void {
+            Tablet.toggle();
+        }
+    }
+
     // `qs -c bar ipc call drives toggle` for the drives plate.
     IpcHandler {
         target: "drives"
