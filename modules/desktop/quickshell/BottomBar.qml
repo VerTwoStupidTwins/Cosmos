@@ -90,6 +90,7 @@ PanelWindow {
         Network {}
         BluetoothReadout {}
         DrivesReadout {}
+        PenReadout {}
         Battery {}
     }
 }

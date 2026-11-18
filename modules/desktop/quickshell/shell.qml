@@ -114,6 +114,20 @@ ShellRoot {
         }
     }
 
+    // The pen menu, on the first screen; it comes up as the stylus leaves its garage.
+    PenMenu {
+        screen: Quickshell.screens[0]
+    }
+
+    // `qs -c bar ipc call pen menu` brings the pen menu up (or down) by hand.
+    IpcHandler {
+        target: "pen"
+
+        function menu(): void {
+            Pen.toggleMenu();
+        }
+    }
+
     // `qs -c bar ipc call drives toggle` for the drives plate.
     IpcHandler {
         target: "drives"
