@@ -388,6 +388,9 @@ in
                     hyprpaper.enable = false;
                     # Needs declared Firefox profiles, and Firefox here keeps its own.
                     firefox.enable = false;
+                    # rofi isn't used, and this target still sets home-manager's renamed
+                    # programs.rofi.font, which warns on every build.
+                    rofi.enable = false;
                   };
 
                   programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
