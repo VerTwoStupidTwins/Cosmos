@@ -8,6 +8,9 @@
 # - a changed PNG updates its note where it is, unless the note was edited since (by the owner or
 #   Hermes): then the edits stay and the note is marked `transcription: outdated` instead;
 # - a changed PNG whose note was deleted gets a new note in the inbox.
+# The owner then sets each note's `review` to accept or delete; at midnight Hermes' notes-ingest job
+# deletes the rejected ones and files the accepted ones, marking them `review: filed`, and this then
+# deletes them with their drawings (clean_up below).
 #
 # Environment: NOTES (the vault), STATE (a folder of the service's own), API (an OpenAI-style chat
 # completions URL), MODEL, and the system prompt and request text as files, PROMPT and REQUEST.
@@ -119,6 +122,8 @@ transcribe() {
     printf 'tags: [handwritten]\n'
     printf 'transcribed: %s\n' "$(date '+%Y-%m-%d %H:%M')"
     printf 'transcription: current\n'
+    # The owner changes it to accept or delete; Hermes' nightly notes-ingest job acts on it.
+    printf 'review: pending\n'
     printf 'png-sha256: %s\n' "$png_hash"
     printf 'text-sha256: %s\n' "$(sha256sum < "$work/body" | cut -d' ' -f1)"
     printf -- '---\n'
@@ -133,6 +138,16 @@ transcribe() {
   log "wrote $note"
 }
 
+# An inbox note Hermes' nightly job has filed into the vault: Hermes marks it `review: filed`, and
+# this deletes it with the drawing it came from, as the owner asked. Hermes doesn't delete anything
+# itself: unattended, its terminal commands would wait for an approval nobody gives.
+clean_up() {
+  local note=$1
+  [[ $note == "$NOTES/Inbox/"*.md && -f $note ]] || return 0
+  [[ $(field "$note" review) == filed ]] || return 0
+  notes-remove "$note" >&2 || true
+}
+
 # Watch first, so nothing exported during the start-up pass is missed.
 inotifywait -m -r -q -e close_write -e moved_to --exclude '/\.' --format '%w%f' "$NOTES" > "$work/events" &
 watcher=$!
@@ -140,10 +155,16 @@ watcher=$!
 while IFS= read -r -d '' png; do
   transcribe "$png"
 done < <(find "$NOTES" -path '*/.*' -prune -o -name '*.excalidraw.png' -print0)
+if [[ -d $NOTES/Inbox ]]; then
+  for note in "$NOTES"/Inbox/*.md; do
+    clean_up "$note"
+  done
+fi
 
 # The sync writes a file and may touch it again straight after; give it a moment to settle.
 tail -n +1 -f --pid="$watcher" "$work/events" | while IFS= read -r path; do
-  [[ $path == *.excalidraw.png ]] || continue
-  sleep 2
-  transcribe "$path"
+  case $path in
+    *.excalidraw.png) sleep 2 && transcribe "$path" ;;
+    "$NOTES"/Inbox/*.md) sleep 2 && clean_up "$path" ;;
+  esac
 done
