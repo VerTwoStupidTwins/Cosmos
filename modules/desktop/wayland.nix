@@ -1,7 +1,7 @@
 # modules/desktop/wayland.nix
 # The pieces every Wayland session here shares: lock, idle, polkit agent, bar, launcher,
-# notifications, terminal. Each compositor module imports this; `key` lets a host carry two
-# compositors without the module system applying it twice. Colours come from theme.nix.
+# notifications, terminal. The compositor module (niri.nix) imports this; `key` keeps the module
+# system from applying it twice if another compositor is ever added. Colours come from theme.nix.
 {
   flake.modules.nixos.wayland = {
     key = "cosmos/desktop/wayland";

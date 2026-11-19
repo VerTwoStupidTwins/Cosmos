@@ -384,8 +384,6 @@ in
                   stylix.targets = {
                     kitty.colors.enable = false;
                     hyprlock.enable = false;
-                    hyprland.enable = false;
-                    hyprpaper.enable = false;
                     # Needs declared Firefox profiles, and Firefox here keeps its own.
                     firefox.enable = false;
                     # rofi isn't used, and this target still sets home-manager's renamed

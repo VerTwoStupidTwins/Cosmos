@@ -4,7 +4,7 @@ let
 in
 {
   # A Lenovo ThinkPad C13 Yoga Chromebook (Google "Morphius") with MrChromebox's UEFI firmware.
-  # It mirrors thoth for now; the touchscreen and stylus are for drawing and media work.
+  # The main workstation; the touchscreen and stylus are for drawing and media work.
   hosts.tenjin = {
     imports = [
       nixos.systemd-boot
@@ -13,7 +13,6 @@ in
       nixos.snapshots
       nixos.desktop
       nixos.niri
-      nixos.hyprland
       nixos.build-client
       nixos.claude-code
       nixos.hermes-desktop

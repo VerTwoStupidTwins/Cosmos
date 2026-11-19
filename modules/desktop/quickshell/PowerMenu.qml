@@ -35,8 +35,6 @@ PanelWindow {
         case "LOG OUT":
             if (Quickshell.env("NIRI_SOCKET"))
                 Quickshell.execDetached(["niri", "msg", "action", "quit", "--skip-confirmation"]);
-            else if (Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE"))
-                Quickshell.execDetached(["hyprctl", "dispatch", "exit"]);
             else
                 Quickshell.execDetached(["loginctl", "terminate-session", Quickshell.env("XDG_SESSION_ID")]);
             break;

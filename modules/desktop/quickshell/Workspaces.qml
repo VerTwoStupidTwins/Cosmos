@@ -1,6 +1,5 @@
-// Workspaces over ext-workspace, which niri and Hyprland both speak, as slanted plates
-// numbered 01, 02…, with the icons of the apps on each under niri (Niri.qml). Click one to
-// switch to it.
+// Workspaces over ext-workspace, as slanted plates numbered 01, 02…, with the icons of the apps
+// on each from niri (Niri.qml). Click one to switch to it.
 import QtQuick
 import Quickshell
 import Quickshell.Widgets
