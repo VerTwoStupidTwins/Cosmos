@@ -82,10 +82,12 @@
                     default-window-height { proportion 0.7; }
                 }
 
-                // 1Password never shows up in screen shares or recordings (screenshots still see it).
+                // 1Password is blacked out of every capture: screen shares, recordings, grim/satty and
+                // the whole-screen and window screenshots niri takes. Only the interactive region shot,
+                // where the selection is in plain view, still shows it.
                 window-rule {
                     match app-id=r#"^com\.onepassword\.OnePassword$"#
-                    block-out-from "screencast"
+                    block-out-from "screen-capture"
                 }
 
                 // Example: block out two password managers from screen capture.' \
