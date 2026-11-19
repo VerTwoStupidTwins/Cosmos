@@ -59,6 +59,37 @@
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }' \
                     'Super+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }' \
                   --replace-fail \
+                    '// Example: block out two password managers from screen capture.' \
+                    '// Small tools and stand-alone dialogs float instead of taking a whole column.
+                window-rule {
+                    match app-id=r#"^org\.pulseaudio\.pavucontrol$"#
+                    match app-id=r#"^xdg-desktop-portal-gtk$"#
+                    match app-id=r#"^com\.gabm\.satty$"#
+                    match app-id=r#"^org\.gnome\.FileRoller$"#
+                    match app-id=r#"^thunar$"# title=r#"^(File Operation Progress|Confirm to replace files|Rename ".*")$"#
+                    match app-id=r#"^com\.onepassword\.OnePassword$"# title=r#"^Quick Access"#
+                    open-floating true
+                }
+                window-rule {
+                    match app-id=r#"^org\.pulseaudio\.pavucontrol$"#
+                    default-column-width { fixed 720; }
+                    default-window-height { fixed 520; }
+                }
+                // File pickers from the portal, roomy enough to browse in.
+                window-rule {
+                    match app-id=r#"^xdg-desktop-portal-gtk$"#
+                    default-column-width { proportion 0.6; }
+                    default-window-height { proportion 0.7; }
+                }
+
+                // 1Password never shows up in screen shares or recordings (screenshots still see it).
+                window-rule {
+                    match app-id=r#"^com\.onepassword\.OnePassword$"#
+                    block-out-from "screencast"
+                }
+
+                // Example: block out two password managers from screen capture.' \
+                  --replace-fail \
                     'spawn-at-startup "waybar"' \
                     '// The bar is Quickshell, started as a systemd user service.
                 spawn-at-startup "1password" "--silent"
