@@ -2,7 +2,7 @@
 {
   # Handwritten notes in the owner's Notes vault (synced to lugh by hermes-wiki.nix) become Markdown:
   # each PNG that Excalidraw exports beside a drawing goes to the main model, which can see, and the
-  # transcription is written as a note next to the drawing. Runs as hermes, so the notes are
+  # transcription is written as a note in the vault's Inbox folder. Runs as hermes, so the notes are
   # Hermes' to index and edit like the rest of the vault.
   flake.modules.nixos.hermes =
     { config, pkgs, ... }:
@@ -35,6 +35,7 @@
         ];
         environment = {
           NOTES = notes;
+          STATE = "/var/lib/notes-transcriber";
           API = "http://127.0.0.1:${toString config.services.llama-swap.port}/v1/chat/completions";
           MODEL = "main";
           PROMPT = "${./hermes-notes/transcribe-prompt.txt}";
@@ -47,6 +48,8 @@
           User = "hermes";
           Group = "hermes";
           ExecStart = "${transcriber}/bin/notes-transcriber";
+          # Which PNGs it has transcribed, kept out of the vault.
+          StateDirectory = "notes-transcriber";
           Restart = "always";
           RestartSec = 30;
           UMask = "0007";
