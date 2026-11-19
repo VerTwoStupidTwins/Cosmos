@@ -27,6 +27,11 @@ in
       boot.kernelParams = [
         "i915.force_probe=!7d67"
         "xe.force_probe=7d67"
+        # The crashes keep hitting filesystem data while plain memory tests pass, and the NVMe's PCIe 5.0
+        # link logs receiver errors, so a device writing where it shouldn't is a suspect. In strict mode
+        # the IOMMU unmaps DMA buffers at once, so a late or stray write becomes a logged DMAR fault
+        # instead of silently landing in reused memory. It costs a little I/O speed.
+        "iommu.strict=1"
       ];
 
       nixpkgs.hostPlatform = "x86_64-linux";
