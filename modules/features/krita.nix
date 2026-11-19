@@ -18,6 +18,20 @@
           home.packages = [ pkgs.krita ];
           xdg.dataFile."krita/pykrita/ai_diffusion".source = "${aiDiffusion}/ai_diffusion";
           xdg.dataFile."krita/pykrita/ai_diffusion.desktop".source = "${aiDiffusion}/ai_diffusion.desktop";
+
+          # ComfyUI's own web page, through the same gate on lugh (comfyui.nix, gatePort), in a Firefox
+          # window of its own.
+          xdg.desktopEntries.comfyui = {
+            name = "ComfyUI";
+            genericName = "Image generation on lugh";
+            comment = "Node-based image generation, running on lugh's B580";
+            exec = "firefox --new-window http://lugh.netbird.cloud:8189";
+            icon = "applications-graphics";
+            categories = [
+              "Graphics"
+              "Network"
+            ];
+          };
         }
       ];
     };
