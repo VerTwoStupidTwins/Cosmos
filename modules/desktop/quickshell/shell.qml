@@ -186,6 +186,9 @@ ShellRoot {
         screen: Quickshell.screens[0]
     }
 
+    // The keyboard backlight: Alt + the brightness keys, dark when idle or folded.
+    KbdLight {}
+
     // `qs -c bar ipc call nightlight toggle`.
     IpcHandler {
         target: "nightlight"

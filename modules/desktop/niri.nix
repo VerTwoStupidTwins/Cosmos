@@ -49,7 +49,9 @@
                     'XF86MonBrightnessUp allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set +10% && qs -c bar ipc call osd brightness"; }' \
                   --replace-fail \
                     'XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }' \
-                    'XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set 10%- && qs -c bar ipc call osd brightness"; }' \
+                    'XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set 10%- && qs -c bar ipc call osd brightness"; }
+                    Alt+XF86MonBrightnessUp allow-when-locked=true { spawn "qs" "-c" "bar" "ipc" "call" "kbdlight" "up"; }
+                    Alt+XF86MonBrightnessDown allow-when-locked=true { spawn "qs" "-c" "bar" "ipc" "call" "kbdlight" "down"; }' \
                   --replace-fail \
                     'Mod+Shift+E { quit; }' \
                     'Mod+Shift+E hotkey-overlay-title="Power Menu" { spawn "qs" "-c" "bar" "ipc" "call" "power" "toggle"; }' \

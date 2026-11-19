@@ -71,6 +71,8 @@
             hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"), { locked = true })
             hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl set 5%+ && qs -c bar ipc call osd brightness"), held)
             hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl set 5%- && qs -c bar ipc call osd brightness"), held)
+            hl.bind("ALT + XF86MonBrightnessUp", hl.dsp.exec_cmd("qs -c bar ipc call kbdlight up"), held)
+            hl.bind("ALT + XF86MonBrightnessDown", hl.dsp.exec_cmd("qs -c bar ipc call kbdlight down"), held)
           '';
         };
       }

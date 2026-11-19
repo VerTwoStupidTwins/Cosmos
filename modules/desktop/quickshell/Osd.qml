@@ -1,5 +1,5 @@
 // The on-screen display: a plate low in the middle of the screen that shows volume, the mic's mute
-// and brightness as they change, then fades. Volume and the mic are watched through PipeWire, so
+// brightness and the keyboard backlight as they change, then fades. Volume and the mic are watched through PipeWire, so
 // keys, the bar and pavucontrol all show it; brightness changes go through logind, which leaves no
 // trace to watch, so the brightness keys call `qs -c bar ipc call osd brightness` after setting it.
 import QtQuick
@@ -13,7 +13,7 @@ PanelWindow {
     id: osd
 
     readonly property int segments: 20
-    // What it shows: "vol", "mic" or "brt", and the level (0–1) for the gauge.
+    // What it shows: "vol", "mic", "brt" or "kbl", and the level (0–1) for the gauge.
     property string kind: "vol"
     property real level: 0
     property bool muted: false
@@ -97,6 +97,7 @@ PanelWindow {
     Connections {
         target: OsdBus
         function onBrightness() { readBrightness.running = true; }
+        function onKeyboardLight(level) { osd.show("kbl", level, false); }
     }
     Process {
         id: readBrightness
@@ -142,7 +143,7 @@ PanelWindow {
             spacing: 14
 
             Tag {
-                text: osd.kind === "brt" ? "BRT" : osd.kind === "mic" ? "MIC" : "VOL"
+                text: ({ brt: "BRT", kbl: "KBL", mic: "MIC" })[osd.kind] ?? "VOL"
                 border.color: body.tone
             }
 
