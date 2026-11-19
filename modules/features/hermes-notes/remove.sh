@@ -1,4 +1,5 @@
-# Deletes an inbox note the transcriber wrote, together with the drawing it was transcribed from.
+# Deletes an inbox note the transcriber or Hermes' notes-capture plugin wrote, together with the
+# drawing it was transcribed from or the voice recording it came from.
 # Used for notes the owner marked `review: delete` (by the nightly job's script) and notes Hermes has
 # filed into the vault, `review: filed` (by the transcriber). The only thing that deletes notes.
 #
@@ -22,7 +23,7 @@ field() {
 }
 
 if [[ -z $(field text-sha256) ]]; then
-  echo "notes-remove: $note wasn't written by the transcriber, so it was kept" >&2
+  echo "notes-remove: $note wasn't written by the transcriber or notes-capture, so it was kept" >&2
   exit 1
 fi
 
@@ -31,10 +32,16 @@ fi
 source=$(field source)
 source=${source#\"[[}
 source=${source%]]\"}
-if [[ $source == *.excalidraw && $source != *..* && $source != /* ]]; then
+# A voice note's source is its recording in Voice/, kept by Hermes' notes-capture plugin.
+if [[ $source == *..* || $source == /* ]]; then
+  echo "removed ${note#"$notes"/} (its source, $source, isn't a path in the vault, so nothing else was)"
+elif [[ $source == *.excalidraw ]]; then
   rm -f -- "$notes/$source.md" "$notes/$source.png"
   echo "removed ${note#"$notes"/} and its drawing $source"
+elif [[ $source =~ ^Voice/[^/]+\.(ogg|oga|opus|mp3|m4a|wav|aac|webm|flac)$ ]]; then
+  rm -f -- "$notes/$source"
+  echo "removed ${note#"$notes"/} and its recording $source"
 else
-  echo "removed ${note#"$notes"/} (its source, $source, isn't a drawing, so nothing else was)"
+  echo "removed ${note#"$notes"/} (its source, $source, isn't a drawing or recording, so nothing else was)"
 fi
 rm -f -- "$note"

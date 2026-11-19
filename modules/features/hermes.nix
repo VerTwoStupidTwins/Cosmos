@@ -15,6 +15,10 @@
       imageFastPlugin = pkgs.runCommand "image-fast" { } ''
         cp -r ${./hermes-image-fast} $out
       '';
+      # note_capture, which saves notes from chat (and voice notes' recordings) to the Notes inbox.
+      notesCapturePlugin = pkgs.runCommand "notes-capture" { } ''
+        cp -r ${./hermes-notes-capture} $out
+      '';
 
       localTask = model: timeout: {
         provider = "llamacpp";
@@ -157,7 +161,10 @@
         extraPackages = [ pkgs.ffmpeg-headless ];
 
         # The image tool can't choose its settings per request, so quick images get a tool of their own.
-        extraPlugins = [ imageFastPlugin ];
+        extraPlugins = [
+          imageFastPlugin
+          notesCapturePlugin
+        ];
 
         settings = {
           model = {
@@ -199,6 +206,9 @@
             keeping about themselves, their setup or how they like things done, or asks you to remember
             something, save it with memory_remember. Before answering anything that depends on their situation
             or history, check memory_recall. When they correct something you remembered, revise that memory.
+
+            When a message starts with "note:" or "take a note", spoken or typed, it is a note for the owner's
+            private Notes inbox: save it with note_capture, as the notes-ingest skill describes.
           '';
 
           auxiliary = {
@@ -262,6 +272,7 @@
           # Settings don't merge lists across files, so every enabled plugin is listed here.
           plugins.enabled = [
             "image-fast"
+            "notes-capture"
             "research-routing"
             "hermes-memory"
           ];

@@ -1,3 +1,4 @@
 result
 result-*
 *.tar.gz
+__pycache__/

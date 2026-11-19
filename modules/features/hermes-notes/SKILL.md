@@ -1,6 +1,6 @@
 ---
 name: notes-ingest
-description: The owner's private Notes vault at /var/lib/hermes/notes. Use it for the nightly notes-ingest job, which files the handwritten notes the owner accepted in Inbox/ into the vault (to-dos into Tasks.md, the rest into Notes/, linked to topic notes and tagged with feelings), and to answer from the owner's notes and to-dos.
+description: The owner's private Notes vault at /var/lib/hermes/notes. Use it to save notes the owner sends in chat (the Telegram Notes topic, or a message starting "note:" or "take a note") with note_capture, for the nightly notes-ingest job, which files the handwritten notes the owner accepted in Inbox/ into the vault (to-dos into Tasks.md, the rest into Notes/, linked to topic notes and tagged with feelings), and to answer from the owner's notes and to-dos.
 version: 1.0.0
 author: twins
 license: MIT
@@ -32,6 +32,7 @@ need the terminal here, and you never delete files: the transcriber service does
   Topics/         one hub note per topic, concept, project, person or interest: "<Name>.md"
   Tasks.md        every to-do, newest last
   Excalidraw/     the drawings themselves: never edit
+  Voice/          recordings of voice notes, kept until their note is filed: never edit
   .obsidian/      Obsidian's settings: never touch
 ```
 
@@ -98,7 +99,9 @@ For each accepted inbox note:
    To-dos from this note are in [[Tasks]].
    ```
 
-   Leave out the drawing embed and the transcriber's fields: the drawing is deleted afterwards.
+   Leave out the drawing or recording embed and the inbox note's other fields: the drawing or
+   recording is deleted afterwards. Use `voice` instead of `handwritten` in the tags for a voice
+   note, and `typed` for a typed one.
 
 4. **Topics.** Link the note to 1–4 topics: the projects, people, places, interests and ideas it is
    about. Reuse an existing topic whenever one fits; make a new one only for something likely to
@@ -131,6 +134,27 @@ Reply with one short line per note you filed, like
 `Filed "Weekend plans": 2 to-dos, topics Homelab and Family, feeling stressed.`, then a line with how
 many notes the script deleted, if any. When nothing was deleted or accepted, reply with exactly
 `[SILENT]`.
+
+## Capturing notes from chat
+
+Every message in the Telegram Notes topic is a note, voice or typed, and so is a message anywhere
+that starts with "note:" or "take a note". Save it with the `note_capture` tool, with `voice: true`
+for a voice message (its recording is kept beside the note), then reply only `Saved to inbox.`.
+Don't answer, research or act on what the note says: the owner reviews it, and the nightly job files
+it. If they ask something in the same message, save the note, then answer the question.
+
+Pass the note lightly cleaned up, in the owner's own words:
+- drop filler (um, uh, like, you know), false starts and repeated words;
+- fix punctuation and capitalisation, and break it into paragraphs where the topic changes;
+- turn each to-do the owner speaks or types ("I need to…", "remind me to…", "don't forget…",
+  "to-do:") into its own `- [ ] ` line, in their words, with any date they give;
+- leave out "note:" or "take a note" itself.
+Don't summarise, reorder, add or reword anything else, and keep anything you're unsure about as
+spoken.
+
+Inbox notes from chat look like the handwritten ones, with `source` set to the recording (or `voice`
+or `chat` without one) and `captured` instead of `transcribed`. Ingest them the same way, using the
+`captured` date.
 
 ## Answering from the notes
 
