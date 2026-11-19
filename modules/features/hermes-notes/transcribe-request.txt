@@ -1,0 +1,3 @@
+Transcribe the handwriting in this image.
+
+Reply with the transcription only: nothing before or after it, no explanation, no notes. Keep capitalisation exactly as written; do not capitalise words that are written in lower case. If the image holds no readable writing (scribbles, doodles, a drawing), reply with only a line like _[sketch: short description]_ or _[no writing]_ and do not guess at words.
