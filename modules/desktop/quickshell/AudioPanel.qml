@@ -32,7 +32,7 @@ PanelWindow {
     visible: Panels.open === "audio"
     anchors.bottom: true
     anchors.right: true
-    margins.bottom: 42
+    margins.bottom: Tablet.barHeight + 2
     margins.right: 8
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay

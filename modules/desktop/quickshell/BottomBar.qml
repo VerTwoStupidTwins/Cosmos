@@ -12,7 +12,7 @@ PanelWindow {
         left: true
         right: true
     }
-    implicitHeight: 40
+    implicitHeight: Tablet.barHeight
     color: "transparent"
 
     Island {
@@ -23,9 +23,11 @@ PanelWindow {
         anchors.bottomMargin: 6
         cutBottomLeft: 4
         cutTopRight: 14
+        scale: Tablet.barScale
+        transformOrigin: Item.BottomLeft
 
         MediaReadout {
-            Layout.maximumWidth: bar.width * 0.3
+            Layout.maximumWidth: bar.width * 0.3 / Tablet.barScale
         }
         Divider {
             visible: progress.visible
@@ -79,6 +81,8 @@ PanelWindow {
         cutBottomRight: 4
         cutTopLeft: 14
         stripRight: true
+        scale: Tablet.barScale
+        transformOrigin: Item.BottomRight
 
         // The OSD shows volume and brightness as they change, so here they're just numbers.
         Volume {

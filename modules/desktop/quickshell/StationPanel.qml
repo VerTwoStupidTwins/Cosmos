@@ -11,7 +11,7 @@ PanelWindow {
 
     visible: Station.open
     anchors.top: true
-    margins.top: 42
+    margins.top: Tablet.barHeight + 2
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "quickshell-station"

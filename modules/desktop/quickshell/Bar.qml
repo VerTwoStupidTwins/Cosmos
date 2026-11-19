@@ -14,8 +14,11 @@ PanelWindow {
         left: true
         right: true
     }
-    implicitHeight: 40
+    implicitHeight: Tablet.barHeight
     color: "transparent"
+
+    // A portrait screen: no room for the window title or the date.
+    readonly property bool narrow: width < 1200
 
     // Caffeine: holding an idle inhibitor keeps the screen awake.
     IdleInhibitor {
@@ -29,11 +32,16 @@ PanelWindow {
         y: 6
         cutTopLeft: 4
         cutBottomRight: 14
+        scale: Tablet.barScale
+        transformOrigin: Item.TopLeft
 
         Workspaces {}
-        Divider {}
+        Divider {
+            visible: !bar.narrow
+        }
         WindowTitle {
-            Layout.maximumWidth: bar.width * 0.28
+            visible: !bar.narrow
+            Layout.maximumWidth: bar.width * 0.28 / Tablet.barScale
         }
     }
 
@@ -43,8 +51,12 @@ PanelWindow {
         y: 6
         cutBottomLeft: 14
         cutBottomRight: 14
+        scale: Tablet.barScale
+        transformOrigin: Item.Top
 
-        Clock {}
+        Clock {
+            compact: bar.narrow
+        }
 
         // Clicking the clock opens the command station below it.
         MouseArea {
@@ -70,6 +82,8 @@ PanelWindow {
         cutTopRight: 4
         cutBottomLeft: 14
         stripRight: true
+        scale: Tablet.barScale
+        transformOrigin: Item.TopRight
 
         // Red while an app records from the mic, uses a camera or captures the screen.
         PrivacyReadout {}

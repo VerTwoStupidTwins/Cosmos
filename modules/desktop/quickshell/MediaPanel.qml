@@ -16,7 +16,7 @@ PanelWindow {
     visible: Media.open && player !== null
     anchors.bottom: true
     anchors.left: true
-    margins.bottom: 42
+    margins.bottom: Tablet.barHeight + 2
     margins.left: 8
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay

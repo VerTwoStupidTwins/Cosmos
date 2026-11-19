@@ -186,6 +186,11 @@ ShellRoot {
         screen: Quickshell.screens[0]
     }
 
+    // Touch strips on the built-in screen's edges while folded into a tablet.
+    EdgeSwipes {
+        screen: Quickshell.screens.find(s => s.name === Tablet.output) ?? Quickshell.screens[0]
+    }
+
     // The keyboard backlight: Alt + the brightness keys, dark when idle or folded.
     KbdLight {}
 

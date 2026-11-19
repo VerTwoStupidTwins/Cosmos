@@ -20,7 +20,7 @@ PanelWindow {
     }
     anchors.top: true
     anchors.right: true
-    margins.top: 44
+    margins.top: Tablet.barHeight + 4
     margins.right: 8
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay

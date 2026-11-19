@@ -4,6 +4,7 @@
 //   folding back to a laptop puts the screen upright again;
 // - wvkbd runs as the input method, so its keyboard comes up whenever a text field has focus (and
 //   KBD on the bar shows or hides it by hand).
+// - the bars' plates grow to finger size (barScale), and EdgeSwipes puts touch strips on the edges.
 // libinput turns the keyboard and touchpad off by itself in tablet mode.
 pragma Singleton
 
@@ -17,6 +18,9 @@ Singleton {
     readonly property bool available: Config.convertible
     property bool active: false
     property bool rotationLocked: false
+    // The bars grow for fingers while folded; panels that hang off a bar sit below barHeight.
+    readonly property real barScale: active ? 1.3 : 1
+    readonly property int barHeight: Math.round(40 * barScale)
     // The built-in screen, the one with the accelerometer.
     readonly property string output: "eDP-1"
     readonly property string device: "/dev/input/tablet-mode"
