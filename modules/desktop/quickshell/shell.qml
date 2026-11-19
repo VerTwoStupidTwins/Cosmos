@@ -119,12 +119,16 @@ ShellRoot {
         screen: Quickshell.screens[0]
     }
 
-    // `qs -c bar ipc call pen menu` brings the pen menu up (or down) by hand.
+    // `qs -c bar ipc call pen menu` brings the pen menu up (or down) by hand; `note` starts a new
+    // drawing in the Notes vault, as the menu's NOTE does.
     IpcHandler {
         target: "pen"
 
         function menu(): void {
             Pen.toggleMenu();
+        }
+        function note(): void {
+            Pen.note();
         }
     }
 

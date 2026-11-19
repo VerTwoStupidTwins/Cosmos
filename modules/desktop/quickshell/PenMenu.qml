@@ -1,5 +1,5 @@
 // The pen menu: a plate on the right edge that comes up when the stylus leaves its garage (Pen.qml),
-// with big rows for the pen: a fresh Rnote page, Krita, a region to mark up, or the whole screen to
+// with big rows for the pen: a new Excalidraw drawing in the Notes vault, a fresh Rnote page, Krita, a region to mark up, or the whole screen to
 // draw on. It goes away after a tap, after eight seconds untouched, or when the pen goes back.
 // The PEN readout on the bottom bar, or `qs -c bar ipc call pen menu`, brings it back.
 import QtQuick
@@ -53,8 +53,14 @@ PanelWindow {
         Action {
             glyph: ""
             label: "NOTE"
-            hint: "A fresh page in Rnote"
+            hint: "A new drawing in Notes"
             onPressed: Pen.note()
+        }
+        Action {
+            glyph: "\u{f03eb}"
+            label: "SKETCH"
+            hint: "A fresh page in Rnote"
+            onPressed: Pen.sketch()
         }
         Action {
             glyph: ""

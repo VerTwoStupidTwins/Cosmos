@@ -17,6 +17,10 @@ Singleton {
     // 0–100, or -1 while the pen isn't reporting.
     property int battery: -1
     readonly property string device: "/dev/input/pen-garage"
+    // NOTE draws in this Obsidian vault, in the Excalidraw plugin's folder; Obsidian knows the
+    // vault by the folder's name.
+    readonly property string vault: Quickshell.env("HOME") + "/Documents/Notes"
+    readonly property string drawings: "Excalidraw"
     // Screenshots and mark-ups land with niri's own screenshots.
     readonly property string pictures: Quickshell.env("HOME") + "/Pictures/Screenshots"
 
@@ -28,7 +32,41 @@ Singleton {
         menu = false;
         Quickshell.execDetached([Config.systemdRun, "--user", "--scope", "--collect", "--quiet", "--slice=app.slice", "--"].concat(command));
     }
+    // A blank drawing, named and laid out the way the Excalidraw plugin makes them (uncompressed;
+    // the plugin compresses it on its first save), then opened in Obsidian, which shows it in the
+    // Excalidraw view. Falls back to Rnote when the vault isn't there.
     function note() {
+        menu = false;
+        const name = "Drawing " + Qt.formatDateTime(new Date(), "yyyy-MM-dd HH.mm.ss") + ".excalidraw.md";
+        const path = drawings + "/" + name;
+        const uri = "obsidian://open?vault=" + encodeURIComponent(vault.split("/").pop())
+            + "&file=" + encodeURIComponent(path);
+        Quickshell.execDetached({
+            command: [Config.bash, "-c",
+                'if [ ! -d "$VAULT/.obsidian" ]; then exec "$RUN" --user --scope --collect --quiet --slice=app.slice -- "$RNOTE"; fi\n'
+                + 'mkdir -p "$(dirname "$VAULT/$FILE")" && [ ! -e "$VAULT/$FILE" ] && printf "%s" "$CONTENT" > "$VAULT/$FILE" || exit 1\n'
+                // Gives Obsidian's vault watcher a moment to see the new file.
+                + 'sleep 0.5\n'
+                + 'exec "$RUN" --user --scope --collect --quiet --slice=app.slice -- "$XDGOPEN" "$URI"'],
+            environment: {
+                VAULT: root.vault, FILE: path, URI: uri, CONTENT: root.blankDrawing(),
+                RUN: Config.systemdRun, XDGOPEN: Config.xdgOpen, RNOTE: Config.rnote
+            }
+        });
+    }
+    function blankDrawing() {
+        const scene = {
+            type: "excalidraw",
+            version: 2,
+            source: "https://github.com/zsviczian/obsidian-excalidraw-plugin",
+            elements: [],
+            appState: { gridSize: null, viewBackgroundColor: "#ffffff" }
+        };
+        return ["---", "", "excalidraw-plugin: parsed", "tags: [excalidraw]", "", "---",
+            "==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠==", "", "",
+            "## Drawing", "```json", JSON.stringify(scene), "```", "%%", ""].join("\n");
+    }
+    function sketch() {
         launch([Config.rnote]);
     }
     function paint() {
