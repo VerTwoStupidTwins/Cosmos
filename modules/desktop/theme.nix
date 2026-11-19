@@ -104,6 +104,18 @@ in
                 pkill = "${pkgs.procps}/bin/pkill";
                 c = name: "{{base16.${name}.default.hex}}";
                 bare = name: "{{base16.${name}.default.hex_stripped}}";
+                # One of Stylix's own mustache templates, rewritten for matugen so the two stay in
+                # step: #{{base0X-hex}} and rgba({{base0X-dec-r}}, …, a) become matugen's names.
+                fromStylix =
+                  name: template:
+                  pkgs.runCommand "${name}.template" { } ''
+                    sed -E \
+                      -e 's/#\{\{(base0[0-9A-F])-hex\}\}/{{base16.\L\1\E.default.hex}}/g' \
+                      -e 's/rgba\(\{\{(base0[0-9A-F])-dec-r\}\}, \{\{base0[0-9A-F]-dec-g\}\}, \{\{base0[0-9A-F]-dec-b\}\}, ([0-9.]+)\)/alpha({{base16.\L\1\E.default.hex}}, \2)/g' \
+                      ${template} > "$out"
+                    # Fail if Stylix's template grows a placeholder this doesn't convert.
+                    if grep -E -- '-hex\}\}|-dec-' "$out"; then exit 1; fi
+                  '';
                 # The base16 colours, plus `accent`, which `wallpaper` picks from them (with_accent).
                 bases =
                   map (n: "base0${n}") [
@@ -176,6 +188,98 @@ in
                     hook = "${pkill} -USR1 -x '\\.?kitty(-wrapped)?' || true";
                   };
 
+                  # A CSS snippet for every Obsidian vault on this machine. Obsidian watches its
+                  # snippets folder and restyles open windows at once; the hook copies it in (a
+                  # symlink's target changing goes unnoticed) and switches it on the first time.
+                  "obsidian.css" = {
+                    text = ''
+                      /* Written by `wallpaper` (theme.nix); edits are overwritten. */
+                      .theme-dark {
+                        --color-base-00: ${c "base00"};
+                        --color-base-05: ${c "base00"};
+                        --color-base-10: ${c "base01"};
+                        --color-base-20: ${c "base01"};
+                        --color-base-25: ${c "base02"};
+                        --color-base-30: ${c "base02"};
+                        --color-base-35: ${c "base03"};
+                        --color-base-40: ${c "base03"};
+                        --color-base-50: ${c "base04"};
+                        --color-base-60: ${c "base04"};
+                        --color-base-70: ${c "base05"};
+                        --color-base-100: ${c "base07"};
+                        --color-red: ${c "base08"};
+                        --color-orange: ${c "base09"};
+                        --color-yellow: ${c "base0a"};
+                        --color-green: ${c "base0b"};
+                        --color-cyan: ${c "base0c"};
+                        --color-blue: ${c "base0d"};
+                        --color-purple: ${c "base0e"};
+                        --color-pink: ${c "base0f"};
+                        --color-accent: ${c "accent"};
+                        --color-accent-1: ${c "accent"};
+                        --color-accent-2: ${c "accent"};
+                        --interactive-accent: ${c "accent"};
+                        --interactive-accent-hover: ${c "accent"};
+                        --text-accent: ${c "accent"};
+                        --text-accent-hover: ${c "base07"};
+                        --text-on-accent: ${c "base00"};
+                        --text-selection: color-mix(in srgb, ${c "accent"} 35%, transparent);
+                        --font-interface-theme: "${config.stylix.fonts.sansSerif.name}";
+                        --font-text-theme: "${config.stylix.fonts.sansSerif.name}";
+                        --font-monospace-theme: "${config.stylix.fonts.monospace.name}";
+                      }
+                    '';
+                    hook = "${obsidianSnippet} ${stateDir}/obsidian.css";
+                  };
+
+                  # A KDE colour scheme for Krita (Settings > Themes > Cosmos), read when Krita
+                  # starts or the theme is picked again.
+                  "krita.colors" = {
+                    text =
+                      let
+                        rgb = n: "{{base16.${n}.default.red}},{{base16.${n}.default.green}},{{base16.${n}.default.blue}}";
+                        group = bg: alt: fg: ''
+                          BackgroundNormal=${rgb bg}
+                          BackgroundAlternate=${rgb alt}
+                          ForegroundNormal=${rgb fg}
+                          ForegroundInactive=${rgb "base04"}
+                          ForegroundActive=${rgb "accent"}
+                          ForegroundLink=${rgb "base0d"}
+                          ForegroundVisited=${rgb "base0e"}
+                          ForegroundNegative=${rgb "base08"}
+                          ForegroundNeutral=${rgb "base0a"}
+                          ForegroundPositive=${rgb "base0b"}
+                          DecorationFocus=${rgb "accent"}
+                          DecorationHover=${rgb "accent"}
+                        '';
+                      in
+                      ''
+                        [General]
+                        ColorScheme=Cosmos
+                        Name=Cosmos
+
+                        [Colors:Window]
+                        ${group "base01" "base00" "base05"}
+                        [Colors:View]
+                        ${group "base00" "base01" "base05"}
+                        [Colors:Button]
+                        ${group "base02" "base01" "base05"}
+                        [Colors:Selection]
+                        ${group "accent" "accent" "base00"}
+                        [Colors:Tooltip]
+                        ${group "base01" "base00" "base05"}
+                        [Colors:Header]
+                        ${group "base01" "base00" "base05"}
+                        [Colors:Complementary]
+                        ${group "base00" "base01" "base05"}
+                        [WM]
+                        activeBackground=${rgb "base01"}
+                        activeForeground=${rgb "base05"}
+                        inactiveBackground=${rgb "base00"}
+                        inactiveForeground=${rgb "base04"}
+                      '';
+                  };
+
                   # hyprlock reads this each time it starts.
                   "hyprlock.conf" = {
                     text = lib.concatMapStrings (b: "\$${b} = rgb(${bare b})\n") bases;
@@ -199,20 +303,34 @@ in
                     '';
                   };
 
-                  # Stylix's own GTK template, rewritten for matugen so the two stay in step. GTK
-                  # reads it when an app starts: apps opened after a change get the new colours,
-                  # open ones keep theirs (GTK under niri has no way to reload it live).
-                  "gtk.css" = {
-                    file = pkgs.runCommand "gtk.css.template" { } ''
-                      sed -E \
-                        -e 's/#\{\{(base0[0-9A-F])-hex\}\}/{{base16.\L\1\E.default.hex}}/g' \
-                        -e 's/rgba\(\{\{(base0[0-9A-F])-dec-r\}\}, \{\{base0[0-9A-F]-dec-g\}\}, \{\{base0[0-9A-F]-dec-b\}\}, ([0-9.]+)\)/alpha({{base16.\L\1\E.default.hex}}, \2)/g' \
-                        ${inputs.stylix}/modules/gtk/gtk.css.mustache > "$out"
-                      # Fail if Stylix's template grows a placeholder this doesn't convert.
-                      if grep -E -- '-hex\}\}|-dec-' "$out"; then exit 1; fi
-                    '';
-                  };
+                  # GTK reads this when an app starts: apps opened after a change get the new
+                  # colours, open ones keep theirs (GTK under niri has no way to reload it live).
+                  "gtk.css".file = fromStylix "gtk.css" "${inputs.stylix}/modules/gtk/gtk.css.mustache";
+
+                  # Qt's style: the Kvantum theme "Cosmos", Stylix's Base16Kvantum in the
+                  # wallpaper's colours. Like GTK, Qt apps take it when they start.
+                  "kvantum.kvconfig".file = fromStylix "kvconfig" "${inputs.stylix}/modules/qt/kvconfig.mustache";
+                  "kvantum.svg".file = fromStylix "kvantum.svg" "${inputs.stylix}/modules/qt/kvantum.svg.mustache";
                 };
+
+                # Copies the Obsidian snippet into every vault Obsidian knows and turns it on in
+                # vaults that haven't got it yet (Obsidian rereads appearance.json when it changes).
+                obsidianSnippet = pkgs.writeShellScript "obsidian-snippet" ''
+                  css=$1
+                  vaults=${config.xdg.configHome}/obsidian/obsidian.json
+                  [ -r "$vaults" ] || exit 0
+                  ${pkgs.jq}/bin/jq -r '.vaults[].path' "$vaults" | while IFS= read -r vault; do
+                    [ -d "$vault/.obsidian" ] || continue
+                    mkdir -p "$vault/.obsidian/snippets"
+                    cp "$css" "$vault/.obsidian/snippets/cosmos.css"
+                    appearance=$vault/.obsidian/appearance.json
+                    [ -s "$appearance" ] || echo '{}' > "$appearance"
+                    if ! ${pkgs.jq}/bin/jq -e '(.enabledCssSnippets // []) | index("cosmos")' "$appearance" > /dev/null; then
+                      ${pkgs.jq}/bin/jq '.enabledCssSnippets = ((.enabledCssSnippets // []) + ["cosmos"])' "$appearance" > "$appearance.new" \
+                        && mv "$appearance.new" "$appearance"
+                    fi
+                  done
+                '';
 
                 matugenConfig = (pkgs.formats.toml { }).generate "matugen.toml" {
                   config = { };
@@ -395,9 +513,19 @@ in
                   programs.hyprlock.settings.source = "${stateDir}/hyprlock.conf";
 
                   # Stylix still picks adw-gtk3 and the fonts; the colours come from the wallpaper.
-                  xdg.configFile = lib.genAttrs [ "gtk-3.0/gtk.css" "gtk-4.0/gtk.css" ] (_: {
-                    source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${stateDir}/gtk.css");
-                  });
+                  xdg.configFile =
+                    lib.genAttrs [ "gtk-3.0/gtk.css" "gtk-4.0/gtk.css" ] (_: {
+                      source = lib.mkForce (config.lib.file.mkOutOfStoreSymlink "${stateDir}/gtk.css");
+                    })
+                    // {
+                      "Kvantum/Cosmos/Cosmos.kvconfig".source =
+                        config.lib.file.mkOutOfStoreSymlink "${stateDir}/kvantum.kvconfig";
+                      "Kvantum/Cosmos/Cosmos.svg".source = config.lib.file.mkOutOfStoreSymlink "${stateDir}/kvantum.svg";
+                    };
+                  xdg.dataFile."krita/color-schemes/Cosmos.colors".source =
+                    config.lib.file.mkOutOfStoreSymlink "${stateDir}/krita.colors";
+                  # Stylix installs and picks Base16Kvantum, frozen at the default wallpaper's colours.
+                  qt.kvantum.settings.General.theme = lib.mkForce "Cosmos";
                 };
               }
             )
