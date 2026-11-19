@@ -7,7 +7,7 @@ note. On this single-owner system the newest recording is the voice message bein
 
 The inbox note has the same front matter as the transcriber's handwritten ones, so the owner reviews
 it the same way (`review: accept` or `delete`), and the nightly notes-ingest job files or deletes it.
-notes-remove deletes the recording with the note.
+`notes remove` deletes the recording with the note.
 """
 
 import hashlib
@@ -130,7 +130,7 @@ def _capture(args):
             f"tags: [{'voice' if voice else 'typed'}]",
             f"captured: {now:%Y-%m-%d %H:%M}",
             "review: pending",
-            # notes-remove deletes only inbox notes carrying this, like the transcriber's.
+            # `notes remove` deletes only inbox notes carrying this, like the transcriber's.
             f"text-sha256: {hashlib.sha256(body.encode()).hexdigest()}",
             "---",
             "",

@@ -18,36 +18,20 @@
     let
       notes = "/var/lib/hermes/notes";
 
-      # The one thing that deletes notes: an inbox note with its drawing.
-      remove = pkgs.writeShellApplication {
-        name = "notes-remove";
-        runtimeInputs = with pkgs; [
-          coreutils
-          gawk
-        ];
-        text = builtins.readFile ./hermes-notes/remove.sh;
+      # `notes watch` transcribes, `notes nightly` runs before the nightly job, and `notes remove`
+      # is the only thing that deletes notes. Its tests run with the build.
+      notesTool = pkgs.rustPlatform.buildRustPackage {
+        pname = "notes";
+        version = "0.1.0";
+        src = ./hermes-notes/notes;
+        cargoLock.lockFile = ./hermes-notes/notes/Cargo.lock;
+        meta.mainProgram = "notes";
       };
 
-      transcriber = pkgs.writeShellApplication {
-        name = "notes-transcriber";
-        runtimeInputs = with pkgs; [
-          coreutils
-          curl
-          findutils
-          gawk
-          gnused
-          inotify-tools
-          jq
-          remove
-        ];
-        text = builtins.readFile ./hermes-notes/transcribe.sh;
-      };
-
-      # Run by Hermes before the nightly job's agent, so it has to live in Hermes' scripts folder.
-      nightly = pkgs.replaceVars ./hermes-notes/notes-nightly.sh {
-        awk = lib.getExe pkgs.gawk;
-        remove = lib.getExe remove;
-      };
+      # Hermes runs only shell or Python scripts from its scripts folder, so this hands over.
+      nightly = pkgs.writeText "notes-nightly.sh" ''
+        exec ${lib.getExe notesTool} nightly
+      '';
     in
     {
       monitor.units = [ "notes-transcriber" ];
@@ -81,7 +65,7 @@
         serviceConfig = {
           User = "hermes";
           Group = "hermes";
-          ExecStart = "${transcriber}/bin/notes-transcriber";
+          ExecStart = "${lib.getExe notesTool} watch";
           # Which PNGs it has transcribed, kept out of the vault.
           StateDirectory = "notes-transcriber";
           Restart = "always";
