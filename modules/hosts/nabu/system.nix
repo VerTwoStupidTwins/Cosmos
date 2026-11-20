@@ -51,6 +51,9 @@ in
     gpu.amd.powerLimits."0000:1f:00.0" = 231; # RX 7900 XT, its minimum (stock 257 W)
     gpu.intel.powerLimits."0000:1b:00.0" = 60; # Arc Pro B50 (stock 70 W)
 
+    # The board's fan headers and temperatures, from its Nuvoton NCT6796D, which nothing loads on its own.
+    boot.kernelModules = [ "nct6775" ];
+
     nixpkgs.hostPlatform = "x86_64-linux";
     hardware.facter.reportPath = ./facter.json;
     system.stateVersion = "26.11";
