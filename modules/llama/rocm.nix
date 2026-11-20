@@ -25,6 +25,7 @@ in
             { webui = null; };
 
         devicePrefix = "ROCm";
+        units = lib.optional (config.gpu.amd.powerLimits != { }) "gpu-power-limits-amd.service";
       };
     };
 }

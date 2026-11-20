@@ -73,6 +73,12 @@ in
         // cfg.env;
 
         devicePrefix = "CUDA";
+
+        # The driver loads late in boot, and the cards appear once nvidia-persistenced holds them.
+        units = [
+          "nvidia-persistenced.service"
+        ]
+        ++ lib.optional (config.gpu.nvidia.powerLimits != { }) "gpu-power-limits-nvidia.service";
       };
     };
 }

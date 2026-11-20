@@ -94,6 +94,15 @@
                     shows them.
                   '';
                 };
+
+                units = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                  description = ''
+                    systemd units its cards need before services use them: the driver's daemon, and the power limits,
+                    so nothing runs on uncapped cards. Services that run its programs order themselves after these.
+                  '';
+                };
               };
             }
           );

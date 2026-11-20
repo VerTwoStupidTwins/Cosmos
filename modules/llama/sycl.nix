@@ -49,6 +49,7 @@ in
         };
 
         devicePrefix = "SYCL";
+        units = lib.optional (config.gpu.intel.powerLimits != { }) "gpu-power-limits-intel.service";
       };
     };
 }

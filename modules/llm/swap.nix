@@ -87,6 +87,19 @@ in
       };
 
       config = lib.mkIf (cfg.models != { }) {
+        # Waits for its models' cards: started before the NVIDIA driver had loaded, llama-server finds no device
+        # and the preload fails.
+        systemd.services.llama-swap =
+          let
+            units = lib.unique (
+              lib.concatMap (model: config.llama.backends.${model.backend}.units) (lib.attrValues cfg.models)
+            );
+          in
+          {
+            after = units;
+            wants = units;
+          };
+
         services.llama-swap = {
           enable = true;
           listenAddress = "127.0.0.1";
