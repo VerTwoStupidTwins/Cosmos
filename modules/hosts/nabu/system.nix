@@ -10,7 +10,13 @@ in
     imports = [
       nixos.systemd-boot
       nixos.server
+      nixos.gpu-nvidia
+      nixos.gpu-amd
+      nixos.gpu-intel
     ];
+
+    gpu.nvidia.cudaCapabilities = [ "6.0" ]; # Tesla P100
+    gpu.amd.targets = [ "gfx1100" ]; # RX 7900 XT
 
     nixpkgs.hostPlatform = "x86_64-linux";
     hardware.facter.reportPath = ./facter.json;
