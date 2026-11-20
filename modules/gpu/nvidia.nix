@@ -23,6 +23,9 @@
       legacy = lib.any (cap: lib.versionOlder cap "7.5") cfg.cudaCapabilities;
     in
     {
+      # Loaded once however many modules import it: the host, and the llama.cpp backend that needs this stack.
+      key = "cosmos#gpu-nvidia";
+
       options.gpu.nvidia = {
         cudaCapabilities = lib.mkOption {
           type = lib.types.nonEmptyListOf lib.types.str;

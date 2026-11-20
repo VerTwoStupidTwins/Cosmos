@@ -23,6 +23,9 @@
       };
     in
     {
+      # Loaded once however many modules import it: the host, and the llama.cpp backend that needs this stack.
+      key = "cosmos#gpu-amd";
+
       options.gpu.amd = {
         targets = lib.mkOption {
           type = lib.types.nonEmptyListOf lib.types.str;

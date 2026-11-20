@@ -13,6 +13,10 @@ in
       nixos.gpu-nvidia
       nixos.gpu-amd
       nixos.gpu-intel
+      nixos.llama-cuda
+      nixos.llama-rocm
+      nixos.llama-sycl
+      nixos.llama-vulkan
     ];
 
     gpu.nvidia.cudaCapabilities = [ "6.0" ]; # Tesla P100

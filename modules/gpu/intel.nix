@@ -20,6 +20,9 @@
       };
     in
     {
+      # Loaded once however many modules import it: the host, and the llama.cpp backend that needs this stack.
+      key = "cosmos#gpu-intel";
+
       options.gpu.intel = {
         computeRuntime = lib.mkOption {
           type = lib.types.package;
