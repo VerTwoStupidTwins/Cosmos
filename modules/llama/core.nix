@@ -3,7 +3,8 @@
 # What every llama.cpp backend module shares. Each backend (nixos.llama-cuda, -rocm, -sycl, -vulkan) builds
 # llama.cpp for its compute stack and registers it under llama.backends.<name>, with the environment its programs
 # need. This module puts a wrapper for each backend's tools on the PATH, such as llama-server-cuda and
-# llama-bench-vulkan, and services that run llama.cpp take the package and environment from llama.backends.
+# llama-bench-vulkan, and services that run llama.cpp take the package and environment from llama.backends. It
+# also sets up the models directory and the Hugging Face CLI that fills it.
 { inputs, ... }:
 {
   flake.modules.nixos.llama =
@@ -59,6 +60,15 @@
           description = "The llama.cpp flake's package scope on this host's nixpkgs, which the backends build from.";
         };
 
+        modelsDir = lib.mkOption {
+          type = lib.types.path;
+          default = "/models";
+          description = ''
+            Where model weights live. Members of the `models` group can write there, and new files and directories
+            inherit the group.
+          '';
+        };
+
         backends = lib.mkOption {
           default = { };
           description = "The llama.cpp builds on this host, one per compute backend.";
@@ -98,9 +108,18 @@
           llamaVersion = cfg.version;
         };
 
-        environment.systemPackages = lib.concatLists (
+        environment.systemPackages = [
+          # hf, to fetch models from Hugging Face, with hf-xet for repositories on its Xet storage.
+          pkgs.python3Packages.huggingface-hub
+        ]
+        ++ lib.concatLists (
           lib.mapAttrsToList (name: backend: map (wrapper name backend) tools) cfg.backends
         );
+
+        users.groups.models = { };
+        users.users.twins.extraGroups = [ "models" ];
+        # Readable by everyone, as model files are; the setgid bit keeps new files in the group.
+        systemd.tmpfiles.rules = [ "d ${cfg.modelsDir} 2775 root models -" ];
       };
     };
 }
