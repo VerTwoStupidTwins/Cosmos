@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, inputs, ... }:
 let
   nixos = config.flake.modules.nixos;
 in
@@ -21,6 +21,25 @@ in
 
     gpu.nvidia.cudaCapabilities = [ "6.0" ]; # Tesla P100
     gpu.amd.targets = [ "gfx1100" ]; # RX 7900 XT
+
+    # CUDA from Kmic-68's fork, tuned for exactly this pair of P100s: on Qwen3.8-27B it reports about twice
+    # upstream's decode and prefill speed. Its Pascal kernels switch off if a second architecture is compiled in, which sm_60 alone
+    # (above) avoids. NCCL is slower than its own exchange over PCIe.
+    llama.cuda = {
+      src = inputs.llama-cpp-p100;
+      version = "p100-${inputs.llama-cpp-p100.shortRev}";
+      cmakeFlags = [
+        "-DGGML_CUDA_NCCL=OFF"
+        # Flash attention for every K/V cache type, including the q4_0 cache that long contexts need.
+        "-DGGML_CUDA_FA_QUANTS=all"
+      ];
+      env = {
+        # Copies between the two cards go direct rather than through host memory.
+        GGML_CUDA_P2P = "1";
+        # CUDA graphs for the single-token MTP draft steps only; full graphs run out of memory at long contexts.
+        GGML_CUDA_GRAPHS_PRE_VOLTA = "3";
+      };
+    };
 
     # The 1200 W supply also feeds a 140 W Xeon. Stock, the cards alone would draw about 830 W, with the 7900 XT
     # spiking above that; these keep them near 690 W. Inference is mostly limited by memory bandwidth, so the

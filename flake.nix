@@ -33,6 +33,11 @@
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-parts.follows = "flake-parts";
     };
+    # Kmic-68's llama.cpp, tuned for two Tesla P100s (sm_60): nabu's CUDA backend builds from it.
+    llama-cpp-p100 = {
+      url = "github:Kmic-68/llama.cpp/p100-optimizations";
+      flake = false;
+    };
     stylix = {
       url = "github:nix-community/stylix";
       inputs.nixpkgs.follows = "nixpkgs";

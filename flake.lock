@@ -284,6 +284,23 @@
         "type": "github"
       }
     },
+    "llama-cpp-p100": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794030739,
+        "narHash": "sha256-Kg3/ASjPaIR2Sr0dfoKO6EYyRGgCgei70g8+YP94+5w=",
+        "owner": "Kmic-68",
+        "repo": "llama.cpp",
+        "rev": "bbad6fcfbf224d4445a89150155c7502d03d3ac1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Kmic-68",
+        "ref": "p100-optimizations",
+        "repo": "llama.cpp",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1792502884,
@@ -400,6 +417,7 @@
         "home-manager": "home-manager",
         "import-tree": "import-tree",
         "llama-cpp": "llama-cpp",
+        "llama-cpp-p100": "llama-cpp-p100",
         "nixpkgs": "nixpkgs_2",
         "sops-nix": "sops-nix",
         "stylix": "stylix"
