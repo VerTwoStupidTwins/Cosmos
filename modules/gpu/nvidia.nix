@@ -60,6 +60,18 @@
           defaultText = lib.literalMD "CUDA 12.9 for cards older than Turing, nixpkgs' default CUDA otherwise";
           description = "The CUDA package set that CUDA software on this host is built with.";
         };
+
+        powerLimits = lib.mkOption {
+          type = lib.types.attrsOf lib.types.ints.positive;
+          default = { };
+          example = {
+            "0000:20:00.0" = 200;
+          };
+          description = ''
+            Power limits in watts, by PCI address (`lspci -D`), which stays put across boots while card numbers
+            don't. `nvidia-smi -q -d POWER` shows the range each card accepts.
+          '';
+        };
       };
 
       config = {
@@ -81,9 +93,33 @@
           pkgs.nvtopPackages.full
           pkgs.pciutils
           pkgs.vulkan-tools
-          # deviceQuery and bandwidthTest, to check that CUDA reaches each card.
-          cfg.cudaPackages.cuda_demo_suite
+          # deviceQuery and bandwidthTest, to check that CUDA reaches each card. The package keeps them in
+          # demo_suite/ rather than bin/.
+          (pkgs.runCommand "cuda-demo-suite" { } ''
+            mkdir -p $out/bin
+            for tool in deviceQuery bandwidthTest busGrind vectorAdd; do
+              ln -s ${cfg.cudaPackages.cuda_demo_suite}/demo_suite/$tool $out/bin/$tool
+            done
+          '')
         ];
+
+        # The driver forgets limits when it unloads, so they're set at each boot, once nvidia-persistenced holds the
+        # cards. The closed driver has no hwmon interface, so this goes through nvidia-smi.
+        systemd.services.gpu-power-limits-nvidia = lib.mkIf (cfg.powerLimits != { }) {
+          description = "Set the NVIDIA cards' power limits";
+          wantedBy = [ "multi-user.target" ];
+          after = [ "nvidia-persistenced.service" ];
+          wants = [ "nvidia-persistenced.service" ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = lib.concatStrings (
+            lib.mapAttrsToList (address: watts: ''
+              ${lib.getExe' cfg.driver.bin "nvidia-smi"} -i ${address} -pl ${toString watts}
+            '') cfg.powerLimits
+          );
+        };
       };
     };
 }
