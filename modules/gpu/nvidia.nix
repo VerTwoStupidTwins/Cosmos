@@ -81,8 +81,8 @@
           description = ''
             A fan on a motherboard header that cools the cards, such as a passive card's shroud fan. The board can't
             read the cards' temperatures, so a service sets its speed from the hottest card's. It holds that card at
-            targetTemp with the slowest speed that manages it: above, the fan speeds up in proportion to how far over
-            it is; well below, it slows gradually down to minRpm; at maxTemp it goes straight to maxRpm. It reads the
+            targetTemp with the slowest speed that manages it, steering by where the temperature is heading so the fan
+            settles rather than swings; well below target, it slows gradually down to minRpm; at maxTemp it goes straight to maxRpm. It reads the
             fan's actual speed back and adjusts the header's duty until they match, so the speeds hold for any fan.
           '';
           type = lib.types.nullOr (
@@ -171,10 +171,12 @@
           );
         };
 
-        # Every two seconds. Above targetTemp the target speed rises 50 rpm for each degree over; within 3 °C below it,
-        # it holds; further below, it falls 50 rpm a step (1,500 a minute), so the fan settles at the speed the load
-        # needs and doesn't hunt. The duty then moves towards whatever gives that speed. When the service stops, the
-        # board's own curve takes over.
+        # Every two seconds. The cards answer a change of fan speed only after 20-30 s, so steering by the temperature
+        # alone overshoots and the fan swings. It steers instead by where the temperature is heading: the current
+        # reading plus its change over the last 20 s. Above targetTemp that forecast raises the target speed 20 rpm a
+        # degree; within 2 °C below, it holds; further below, it lowers it 15 rpm a degree, at most 50 a step. Above
+        # target but already cooling, it stops adding speed, and the fan settles at the speed the load needs. The duty
+        # then moves towards whatever gives that speed. When the service stops, the board's own curve takes over.
         systemd.services.gpu-board-fan = lib.mkIf (cfg.boardFan != null) {
           description = "Drive the cards' board fan from their temperatures";
           wantedBy = [ "multi-user.target" ];
@@ -195,14 +197,24 @@
             echo 1 > "''${pwm}_enable"
             target=${minRpm}
             stalled=0
+            history=()
             while true; do
               temp=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | sort -n | tail -1) || temp=
               if ! [[ $temp =~ ^[0-9]+$ ]] || (( temp >= ${maxTemp} )); then
                 target=${maxRpm}
-              elif (( temp > ${targetTemp} )); then
-                target=$(( target + (temp - ${targetTemp}) * 50 ))
-              elif (( temp < ${targetTemp} - 3 )); then
-                target=$(( target - 50 ))
+              else
+                # The last 11 readings: the oldest is 20 s ago.
+                history+=("$temp")
+                (( ''${#history[@]} > 11 )) && history=("''${history[@]:1}")
+                forecast=$(( 2 * temp - history[0] ))
+                error=$(( forecast - ${targetTemp} ))
+                if (( error > 0 )); then
+                  target=$(( target + error * 20 ))
+                elif (( error < -2 )); then
+                  change=$(( (error + 2) * 15 ))
+                  (( change < -50 )) && change=-50
+                  target=$(( target + change ))
+                fi
               fi
               (( target < ${minRpm} )) && target=${minRpm}
               (( target > ${maxRpm} )) && target=${maxRpm}
