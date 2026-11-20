@@ -3,6 +3,7 @@ keys:
   - &lugh  age1az7jws43wyt0nq8v2l0gkchkw078fmuyqprrjt6xpa5d2ppmrvpqy6dmng
   - &tenjin age1axxuhlnen0jxyel5qwp9357mnely5t09slm89ec4400vqxlqvdwspql6dk
   - &kobold age1yv6c0pwr5kjac2uewgkh0k808hk6u2rsd6dxlar6pzzkhr78kcyq5ah85u
+  - &nabu   age1j26ya0tq8keac3sk4xrd3w7rj5ytuhfwph0rdxejyw8t8fwvv4zq5uhk36
 creation_rules:
   # Secrets only one host may read, like its Nix signing key.
   - path_regex: secrets/kobold\.yaml$
@@ -11,9 +12,12 @@ creation_rules:
   - path_regex: secrets/lugh\.yaml$
     key_groups:
       - age: [*admin, *lugh]
+  - path_regex: secrets/nabu\.yaml$
+    key_groups:
+      - age: [*admin, *nabu]
   - path_regex: secrets/tenjin\.yaml$
     key_groups:
       - age: [*admin, *tenjin]
   - path_regex: secrets/.*\.yaml$
     key_groups:
-      - age: [*admin, *lugh, *tenjin, *kobold]
+      - age: [*admin, *lugh, *tenjin, *kobold, *nabu]
