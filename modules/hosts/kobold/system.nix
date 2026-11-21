@@ -4,7 +4,7 @@ let
 in
 {
   # The infrastructure server: an Intel Core Ultra 7 265K desktop with 32 GB of RAM. It's meant for the services
-  # that should stay up whatever happens to the other servers (Matrix first), Nix builds, and the Minecraft and Foundry VTT servers.
+  # that should stay up whatever happens to the other servers (Matrix first) and Nix builds.
   hosts.kobold =
     { pkgs, ... }:
     {
