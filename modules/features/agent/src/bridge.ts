@@ -23,22 +23,50 @@ import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
 
-const emptyState = (): BridgeState => ({ since: null, rooms: {}, pending: {}, reactions: {} });
+const emptyState = (): BridgeState => ({
+	since: null,
+	rooms: {},
+	pending: {},
+	reactions: {},
+	alertsRoom: null,
+	explained: {},
+});
 
 type BridgeState = {
 	since: string | null;
 	rooms: Record<string, number>;
 	pending: Record<string, { room: string; event: string }>;
 	reactions: Record<string, boolean>;
+	// The room the agent made for alerts, and the firing alerts it has explained there (fingerprint → since when).
+	alertsRoom: string | null;
+	explained: Record<string, string>;
 };
 
 export const BridgeDoc = defineDoc<BridgeState>({
 	kind: "cosmos.bridge",
-	version: 1,
+	version: 2,
 	scope: "session",
 	initial: emptyState,
+	migrate: (value) => ({ ...emptyState(), ...(value as Partial<BridgeState>) }),
 	checkpointWhen: () => true, // small; store it whole each time
 });
+
+// What Alertmanager's webhook sends, as far as the agent reads it.
+export type AlertPayload = {
+	alerts: {
+		status: "firing" | "resolved";
+		labels: Record<string, string>;
+		annotations: Record<string, string>;
+		startsAt: string;
+		fingerprint: string;
+	}[];
+};
+
+const ALERT_INSTRUCTIONS = [
+	"Investigate with your read-only tools (observe for metrics, alerts and logs across hosts; monitor for lugh's services).",
+	"Confirm what's happening, find the likely cause, and say what the owner should check or do.",
+	"Keep it short: a few sentences or bullets. Change nothing.",
+].join(" ");
 
 const Approval = defineSignal({ name: "cosmos.approval", version: 1, schema: obj({ allow: bool() }) });
 const APPROVAL_WINDOW_MS = 60 * 60 * 1000;
@@ -52,6 +80,7 @@ export type BridgeOptions = {
 	model: string;
 	maxTurns: number;
 	needsApproval: (tool: string) => boolean;
+	alertsRoomName: string;
 	context: Context;
 };
 
@@ -220,6 +249,55 @@ export class Bridge {
 			return submissionId;
 		}, this.#ctx);
 		this.#state.pending[String(id)] = { room, event: event.event_id };
+		void this.options.matrix.typing(room, this.#me, true);
+		this.#deliver(String(id));
+	}
+
+	// The Alerts room: made on the first alert, with the owner invited.
+	async #alertsRoom(): Promise<string> {
+		if (this.#state.alertsRoom) return this.#state.alertsRoom;
+		const room = await this.options.matrix.createRoom(this.options.alertsRoomName, [this.options.owner]);
+		await this.#commit((s) => {
+			s.alertsRoom = room;
+		});
+		console.error(`bridge: made the alerts room ${room}`);
+		return room;
+	}
+
+	// Alertmanager's webhook. Each newly firing alert gets a notice in the Alerts room and one investigation, answered
+	// as a reply to that notice; Alertmanager's repeats don't. A resolved alert gets a short notice and no model run.
+	// Returns once everything is committed, so a crash before then makes Alertmanager send it again.
+	async onAlerts(payload: AlertPayload) {
+		const room = await this.#alertsRoom();
+		const fresh = payload.alerts.filter((a) => a.status === "firing" && this.#state.explained[a.fingerprint] !== a.startsAt);
+		const resolved = payload.alerts.filter((a) => a.status === "resolved" && this.#state.explained[a.fingerprint] !== undefined);
+		const describe = (a: AlertPayload["alerts"][number]) =>
+			`**${a.labels.alertname}**${a.labels.host ? ` on ${a.labels.host}` : ""}${a.labels.severity ? ` (${a.labels.severity})` : ""}: ${a.annotations.summary ?? ""}`;
+
+		for (const alert of resolved) {
+			await this.options.matrix.send(room, { ...textContent(`✅ Resolved: ${describe(alert)}`, html(`✅ Resolved: ${describe(alert)}`), "m.notice") });
+			await this.#commit((s) => {
+				delete s.explained[alert.fingerprint];
+			});
+		}
+		if (fresh.length === 0) return;
+
+		const list = fresh.map((a) => `- ${describe(a)} (since ${a.startsAt})`).join("\n");
+		const notice = await this.options.matrix.send(room, textContent(`🚨 Firing:\n${list}`, html(`🚨 Firing:\n\n${list}`)));
+		const conversation = await this.#conversation(room);
+		const requestId = `alert:${fresh.map((a) => `${a.fingerprint}@${a.startsAt}`).sort().join(",")}`;
+		const content = `Alertmanager reports newly firing alerts:\n${fresh
+			.map((a) => `- ${JSON.stringify({ labels: a.labels, annotations: a.annotations, since: a.startsAt })}`)
+			.join("\n")}\n\n${ALERT_INSTRUCTIONS}`;
+		const id = await this.#harness!.commit(async (tx) => {
+			const submissionId = await conversation.submit(tx, { type: "input", content, requestId });
+			const state = (await tx.doc(BridgeDoc)) as BridgeState;
+			state.pending[String(submissionId)] = { room, event: notice };
+			for (const a of fresh) state.explained[a.fingerprint] = a.startsAt;
+			return submissionId;
+		}, this.#ctx);
+		this.#state.pending[String(id)] = { room, event: notice };
+		for (const a of fresh) this.#state.explained[a.fingerprint] = a.startsAt;
 		void this.options.matrix.typing(room, this.#me, true);
 		this.#deliver(String(id));
 	}

@@ -55,6 +55,12 @@ export class Matrix {
 		return this.request<SyncResponse>("GET", `/sync?${query}`, undefined, signal);
 	}
 
+	// A private, unencrypted room (the agent can't read encrypted ones yet) with the given people invited.
+	async createRoom(name: string, invite: string[]): Promise<string> {
+		const { room_id } = await this.request<{ room_id: string }>("POST", "/createRoom", { name, preset: "private_chat", invite });
+		return room_id;
+	}
+
 	join(roomId: string) {
 		return this.request("POST", `/join/${encodeURIComponent(roomId)}`, {});
 	}

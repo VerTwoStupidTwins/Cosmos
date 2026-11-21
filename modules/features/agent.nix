@@ -43,6 +43,15 @@
         '';
       };
 
+      # The observability stack (observability.nix) for the agent: metrics, alerts and logs, read-only.
+      observe = pkgs.rustPlatform.buildRustPackage {
+        pname = "observe";
+        version = "0.1.0";
+        src = ./agent-tools/observe;
+        cargoLock.lockFile = ./agent-tools/observe/Cargo.lock;
+        meta.mainProgram = "observe";
+      };
+
       configFile = pkgs.writeText "agent-config.json" (
         builtins.toJSON {
           inherit (cfg)
@@ -51,6 +60,7 @@
             maxTurns
             testTools
             ;
+          alerts = { inherit (cfg.alerts) port roomName; };
           state = "/var/lib/agent/agent.sqlite";
           models = {
             inherit (cfg.models) endpoint default;
@@ -98,6 +108,19 @@
           type = lib.types.ints.positive;
           default = 12;
           description = "Tool rounds one answer may take before the run stops.";
+        };
+
+        alerts = {
+          port = lib.mkOption {
+            type = lib.types.port;
+            default = 8091;
+            description = "Where the agent takes Alertmanager's webhook, on localhost.";
+          };
+          roomName = lib.mkOption {
+            type = lib.types.str;
+            default = "Alerts";
+            description = "The room the agent makes for alerts, with the owner invited, on the first alert.";
+          };
         };
 
         testTools = lib.mkOption {
@@ -180,6 +203,8 @@
       config = {
         # host-monitor, run locally: system, hardware, services, logs and config lookups, all read-only.
         agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
+        # Metrics, alerts and logs from every host, where the observability stack runs.
+        agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
 
         sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
 

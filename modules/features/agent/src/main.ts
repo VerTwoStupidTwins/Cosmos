@@ -3,8 +3,9 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createRegistry, defineExtension, defineTool, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { createServer } from "node:http";
 import { obj, str } from "@earendil-works/pi-schema";
-import { Bridge } from "./bridge.js";
+import { type AlertPayload, Bridge } from "./bridge.js";
 import { credential, loadConfig } from "./config.js";
 import { Matrix } from "./matrix.js";
 import { mcpExtension } from "./mcp.js";
@@ -63,6 +64,7 @@ const bridge = new Bridge({
 	model: config.models.default,
 	maxTurns: config.maxTurns,
 	needsApproval: (tool) => approval.has(tool),
+	alertsRoomName: config.alerts.roomName,
 	context,
 });
 registry.install(bridge.extension);
@@ -80,11 +82,35 @@ const harness = await Harness.open(
 harness.resume();
 await bridge.start(harness);
 
+// Alertmanager's webhook, on localhost only. Alerts are handled one at a time; Alertmanager retries on an error.
+let alertQueue: Promise<void> = Promise.resolve();
+const alertServer = createServer((request, response) => {
+	if (request.method !== "POST" || request.url !== "/alertmanager") {
+		response.writeHead(404).end();
+		return;
+	}
+	const chunks: Buffer[] = [];
+	request.on("data", (chunk: Buffer) => chunks.push(chunk));
+	request.on("end", () => {
+		alertQueue = alertQueue.then(async () => {
+			try {
+				await bridge.onAlerts(JSON.parse(Buffer.concat(chunks).toString("utf8")) as AlertPayload);
+				response.writeHead(200).end();
+			} catch (error) {
+				console.error(`alerts: ${String(error)}`);
+				response.writeHead(500).end();
+			}
+		});
+	});
+});
+alertServer.listen(config.alerts.port, "127.0.0.1", () => console.error(`alerts: listening on 127.0.0.1:${config.alerts.port}`));
+
 let closing = false;
 const shutdown = async () => {
 	if (closing) return;
 	closing = true;
 	bridge.stop();
+	alertServer.close();
 	await harness.close(context);
 	process.exit(0);
 };

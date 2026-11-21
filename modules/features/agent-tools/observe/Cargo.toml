@@ -1,0 +1,21 @@
+[package]
+name = "observe"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only access to the homelab's metrics, alerts and logs (Prometheus, Alertmanager, Loki) as an MCP server over stdio"
+publish = false
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+# Plain HTTP to services on localhost: no TLS stack.
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[profile.release]
+lto = "thin"

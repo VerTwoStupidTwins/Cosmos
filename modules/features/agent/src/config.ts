@@ -10,6 +10,7 @@ export type Config = {
 	state: string;
 	maxTurns: number;
 	testTools: boolean;
+	alerts: { port: number; roomName: string };
 	models: {
 		endpoint: string;
 		default: string;

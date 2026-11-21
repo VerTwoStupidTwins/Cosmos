@@ -227,7 +227,7 @@ in
           port = ports.alertmanager;
           configuration = {
             route = {
-              receiver = "ntfy";
+              receiver = "homelab";
               group_by = [
                 "alertname"
                 "host"
@@ -238,8 +238,12 @@ in
             };
             receivers = [
               {
-                name = "ntfy";
-                webhook_configs = [ { url = "http://127.0.0.1:${toString ports.alertmanagerNtfy}/hook"; } ];
+                name = "homelab";
+                webhook_configs = [
+                  { url = "http://127.0.0.1:${toString ports.alertmanagerNtfy}/hook"; }
+                ]
+                # The agent explains each new alert in its Alerts room (agent.nix); ntfy doesn't depend on it.
+                ++ lib.optional (config ? agent) { url = "http://127.0.0.1:${toString config.agent.alerts.port}/alertmanager"; };
               }
             ];
           };
