@@ -3,15 +3,19 @@ let
   nixos = config.flake.modules.nixos;
 in
 {
-  # The old LLM server, now that nabu has taken over its models. Its next job is game streaming from the B580 and
-  # modded Minecraft and Foundry VTT servers, all over NetBird; for now it's a base install that still builds for the
-  # other hosts, and tenjin's homelab plate still checks on it.
+  # The homelab's infrastructure server: it watches every host (metrics, logs, dashboards, alerts to the phone through
+  # ntfy) and builds for the others. Game streaming from the B580 and modded Minecraft and Foundry VTT servers come
+  # later, all over NetBird.
   hosts.lugh = {
     imports = [
       nixos.systemd-boot
       nixos.server
       nixos.builder
       nixos.monitor
+      nixos.web
+      nixos.ntfy
+      nixos.observability
+      nixos.observed
     ];
 
     # The desktop bar's homelab plate reads lugh's monitor.

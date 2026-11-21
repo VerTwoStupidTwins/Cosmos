@@ -17,6 +17,7 @@ in
       nixos.claude-code
       nixos.krita
       nixos.monitor-station
+      nixos.observed
     ];
 
     nixpkgs.hostPlatform = "x86_64-linux";

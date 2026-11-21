@@ -17,9 +17,11 @@ in
       nixos.llama-rocm
       nixos.llama-sycl
       nixos.llama-vulkan
+      nixos.observed
     ];
 
     gpu.nvidia.cudaCapabilities = [ "6.0" ]; # Tesla P100
+    observed.nvidia = true;
     gpu.amd.targets = [ "gfx1100" ]; # RX 7900 XT
 
     # CUDA from Kmic-68's fork, tuned for exactly this pair of P100s: on Qwen3.8-27B it reports about twice
