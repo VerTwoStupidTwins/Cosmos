@@ -28,6 +28,9 @@
           # Apps still try other servers now and then (the public room directory, joining by an outside address), and
           # each refused request was logged as an ERROR. With federation off that's expected, so it isn't logged.
           log = "info,tuwunel_service::federation::execute=off";
+          # RocksDB's direct I/O writes fail on lugh's bcachefs ("pwrite … Invalid argument"), which stopped Tuwunel
+          # from starting once its database had anything to write out. Ordinary buffered writes work.
+          rocksdb_direct_io = false;
           allow_registration = true;
           registration_token_file = config.sops.secrets.matrix-registration-token.path;
           # Apps that only know the server name look here for the address.
