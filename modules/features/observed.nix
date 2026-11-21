@@ -1,12 +1,12 @@
 # modules/features/observed.nix
 let
-  # lugh collects everything (observability.nix). Its NetBird address is the only one let at the exporters.
+  # lugh collects everything (observability.nix).
   collector = "lugh.netbird.cloud";
-  collectorAddress = "100.94.36.6";
 in
 {
   # What every watched host runs for lugh: Prometheus exporters for its system, disks and (on nabu) NVIDIA cards, and
-  # Alloy sending its journal to Loki. The exporters answer only lugh, over NetBird.
+  # Alloy sending its journal to Loki. NetBird's "infra → watched" policy lets only lugh reach the exporters
+  # (modules/base/netbird.nix).
   flake.modules.nixos.observed =
     { config, lib, ... }:
     let
@@ -32,9 +32,7 @@ in
           nvidia-gpu.enable = cfg.nvidia;
         };
 
-        networking.firewall.extraCommands = lib.concatMapStrings (port: ''
-          iptables -A nixos-fw -i nb-wt0 -p tcp --dport ${toString port} -s ${collectorAddress} -j nixos-fw-accept
-        '') ports;
+        networking.firewall.interfaces."nb-wt0".allowedTCPPorts = ports;
 
         services.alloy.enable = true;
         environment.etc."alloy/config.alloy".text = ''

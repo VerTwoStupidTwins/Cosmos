@@ -316,7 +316,7 @@ in
           analytics.reporting_enabled = false;
         };
       };
-      # Every watched host's Alloy pushes here. Only NetBird peers can reach it.
+      # Every watched host's Alloy pushes here, through NetBird's "watched → infra" policy (modules/base/netbird.nix).
       networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [ ports.loki ];
 
       sops.secrets = {
