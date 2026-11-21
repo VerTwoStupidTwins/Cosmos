@@ -72,6 +72,12 @@ in
             mountpoint = "/nix";
             inherit mountOptions;
           };
+          # Games for streaming and the game servers' worlds, in their own subvolume so snapshots of the system
+          # don't drag them along.
+          "subvolumes/games" = {
+            mountpoint = "/games";
+            inherit mountOptions;
+          };
         };
       };
     };
