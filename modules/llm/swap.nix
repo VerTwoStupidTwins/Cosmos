@@ -43,7 +43,16 @@ in
           );
           inherit (model) checkEndpoint;
         }
-        // lib.optionalAttrs (model.aliases != [ ]) { inherit (model) aliases; };
+        // lib.optionalAttrs (model.aliases != [ ]) { inherit (model) aliases; }
+        # Each setting with a trailing "?", which makes it a default: a request that sets it keeps its own value.
+        // lib.optionalAttrs (model.requestDefaults != { }) {
+          filters.setParamsByID = lib.mapAttrs' (
+            id: settings:
+            lib.nameValuePair (if id == name then "\${MODEL_ID}" else id) (
+              lib.mapAttrs' (setting: lib.nameValuePair "${setting}?") settings
+            )
+          ) model.requestDefaults;
+        };
     in
     {
       imports = [ nixos.llama ];
@@ -117,6 +126,22 @@ in
                   description = "Other names clients can ask for it by.";
                 };
 
+                requestDefaults = lib.mkOption {
+                  type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                  default = { };
+                  example = lib.literalExpression ''
+                    {
+                      main.temperature = 1.0;
+                      helper = { temperature = 0.3; chat_template_kwargs.enable_thinking = false; };
+                    }
+                  '';
+                  description = ''
+                    Request settings by the name a client asks for, applied when the request doesn't carry them.
+                    One loaded model can then act differently under each name. A name other than the model's own
+                    becomes another name for it, so it isn't listed in aliases as well.
+                  '';
+                };
+
                 preload = lib.mkOption {
                   type = lib.types.bool;
                   default = true;
@@ -141,10 +166,18 @@ in
             path = lib.concatMap (model: model.path) (lib.attrValues cfg.models);
           };
 
-        assertions = lib.mapAttrsToList (name: model: {
-          assertion = (model.backend == null) != (model.command == null);
-          message = "llm.models.${name} needs either a backend or a command, not both.";
-        }) cfg.models;
+        assertions = lib.concatLists (
+          lib.mapAttrsToList (name: model: [
+            {
+              assertion = (model.backend == null) != (model.command == null);
+              message = "llm.models.${name} needs either a backend or a command, not both.";
+            }
+            {
+              assertion = lib.all (id: !lib.elem id model.aliases) (lib.attrNames model.requestDefaults);
+              message = "llm.models.${name}: a name in requestDefaults is already another name for it; drop it from aliases.";
+            }
+          ]) cfg.models
+        );
 
         services.llama-swap = {
           enable = true;
