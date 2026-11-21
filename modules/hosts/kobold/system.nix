@@ -4,7 +4,7 @@ let
 in
 {
   # The infrastructure server: an Intel Core Ultra 7 265K desktop with 32 GB of RAM. It's meant for the services
-  # that should stay up whatever happens to lugh (Matrix first), Nix builds, and the Minecraft and Foundry VTT servers.
+  # that should stay up whatever happens to the other servers (Matrix first), Nix builds, and the Minecraft and Foundry VTT servers.
   hosts.kobold =
     { pkgs, ... }:
     {
@@ -16,8 +16,6 @@ in
         nixos.matrix
       ];
 
-      # Hermes, on lugh, checks on kobold through its monitor.
-      monitor.allowHermes = true;
       monitor.allowStation = true;
 
       # Its first boots, on 7.3.3 with i915 and xe both loaded for the iGPU, corrupted memory, though memtest86+

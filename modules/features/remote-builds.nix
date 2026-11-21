@@ -50,7 +50,7 @@ in
       nix.settings.builders-use-substitutes = true;
 
       # Nix gives each job to the machine with the least work for its speed factor, so kobold takes the builds and
-      # lugh, whose CPU and RAM serve the models, only gets them when kobold is busy or down.
+      # lugh only gets them when kobold is busy or down.
       nix.buildMachines =
         map
           (

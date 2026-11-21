@@ -78,7 +78,7 @@ in
         }) m.cards;
         always_loaded = config.services.llama-swap.settings.hooks.on_startup.preload or [ ];
         check_devices = m.checkDevices;
-        # Every subvolume shares the btrfs pool on /, and /boot fills up with old generations.
+        # Every subvolume shares the filesystem on /, and /boot fills up with old generations.
         disks = [
           "/"
           "/boot"

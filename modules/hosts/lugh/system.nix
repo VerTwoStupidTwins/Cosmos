@@ -3,16 +3,13 @@ let
   nixos = config.flake.modules.nixos;
 in
 {
+  # The old LLM server, now that nabu has taken over its models: a minimal host until its next job is decided. It
+  # still builds for the other hosts, and tenjin's homelab plate still checks on it.
   hosts.lugh = {
     imports = [
       nixos.systemd-boot
       nixos.server
       nixos.builder
-      nixos.gpu
-      nixos.claude-code
-      nixos.llm
-      nixos.comfyui
-      nixos.hermes
       nixos.monitor
     ];
 

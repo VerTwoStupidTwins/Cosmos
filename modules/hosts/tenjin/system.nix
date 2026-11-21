@@ -15,7 +15,6 @@ in
       nixos.niri
       nixos.build-client
       nixos.claude-code
-      nixos.hermes-desktop
       nixos.krita
       nixos.monitor-station
     ];
