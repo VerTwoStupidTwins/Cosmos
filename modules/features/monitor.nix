@@ -13,7 +13,7 @@ let
   # plate checks, by host key. Each of them sets monitor.allowStation.
   stationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw0/t1en+PuDl7iQiW/6f0DLorwLSHcLP+WdOtpYIxw station-monitor";
   labHosts = {
-    lugh = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOW2xA+/CR6trd2iH4bdORyeIjswgoLc8ZglHjEyOeCD";
+    lugh = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3DM9wpr41MlWUe1+C05lht9vg1a9h1XNqFGBbw5oAU";
     inherit (remotes) kobold;
   };
 in
