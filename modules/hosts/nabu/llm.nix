@@ -1,7 +1,8 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
-# Clients ask for a role, as on lugh: main on the P100 pair; vision, transcription, decision, embedding and reranker
-# on the Arc Pro B50.
+# Clients ask for a role: main (and helper) on the RX 7900 XT for everyday chats, quick automations and Hermes'
+# background jobs; workhorse on the P100 pair for deep analysis, coding and long work; vision, transcription,
+# decision, embedding and reranker on the Arc Pro B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -28,8 +29,8 @@ in
 
       # Swift 1.5 on Qwen3.8-27B with a Heretic edit against refusals: mradermacher's Q6_K, which carries the
       # model's MTP head. It spans both P100s through Kmic-68's fork (llama.cuda.src). It reads prompts at about 430
-      # tokens a second and writes 50-70 with MTP, on cool cards.
-      llm.models.main = {
+      # tokens a second and writes 50-70 with MTP, on cool cards. The most capable model, and the slowest.
+      llm.models.workhorse = {
         backend = "cuda";
         aliases = [ "swift-27b-heretic" ];
         args = [
@@ -72,9 +73,47 @@ in
         };
       };
 
+      # Gemma 4 12B with a Heretic (ARA) edit on Google's QAT weights, by SC117, in the Q4_0 those weights were
+      # trained for; Gemma's own MTP head drafts for it. On lugh's helper test with real Hermes sessions it beat
+      # Ornith 9B, lugh's helper: titles 29/30 against 20, memory capture 35/39 against 35, compression 62/68
+      # against 61, with no refusals and summaries a fifth the length; a title took 1.3 s while a compression ran.
+      # It reads long prompts at about 1,000 tokens a second and writes 55-95, faster when the answer follows its
+      # input. It takes 9.4 GB of the card's 20, which leaves room for an image model.
+      llm.models.main = {
+        backend = "rocm";
+        args = [
+          "-m ${helpers}/gemma-4-12b-heretic-qat-sc117/gemma-4-12B-it-heretic-QAT-UD-Q4_K_XL.gguf"
+          "-dev ROCm0"
+          "-ngl 99"
+          "-fa on"
+          # Shared by two slots, so a helper job can run beside a chat.
+          "-c 96000"
+          "-np 2"
+          "--kv-unified"
+          "-ctk q8_0 -ctv q8_0"
+          # Gemma's MTP head drafts three tokens at a time: rewrites and JSON ran about 1.7 times faster, prose
+          # about the same. Six drafts were slower.
+          "-md ${helpers}/gemma-4-12b-heretic-qat-sc117/mtp-gemma-4-12B-it.gguf"
+          "--spec-type draft-mtp"
+          "-ngld 99"
+          "--jinja"
+          # Google's recommended sampling.
+          "--temp 1.0 --top-k 64 --top-p 0.95"
+        ];
+        # One model under two names. Chats get Google's sampling; Hermes' background jobs (titles, memory capture,
+        # compression) a steadier one. Neither thinks unless a request asks: the helper test ran without it.
+        requestDefaults = {
+          main.chat_template_kwargs.enable_thinking = false;
+          helper = {
+            temperature = 0.3;
+            chat_template_kwargs.enable_thinking = false;
+          };
+        };
+      };
+
       # Gemma 4 E4B with a Heretic edit, Q4_K_M: pictures, handwriting, translation and quick text jobs. It read the
       # user's handwritten note with 1 error in 49 words, reads a picture in about 3 s, writes 43 tokens a second and
-      # translates about as well as main. It hears audio too, but transcription has its own model.
+      # translates about as well as the workhorse. It hears audio too, but transcription has its own model.
       llm.models.vision = {
         backend = "sycl";
         aliases = [ "gemma-4-e4b-heretic" ];
