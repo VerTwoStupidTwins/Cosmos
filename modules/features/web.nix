@@ -44,9 +44,19 @@
             domain = "*.${domain}";
             dnsProvider = "spaceship";
             environmentFile = config.sops.secrets.spaceship-api.path;
-            # lego checks the challenge record through the system resolver otherwise, and systemd-resolved can
-            # answer NXDOMAIN, cached from before the record existed, until lego gives up.
+            # lego looks names up through the system resolver otherwise, and systemd-resolved can answer NXDOMAIN,
+            # cached from before the record existed.
             dnsResolver = "1.1.1.1:53";
+            # lego's own propagation check passes within seconds, before Let's Encrypt's resolvers see Spaceship's
+            # record (they answered NXDOMAIN on the first order), so it waits out the record's 120-second TTL instead.
+            extraLegoRunFlags = [
+              "--dns.propagation.wait"
+              "120s"
+            ];
+            extraLegoRenewFlags = [
+              "--dns.propagation.wait"
+              "120s"
+            ];
             group = config.services.nginx.group;
           };
         };
