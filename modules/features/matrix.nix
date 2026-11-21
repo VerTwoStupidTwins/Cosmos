@@ -25,6 +25,9 @@
           port = [ port ];
           allow_federation = false;
           trusted_servers = [ ];
+          # Apps still try other servers now and then (the public room directory, joining by an outside address), and
+          # each refused request was logged as an ERROR. With federation off that's expected, so it isn't logged.
+          log = "info,tuwunel_service::federation::execute=off";
           allow_registration = true;
           registration_token_file = config.sops.secrets.matrix-registration-token.path;
           # Apps that only know the server name look here for the address.
