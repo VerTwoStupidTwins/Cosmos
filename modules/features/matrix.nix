@@ -42,14 +42,14 @@
       ];
 
       sops.secrets.matrix-registration-token = {
-        sopsFile = ../../secrets/kobold.yaml;
+        sopsFile = ../../secrets/${config.networking.hostName}.yaml;
         owner = config.services.matrix-tuwunel.user;
       };
 
       # The certificate comes through Spaceship's DNS API, so nothing has to be reachable from the internet. Public DNS
-      # points matrix.gatica.one at kobold's NetBird address, which only NetBird peers can reach.
+      # points matrix.gatica.one at the host's NetBird address, which only NetBird peers can reach.
       sops.secrets.spaceship-api = {
-        sopsFile = ../../secrets/kobold.yaml;
+        sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       };
       security.acme = {
         acceptTerms = true;

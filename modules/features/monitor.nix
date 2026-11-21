@@ -5,7 +5,6 @@ let
   stationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw0/t1en+PuDl7iQiW/6f0DLorwLSHcLP+WdOtpYIxw station-monitor";
   labHosts = {
     lugh = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3DM9wpr41MlWUe1+C05lht9vg1a9h1XNqFGBbw5oAU";
-    kobold = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFsW8D98Mo2cYCc5ijPszxHPy0qBBnpV4bD/Gxb+ki/U";
   };
 in
 {

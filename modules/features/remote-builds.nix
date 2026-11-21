@@ -3,7 +3,6 @@ let
   # Each builder signs what it builds, so its results can be copied to other hosts, as nh does after a --build-host
   # build. The secret halves are in each host's own sops file, which only that host can read.
   signingKeys = [
-    "kobold-1:+NX7E2USSlLQtfcsv/MIZJ2Sv9N4ZvD6TRu4N5TSdFg="
     "lugh-1:+52KriMOQOPLuLMtk9vztdoCj+251rflRHzyffMRsfI="
   ];
 in
@@ -13,8 +12,7 @@ in
     {
       sops.secrets.nix-signing-key.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       nix.settings.secret-key-files = [ config.sops.secrets.nix-signing-key.path ];
-      # Builders take each other's builds too, so one can build the other's system (nh --build-host lugh
-      # --target-host kobold) and copy it straight across.
+      # Builders take each other's builds too, so one can build another host's system and copy it straight across.
       nix.settings.trusted-public-keys = signingKeys;
 
       nix.sshServe = {
@@ -34,10 +32,6 @@ in
       sops.secrets.builder-key = { };
 
       programs.ssh.knownHosts = {
-        kobold = {
-          hostNames = [ "kobold.netbird.cloud" ];
-          publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFsW8D98Mo2cYCc5ijPszxHPy0qBBnpV4bD/Gxb+ki/U";
-        };
         lugh = {
           hostNames = [ "lugh.netbird.cloud" ];
           publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3DM9wpr41MlWUe1+C05lht9vg1a9h1XNqFGBbw5oAU";
@@ -49,8 +43,7 @@ in
       nix.distributedBuilds = true;
       nix.settings.builders-use-substitutes = true;
 
-      # Nix gives each job to the machine with the least work for its speed factor, so kobold takes the builds and
-      # lugh only gets them when kobold is busy or down.
+      # With more than one builder, Nix gives each job to the machine with the least work for its speed factor.
       nix.buildMachines =
         map
           (
@@ -70,13 +63,6 @@ in
             // machine
           )
           [
-            # kobold is out until its memory corruption is fixed (2026-11-17): it damaged files in its own store, so
-            # what it builds can't be trusted. Put this back after a clean memtest and a reinstall.
-            # {
-            #   hostName = "kobold.netbird.cloud";
-            #   maxJobs = 10;
-            #   speedFactor = 16;
-            # }
             {
               hostName = "lugh.netbird.cloud";
               maxJobs = 12;
