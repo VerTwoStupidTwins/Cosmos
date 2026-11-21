@@ -213,10 +213,11 @@ in
               }
             ];
           }
-          (probe "http_2xx" [
-            "https://grafana.gatica.one/api/health"
-            "https://ntfy.gatica.one/v1/health"
-          ])
+          # Every site behind the web gateway, at its health path: a site that stops answering, or whose
+          # certificate is about to run out, raises an alert without being listed here.
+          (probe "http_2xx" (
+            lib.mapAttrsToList (name: site: "https://${name}.gatica.one${site.healthPath}") config.web.sites
+          ))
           (probe "icmp" (map (h: "${h}.netbird.cloud") servers))
         ];
 
@@ -378,6 +379,7 @@ in
       };
 
       web.sites.grafana = {
+        healthPath = "/api/health";
         port = ports.grafana;
         websockets = true;
       };

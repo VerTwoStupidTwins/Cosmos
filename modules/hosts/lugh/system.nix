@@ -4,8 +4,8 @@ let
 in
 {
   # The homelab's infrastructure server: it watches every host (metrics, logs, dashboards, alerts to the phone through
-  # ntfy) and builds for the others. Game streaming from the B580 and modded Minecraft and Foundry VTT servers come
-  # later, all over NetBird.
+  # ntfy), runs the homelab's Matrix server, and builds for the others. Game streaming from the B580 and modded
+  # Minecraft and Foundry VTT servers come later, all over NetBird.
   hosts.lugh = {
     imports = [
       nixos.systemd-boot
@@ -14,6 +14,7 @@ in
       nixos.monitor
       nixos.web
       nixos.ntfy
+      nixos.matrix
       nixos.observability
       nixos.observed
     ];

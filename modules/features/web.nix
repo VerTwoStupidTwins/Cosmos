@@ -20,6 +20,11 @@
                 type = lib.types.port;
                 description = "The local port the service listens on, on 127.0.0.1.";
               };
+              healthPath = lib.mkOption {
+                type = lib.types.str;
+                default = "/";
+                description = "A path that answers 2xx while the service is healthy, for the blackbox probe.";
+              };
               websockets = lib.mkOption {
                 type = lib.types.bool;
                 default = false;

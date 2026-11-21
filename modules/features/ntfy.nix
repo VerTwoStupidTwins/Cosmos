@@ -26,6 +26,7 @@
       };
 
       web.sites.ntfy = {
+        healthPath = "/v1/health";
         inherit port;
         websockets = true;
       };
