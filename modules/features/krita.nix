@@ -1,7 +1,6 @@
 # modules/features/krita.nix
 {
-  # Krita, for drawing with the pen. Its AI Diffusion plugin drew through lugh's ComfyUI, which is off now that lugh
-  # is being repurposed; comfyui.nix is still there for whichever host takes it on.
+  # Krita, for drawing with the pen.
   flake.modules.nixos.krita =
     { pkgs, ... }:
     {

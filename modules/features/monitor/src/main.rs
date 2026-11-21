@@ -1,19 +1,16 @@
-//! A read-only MCP server that reports a homelab host's health to Hermes and lets it look up the host's NixOS config.
+//! A read-only MCP server that reports a homelab host's health and lets clients look up the host's NixOS config.
 //!
-//! The health tools read status from /proc, /sys, systemd and the journal, and on the host with the models, from
-//! llama-swap and the memory service too; tools for what a host doesn't have are left out. The config tools read the
-//! commit the host was built from and the copy of the config that commit holds. None of them runs a shell or changes
-//! anything, and logs come only from listed services. Hermes runs it directly on its own host and over SSH elsewhere.
+//! The health tools read status from /proc, /sys, systemd and the journal. The config tools read the commit the host
+//! was built from and the copy of the config that commit holds. None of them runs a shell or changes anything, and
+//! logs come only from listed services. tenjin's homelab plate runs it over SSH for health_report.
 
 mod drift;
-mod edits;
 mod hardware;
-mod http;
 mod manifest;
 mod probes;
 mod repo;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::Parser;
 use rmcp::{
     ServerHandler, ServiceExt,
@@ -29,20 +26,13 @@ use probes::{Config, safely};
 
 #[derive(Parser)]
 struct Args {
-    /// The host's name, for Hermes.
+    /// The host's name.
     #[arg(long)]
     host: String,
     #[arg(long)]
     systemctl: String,
     #[arg(long)]
     journalctl: String,
-    /// The three below only on the host with the models and Hermes.
-    #[arg(long)]
-    llama_server: Option<String>,
-    #[arg(long)]
-    llama_swap_url: Option<String>,
-    #[arg(long)]
-    memory_socket: Option<String>,
     /// A file holding the commit the running system was built from.
     #[arg(long)]
     revision_file: String,
@@ -136,7 +126,7 @@ fn default_read_lines() -> i64 {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct ReadRequest {
-    /// A file inside the config, such as modules/features/llm.nix.
+    /// A file inside the config, such as modules/features/monitor.nix.
     path: String,
     /// The first line to show, counting from 1.
     #[serde(default = "default_start")]
@@ -160,24 +150,12 @@ impl Monitor {
         ok(safely(probes::system_info(&self.cfg)).await)
     }
 
-    /// Each GPU's role, free and total memory, temperatures and power draw.
-    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    async fn gpu_status(&self) -> CallToolResult {
-        ok(json!({ "gpus": safely(probes::gpu_info(&self.cfg)).await }))
-    }
-
     /// Trouble below the services: kernel faults, hardware errors, storage errors, out-of-memory kills and crashed
     /// processes since boot and in the previous boot, whether the previous boot shut down cleanly, btrfs error
     /// counters, and NVMe health.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn hardware_status(&self) -> CallToolResult {
         ok(safely(hardware::hardware_info(&self.cfg)).await)
-    }
-
-    /// The models llama-swap has loaded, and any that should always be loaded but aren't.
-    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    async fn model_status(&self) -> CallToolResult {
-        ok(safely(probes::model_info(&self.cfg)).await)
     }
 
     /// The state, restart count and last-24-hour error count of the host's key services, and any failed unit.
@@ -207,28 +185,13 @@ impl Monitor {
         )
     }
 
-    /// Whether the memory service answers, and how many memories it holds.
-    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    async fn memory_status(&self) -> CallToolResult {
-        ok(safely(probes::memory_info(&self.cfg)).await)
-    }
-
     /// Every check at once, with a list of anything that needs attention. Use this for a daily health summary.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn health_report(&self) -> CallToolResult {
         ok(probes::health_report(&self.cfg).await)
     }
 
-    /// Edits Hermes made to files the NixOS config manages, such as the llm-wiki skill: ones made since the last
-    /// switch, and ones saved before a switch replaced them. Both need bringing into the repo to last.
-    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
-    async fn hermes_edits(&self) -> CallToolResult {
-        let managed = self.cfg.manifest().and_then(|m| m.managed_files.context("this host doesn't run Hermes"));
-        or_error(managed.and_then(|m| edits::edits(&m, &self.cfg.config_source)))
-    }
-
-    /// Whether the host runs what its config declares: every declared port listening, Hermes' MCP servers running, and
-    /// the cards numbered the way the models expect. service_status and model_status cover services and models.
+    /// Whether the host runs what its config declares beyond its services: every declared port listening.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn config_drift(&self) -> CallToolResult {
         match self.cfg.manifest() {
@@ -270,11 +233,10 @@ impl Monitor {
 impl ServerHandler for Monitor {
     fn get_info(&self) -> ServerConfig {
         let host = &self.host;
-        let hermes = if self.cfg.memory_socket.is_some() { ", the server Hermes runs on" } else { "" };
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new(format!("{host}-monitor"), env!("CARGO_PKG_VERSION")))
             .with_instructions(format!(
-                "Read-only checks for {host}{hermes}. Use health_report for a summary and the other health tools for \
+                "Read-only checks for {host}. Use health_report for a summary and the other health tools for \
                  detail. To explain why {host} is set up a certain way, or what it's configured to do, use \
                  config_search and config_read on its NixOS config: the comments there give the reasons. \
                  deployed_revision says which commit is running, and config_drift whether {host} runs what that \
@@ -287,31 +249,13 @@ impl ServerHandler for Monitor {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = Config {
-        llama_server: args.llama_server,
         systemctl: args.systemctl,
         journalctl: args.journalctl,
-        llama_swap_url: args.llama_swap_url,
-        memory_socket: args.memory_socket,
         revision_file: args.revision_file,
         config_source: args.config_source,
         manifest: args.manifest,
     };
-    // Tools for what this host doesn't have are left out, so Hermes never sees them. The manifest's contents can
-    // change with a switch, but the tool list is read once, when Hermes starts the monitor.
-    let mut tool_router = Monitor::tool_router();
-    let manifest = cfg.manifest().ok();
-    let absent = [
-        ("gpu_status", manifest.as_ref().is_some_and(|m| m.cards.is_empty())),
-        ("model_status", cfg.llama_swap_url.is_none()),
-        ("memory_status", cfg.memory_socket.is_none()),
-        ("hermes_edits", manifest.as_ref().is_some_and(|m| m.managed_files.is_none())),
-    ];
-    for (tool, missing) in absent {
-        if missing {
-            tool_router.remove_route(tool);
-        }
-    }
-    let monitor = Monitor { host: args.host, cfg, tool_router };
+    let monitor = Monitor { host: args.host, cfg, tool_router: Monitor::tool_router() };
     monitor.serve(stdio()).await?.waiting().await?;
     Ok(())
 }

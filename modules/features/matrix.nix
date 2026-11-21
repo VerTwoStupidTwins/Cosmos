@@ -1,7 +1,7 @@
 # modules/features/matrix.nix
 {
   # A Matrix homeserver for the homelab: Tuwunel behind nginx, reachable only over NetBird. It doesn't federate, and
-  # accounts are made with a registration token. Hermes talks to it as @hermes:matrix.gatica.one.
+  # accounts are made with a registration token.
   flake.modules.nixos.matrix =
     { config, pkgs, ... }:
     let

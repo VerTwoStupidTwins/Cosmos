@@ -1,6 +1,6 @@
 // The homelab page: drops down below the clock plate like the command station, with a card per lab
 // host from its monitor's health report (Homelab.qml). Each card has the host's state, build,
-// system readings, disks, GPUs, models, services, hardware health, config drift and the monitor's
+// system readings, disks, services, hardware health, config drift and the monitor's
 // warnings; a host that didn't answer says why. Two columns once there's more than one host,
 // scrolling when they don't fit. Open it with the station's LAB button, Mod+B, or
 // `qs -c bar ipc call lab toggle`; Esc closes, R checks again.
@@ -180,24 +180,18 @@ PanelWindow {
         readonly property real memUsed: sys.memory ? 1 - sys.memory.available_percent / 100 : -1
         readonly property real load: sys.load_average && sys.cpu_threads ? sys.load_average[0] / sys.cpu_threads : -1
         readonly property var disks: Object.entries(sys.disks ?? {})
-        readonly property var models: Object.entries(r?.models?.loaded ?? {})
-        readonly property var missingModels: r?.models?.missing_always_loaded ?? []
         readonly property var services: Object.entries(r?.services?.services ?? {})
         readonly property var failedUnits: r?.services?.failed_units ?? []
         readonly property var nvme: Object.entries(hw.nvme ?? {})
         readonly property int btrfsErrors: Object.values(hw.btrfs_errors ?? {})
             .reduce((n, dev) => n + Object.values(dev).reduce((a, b) => a + b, 0), 0)
         readonly property int kernelIssues: Object.keys(hw.kernel_this_boot ?? {}).length
-        // What config_drift found out of place: ports not listening, MCP servers not running, cards
-        // out of order.
+        // What config_drift found out of place: ports not listening.
         readonly property var drift: {
             const d = r?.config_drift ?? {};
             const out = [];
             for (const [name, p] of Object.entries(d.ports ?? {}))
                 if (!p.listening) out.push(name.toUpperCase() + " :" + p.port + " NOT LISTENING");
-            for (const [name, m] of Object.entries(d.mcp_servers ?? {}))
-                if (!m.running) out.push("MCP " + name.toUpperCase() + " DOWN");
-            if (d.card_order?.checked && !d.card_order.ok) out.push("GPU ORDER CHANGED");
             return out;
         }
         readonly property bool hasDrift: r?.config_drift !== undefined
@@ -342,90 +336,6 @@ PanelWindow {
                         text: panel.gib(disk.d.total_gib - disk.d.free_gib) + " / " + panel.gib(disk.d.total_gib)
                         color: disk.used >= 0.95 ? Theme.urgent : disk.used >= 0.85 ? Theme.warn : Theme.fg
                         font.pixelSize: 11
-                    }
-                }
-            }
-
-            Section {
-                text: "GPUS"
-                visible: (card.r?.gpus ?? []).length > 0
-            }
-            Repeater {
-                model: card.r?.gpus ?? []
-
-                // Card and role on the left, its readings on the right.
-                RowLayout {
-                    id: gpu
-
-                    required property var modelData
-                    readonly property real used: modelData.vram_total_mib ? 1 - modelData.vram_free_mib / modelData.vram_total_mib : -1
-                    readonly property real hot: panel.hottest(modelData.temps_c)
-
-                    Layout.fillWidth: true
-                    spacing: 8
-
-                    Label {
-                        Layout.preferredWidth: 56
-                        text: gpu.modelData.short.toUpperCase()
-                        font.pixelSize: 11
-                        font.bold: true
-                        elide: Text.ElideRight
-                    }
-                    Label {
-                        Layout.fillWidth: true
-                        text: (gpu.modelData.role ?? "").toUpperCase()
-                        color: Theme.muted
-                        font.pixelSize: 9
-                        font.letterSpacing: 1
-                        elide: Text.ElideRight
-                    }
-                    Row {
-                        spacing: 12
-
-                        Reading {
-                            key: "VRAM"
-                            value: gpu.used >= 0 ? panel.pad(gpu.used * 100) + "%" : "--"
-                            fraction: gpu.used
-                        }
-                        Reading {
-                            key: "TEMP"
-                            value: panel.temp(gpu.hot)
-                            tone: panel.heat(gpu.hot, 80, 95)
-                        }
-                        Reading {
-                            visible: gpu.modelData.power_w !== undefined
-                            key: "PWR"
-                            value: Math.round(gpu.modelData.power_w ?? 0) + "/" + Math.round(gpu.modelData.power_cap_w ?? 0) + "W"
-                        }
-                    }
-                }
-            }
-
-            Section {
-                text: "MODELS · " + card.models.filter(m => m[1] === "ready").length + "/" + card.models.length + " READY"
-                visible: card.models.length > 0 || card.missingModels.length > 0
-            }
-            Flow {
-                visible: card.models.length > 0 || card.missingModels.length > 0
-                Layout.fillWidth: true
-                spacing: 4
-
-                Repeater {
-                    model: card.models
-
-                    Chip {
-                        required property var modelData
-                        text: modelData[0].toUpperCase()
-                        tone: modelData[1] === "ready" ? Theme.good : Theme.warn
-                    }
-                }
-                Repeater {
-                    model: card.missingModels
-
-                    Chip {
-                        required property var modelData
-                        text: String(modelData).toUpperCase() + " MISSING"
-                        tone: Theme.urgent
                     }
                 }
             }
@@ -584,7 +494,7 @@ PanelWindow {
         }
     }
 
-    // A boxed name in its state's colour: a model or a service.
+    // A boxed name in its state's colour: a service.
     component Chip: Rectangle {
         property alias text: chipLabel.text
         property color tone: Theme.good

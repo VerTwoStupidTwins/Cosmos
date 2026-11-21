@@ -1,8 +1,8 @@
 //! What the host is running, from the Cosmos repository: the commit it was built from, and a read-only copy of the
 //! NixOS config that commit holds.
 //!
-//! Both are read from /etc on every call, so they always describe the system that's active now, and Hermes' own
-//! config doesn't change (and restart Hermes) with every commit.
+//! Both are read from /etc on every call, so they always describe the system that's active now, and the monitor's own
+//! command line doesn't change with every commit.
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -60,7 +60,7 @@ fn resolve(root: &Path, relative: &str) -> Result<PathBuf> {
     let relative = relative.trim().trim_start_matches("./");
     let rel = Path::new(relative);
     if rel.components().any(|c| !matches!(c, Component::Normal(_) | Component::CurDir)) {
-        bail!("Give a path inside the config, such as modules/features/llm.nix, without .. or a leading /");
+        bail!("Give a path inside the config, such as modules/features/monitor.nix, without .. or a leading /");
     }
     let root = fs::canonicalize(root).context("The config isn't available on this system")?;
     let full = fs::canonicalize(root.join(rel)).with_context(|| format!("No such file or directory: {relative}"))?;

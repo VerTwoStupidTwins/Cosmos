@@ -1,4 +1,4 @@
-//! The health checks: status read from /proc, /sys, systemd, the journal, llama-swap and the memory service.
+//! The health checks: status read from /proc, /sys, systemd and the journal.
 //!
 //! Nothing here runs a shell or changes anything. Output keys match the Python monitor this replaced.
 
@@ -13,9 +13,7 @@ use regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::drift;
-use crate::edits;
 use crate::hardware;
-use crate::http;
 use crate::manifest::Manifest;
 use crate::repo;
 
@@ -23,21 +21,15 @@ use crate::repo;
 const DISK_WARN: f64 = 85.0;
 const DISK_CRIT: f64 = 95.0;
 const CPU_TEMP_WARN: f64 = 85.0;
-const GPU_TEMP_WARN: f64 = 90.0;
 const NVME_TEMP_WARN: f64 = 70.0;
 const MEM_AVAILABLE_WARN: f64 = 10.0;
-const VRAM_FREE_WARN_MIB: i64 = 300;
 
 const SYSTEM_PROFILE: &str = "/nix/var/nix/profiles/system";
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The three below exist only on the host with the models and Hermes.
-    pub llama_server: Option<String>,
     pub systemctl: String,
     pub journalctl: String,
-    pub llama_swap_url: Option<String>,
-    pub memory_socket: Option<String>,
     pub revision_file: String,
     pub config_source: String,
     pub manifest: String,
@@ -77,8 +69,8 @@ fn gib(n: f64) -> f64 {
     round1(n / (1u64 << 30) as f64)
 }
 
-/// Each hwmon sensor directory with its driver name and the PCI device it belongs to.
-fn hwmon_by_name() -> Vec<(String, String, String)> {
+/// Each hwmon sensor directory with its driver name.
+fn hwmon_by_name() -> Vec<(String, String)> {
     let base = Path::new("/sys/class/hwmon");
     let mut names: Vec<_> = fs::read_dir(base)
         .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
@@ -88,11 +80,7 @@ fn hwmon_by_name() -> Vec<(String, String, String)> {
         .into_iter()
         .map(|h| {
             let path = base.join(&h);
-            let device = fs::canonicalize(path.join("device"))
-                .ok()
-                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-                .unwrap_or_else(|| "device".into());
-            (read(path.join("name")).unwrap_or_default(), device, path.to_string_lossy().into_owned())
+            (read(path.join("name")).unwrap_or_default(), path.to_string_lossy().into_owned())
         })
         .collect()
 }
@@ -166,7 +154,7 @@ pub async fn system_info(cfg: &Config) -> Result<Value> {
 
     let disks: Map<String, Value> = cfg.manifest()?.disks.iter().map(|m| (m.clone(), disk_usage(m))).collect();
     let (mut cpu, mut nvme) = (Map::new(), Map::new());
-    for (name, _, path) in hwmon_by_name() {
+    for (name, path) in hwmon_by_name() {
         match name.as_str() {
             // AMD reports Tctl and each chiplet; Intel reports the package and every core, of which the package is
             // enough.
@@ -208,86 +196,7 @@ pub async fn system_info(cfg: &Config) -> Result<Value> {
     }))
 }
 
-// ---- GPUs
-
-static VULKAN_DEVICE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(Vulkan\d+): (.*?) \((\d+) MiB, (\d+) MiB free\)").unwrap());
-
-/// Vulkan devices as (name, id, total MiB, free MiB), from `llama-server --list-devices`.
-fn parse_devices(text: &str) -> Vec<(String, String, i64, i64)> {
-    VULKAN_DEVICE
-        .captures_iter(text)
-        .map(|c| (c[2].to_owned(), c[1].to_owned(), c[3].parse().unwrap_or(0), c[4].parse().unwrap_or(0)))
-        .collect()
-}
-
-pub async fn gpu_info(cfg: &Config) -> Result<Value> {
-    let manifest = cfg.manifest()?;
-    // Free memory per card comes from llama-server, where there is one.
-    let devices = match &cfg.llama_server {
-        Some(server) => parse_devices(&run(server, &["--list-devices"], Duration::from_secs(60)).await?),
-        None => Vec::new(),
-    };
-    let sensors: BTreeMap<String, (String, String)> = hwmon_by_name()
-        .into_iter()
-        .filter(|(name, _, _)| name == "amdgpu" || name == "xe")
-        .map(|(name, dev, path)| (dev, (name, path)))
-        .collect();
-
-    let mut cards = Vec::new();
-    for (pci, (driver, path)) in sensors {
-        // Cards by PCI ID, so names and roles survive Vulkan renumbering.
-        let dev = |f: &str| read(format!("/sys/bus/pci/devices/{pci}/{f}")).unwrap_or_default();
-        let pci_id = format!("{}:{}", dev("vendor"), dev("device"));
-        let known = manifest.card_by_pci(&pci_id);
-        let short = known.map_or(pci_id.clone(), |(short, _)| short.clone());
-        let mut card = json!({
-            "card": known.map_or(pci_id.clone(), |(_, c)| c.name.clone()),
-            "short": short,
-            "role": known.map_or(String::new(), |(_, c)| c.models.join(", ")),
-            "pci": pci,
-            "temps_c": temps(&path),
-        });
-        let c = card.as_object_mut().unwrap();
-        if let Some((_, k)) = known.filter(|(_, k)| !k.note.is_empty()) {
-            c.insert("note".into(), json!(k.note));
-        }
-        if let Some((_, vk, total, free)) = devices.iter().find(|(name, ..)| name.contains(&short)) {
-            c.insert("vulkan".into(), json!(vk));
-            c.insert("vram_total_mib".into(), json!(total));
-            c.insert("vram_free_mib".into(), json!(free));
-        }
-        let int = |file: &str| read(format!("{path}/{file}")).and_then(|v| v.parse::<i64>().ok());
-        if driver == "amdgpu" {
-            c.insert("power_w".into(), json!(int("power1_average").map(|w| round1(w as f64 / 1e6))));
-        } else if let Some(e1) = int("energy1_input") {
-            // The Intel driver reports energy, so power comes from two readings.
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let e2 = int("energy1_input").context("energy1_input vanished")?;
-            c.insert("power_w".into(), json!(round1((e2 - e1) as f64 / 0.5e6)));
-        }
-        c.insert("power_cap_w".into(), json!(int("power1_cap").map(|w| (w as f64 / 1e6).round() as i64)));
-        cards.push(card);
-    }
-    Ok(Value::Array(cards))
-}
-
-// ---- models and services
-
-pub async fn model_info(cfg: &Config) -> Result<Value> {
-    let url = cfg.llama_swap_url.as_deref().context("this host has no llama-swap")?;
-    let running = http::get_json(&format!("{url}/running")).await?;
-    let states: Map<String, Value> = running["running"]
-        .as_array()
-        .context("llama-swap's /running has no list")?
-        .iter()
-        .filter_map(|m| Some((m["model"].as_str()?.to_owned(), m["state"].clone())))
-        .collect();
-    let always_loaded = cfg.manifest()?.always_loaded;
-    let missing: Vec<&String> =
-        always_loaded.iter().filter(|m| states.get(*m).and_then(Value::as_str) != Some("ready")).collect();
-    Ok(json!({ "loaded": states, "missing_always_loaded": missing }))
-}
+// ---- services
 
 /// Containers log everything to stderr, which the journal records as errors, so lines that
 /// name a lower level of their own aren't errors.
@@ -366,16 +275,11 @@ pub async fn services_info(cfg: &Config) -> Result<Value> {
     Ok(json!({ "services": services, "failed_units": failed }))
 }
 
-pub async fn memory_info(cfg: &Config) -> Result<Value> {
-    let socket = cfg.memory_socket.as_deref().context("this host has no memory service")?;
-    http::get_json_unix(socket, "/health").await
-}
-
 // ---- the report
 
-fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memory: &Value) -> Vec<String> {
+fn warnings(system: &Value, services: &Value) -> Vec<String> {
     let mut w = Vec::new();
-    for (part, value) in [("system", system), ("gpus", gpus), ("models", models), ("services", services), ("memory", memory)] {
+    for (part, value) in [("system", system), ("services", services)] {
         if let Some(e) = value.get("error").and_then(Value::as_str) {
             w.push(format!("Could not check {part}: {e}"));
         }
@@ -407,20 +311,6 @@ fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memo
             w.push("The running system isn't the latest build; a reboot or switch is pending".into());
         }
     }
-    for g in gpus.as_array().into_iter().flatten() {
-        let card = g["card"].as_str().unwrap_or("A GPU");
-        let hottest = max_temp(&g["temps_c"]);
-        if hottest >= GPU_TEMP_WARN {
-            w.push(format!("{card} is at {} °C", num(hottest)));
-        }
-        if let Some(free) = g["vram_free_mib"].as_i64().filter(|f| *f < VRAM_FREE_WARN_MIB) {
-            w.push(format!("{card} has only {free} MiB of memory free"));
-        }
-    }
-    if let Some(missing) = models["missing_always_loaded"].as_array().filter(|m| !m.is_empty()) {
-        let names: Vec<&str> = missing.iter().filter_map(Value::as_str).collect();
-        w.push(format!("Models not loaded: {}", names.join(", ")));
-    }
     if services.get("error").is_none() {
         for unit in services["failed_units"].as_array().into_iter().flatten().filter_map(Value::as_str) {
             w.push(format!("Failed unit: {unit}"));
@@ -439,64 +329,31 @@ fn warnings(system: &Value, gpus: &Value, models: &Value, services: &Value, memo
     w
 }
 
-/// Runs a check only where the host has what it looks at; elsewhere it's left out of the report.
-async fn where_present(present: bool, check: impl Future<Output = Result<Value>>) -> Option<Value> {
-    if present { Some(safely(check).await) } else { None }
-}
-
 pub async fn health_report(cfg: &Config) -> Value {
-    let manifest = cfg.manifest();
-    let m = manifest.as_ref().ok();
-    let has_cards = m.is_some_and(|m| !m.cards.is_empty());
     let drift_check = async {
-        match &manifest {
-            Ok(m) => drift::drift(m).await,
+        match cfg.manifest() {
+            Ok(m) => drift::drift(&m).await,
             Err(e) => Err(anyhow!("{e:#}")),
         }
     };
-    let (system, hardware, gpus, models, services, memory, drift) = tokio::join!(
+    let (system, hardware, services, drift) = tokio::join!(
         safely(system_info(cfg)),
         safely(hardware::hardware_info(cfg)),
-        where_present(has_cards, gpu_info(cfg)),
-        where_present(cfg.llama_swap_url.is_some(), model_info(cfg)),
         safely(services_info(cfg)),
-        where_present(cfg.memory_socket.is_some(), memory_info(cfg)),
         safely(drift_check),
     );
-    let edits = match m.and_then(|m| m.managed_files.as_ref()) {
-        Some(managed) => Some(safely(async { edits::edits(managed, &cfg.config_source) }).await),
-        None => None,
-    };
-    let none = Value::Null;
-    let (g, mo, me) = (gpus.as_ref().unwrap_or(&none), models.as_ref().unwrap_or(&none), memory.as_ref().unwrap_or(&none));
-    let mut warnings = warnings(&system, g, mo, &services, me);
+    let mut warnings = warnings(&system, &services);
     warnings.extend(hardware::warnings(&hardware));
-    warnings.extend(drift::warnings(&drift, g, m));
-    if let Some(e) = &edits {
-        warnings.extend(edits::warnings(e));
-    }
-    let mut report = json!({
+    warnings.extend(drift::warnings(&drift));
+    json!({
         "checked_at": chrono::Local::now().format("%Y-%m-%d %H:%M %:z").to_string(),
         "status": if warnings.is_empty() { "ok" } else { "attention" },
         "warnings": warnings,
         "system": system,
         "hardware": hardware,
-    });
-    let r = report.as_object_mut().unwrap();
-    for (key, value) in [("gpus", gpus), ("models", models)] {
-        if let Some(v) = value {
-            r.insert(key.into(), v);
-        }
-    }
-    r.insert("services".into(), services);
-    if let Some(v) = memory {
-        r.insert("memory".into(), v);
-    }
-    r.insert("config_drift".into(), drift);
-    if let Some(v) = edits {
-        r.insert("hermes_edits".into(), v);
-    }
-    report
+        "services": services,
+        "config_drift": drift,
+    })
 }
 
 #[cfg(test)]
@@ -508,16 +365,6 @@ mod tests {
         let mem = parse_meminfo("MemTotal:       65536 kB\nMemAvailable:   32768 kB\nHugePages_Total:       0\n");
         assert_eq!(mem["MemTotal"], 65536.0 * 1024.0);
         assert_eq!(mem["HugePages_Total"], 0.0);
-    }
-
-    #[test]
-    fn finds_vulkan_devices() {
-        let text = "Available devices:\n  Vulkan0: AMD Radeon RX 7900 XT (RADV NAVI31) (20464 MiB, 19000 MiB free)\n  \
-                    Vulkan1: Intel(R) Arc(tm) B580 Graphics (BMG G21) (12216 MiB, 11000 MiB free)\n";
-        let devices = parse_devices(text);
-        assert_eq!(devices.len(), 2);
-        assert_eq!(devices[0], ("AMD Radeon RX 7900 XT (RADV NAVI31)".into(), "Vulkan0".into(), 20464, 19000));
-        assert!(devices[1].0.contains("B580"));
     }
 
     #[test]
@@ -545,27 +392,21 @@ mod tests {
             "nvme_temps_c": {},
             "last_rebuild": { "running_matches_latest": false },
         });
-        let gpus = json!([{ "card": "Arc B580", "temps_c": { "edge": 91.0 }, "vram_free_mib": 100 }]);
-        let models = json!({ "missing_always_loaded": ["helper"] });
         let services = json!({
             "failed_units": ["foo.service"],
-            "services": { "kokoro": { "state": "failed/failed", "errors_24h": 2 } },
+            "services": { "matrix-tuwunel": { "state": "failed/failed", "errors_24h": 2 } },
         });
-        let memory = json!({ "error": "ConnectionRefused" });
         assert_eq!(
-            warnings(&system, &gpus, &models, &services, &memory),
+            warnings(&system, &services),
             [
-                "Could not check memory: ConnectionRefused",
                 "CRITICAL: / is 96.0% full",
                 "/boot is 86.5% full",
                 "The running system isn't the latest build; a reboot or switch is pending",
-                "Arc B580 is at 91.0 °C",
-                "Arc B580 has only 100 MiB of memory free",
-                "Models not loaded: helper",
                 "Failed unit: foo.service",
-                "kokoro is failed/failed",
-                "kokoro logged 2 errors in the last 24 hours",
+                "matrix-tuwunel is failed/failed",
+                "matrix-tuwunel logged 2 errors in the last 24 hours",
             ]
         );
+        assert_eq!(warnings(&json!({ "error": "boom" }), &json!({}))[0], "Could not check system: boom");
     }
 }
