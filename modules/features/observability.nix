@@ -316,7 +316,7 @@ in
           analytics.reporting_enabled = false;
         };
       };
-      # Every watched host's Alloy pushes here, through NetBird's "watched → infra" policy (modules/base/netbird.nix).
+      # Every watched host's Alloy pushes here, through NetBird's CosmosWatched → CosmosInfra policy (modules/base/netbird.nix).
       networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [ ports.loki ];
 
       sops.secrets = {

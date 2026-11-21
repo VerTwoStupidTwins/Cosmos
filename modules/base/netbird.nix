@@ -1,15 +1,16 @@
 {
   # NetBird decides who reaches what on the mesh. Its client accepts traffic its access policies allow before the
   # NixOS firewall sees it (and drops what they don't), so the nb-wt0 rules in the modules only apply if NetBird's
-  # firewall handling is off. The policies, set in the NetBird dashboard, with the default "All" policy removed:
+  # firewall handling is off. NetBird policies only ever allow, and any one of them is enough, so no broad policy
+  # (NetBird's default "All", or a group-wide all-to-all) may cover these hosts. The ones to set in the dashboard:
   #
-  #   Groups:  admin = tenjin, phone · servers = lugh, nabu · watched = lugh, nabu, tenjin · infra = lugh
+  #   Groups, prefixed with Cosmos so they stand apart from the others' on the shared NetBird account:
+  #   CosmosAdmin = tenjin, phone · CosmosServers = lugh, nabu · CosmosWatched = lugh, nabu, tenjin · CosmosInfra = lugh
   #
-  #   admin    → servers   all                       SSH, remote builds, the homelab plate, Grafana, ntfy
-  #   infra    → watched   TCP 9100, 9633, 9835      Prometheus scraping the exporters (observed.nix)
-  #   infra    → servers   ICMP                      blackbox ping probes (observability.nix)
-  #   watched  → infra     TCP 3100                  Alloy pushing journals to Loki
-  #   admin    → infra     TCP 443                   (covered by admin → servers; listed for the phone)
+  #   CosmosAdmin   → CosmosServers  all                   SSH, remote builds, the homelab plate, Grafana, ntfy
+  #   CosmosInfra   → CosmosWatched  TCP 9100, 9633, 9835  Prometheus scraping the exporters (observed.nix)
+  #   CosmosInfra   → CosmosServers  ICMP                  blackbox ping probes (observability.nix)
+  #   CosmosWatched → CosmosInfra    TCP 3100              Alloy pushing journals to Loki
   #
   # A service that another host or the phone must reach needs a policy here as well as its own config.
   flake.modules.nixos.base =

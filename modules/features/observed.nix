@@ -5,7 +5,7 @@ let
 in
 {
   # What every watched host runs for lugh: Prometheus exporters for its system, disks and (on nabu) NVIDIA cards, and
-  # Alloy sending its journal to Loki. NetBird's "infra → watched" policy lets only lugh reach the exporters
+  # Alloy sending its journal to Loki. NetBird's CosmosInfra → CosmosWatched policy lets only lugh reach the exporters
   # (modules/base/netbird.nix).
   flake.modules.nixos.observed =
     { config, lib, ... }:
