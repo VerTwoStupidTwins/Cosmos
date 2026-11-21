@@ -123,7 +123,7 @@
                   default = null;
                   description = ''
                     The loudest speed acceptable for everyday load. It goes faster only once the hottest card
-                    reaches quietTemp, and comes back under it once that card is down to targetTemp. Null: no cap
+                    reaches quietTemp, and eases back under it once that card is down to targetTemp. Null: no cap
                     below maxRpm.
                   '';
                 };
@@ -215,6 +215,7 @@
             quiet=${if cfg.boardFan.quietRpm == null then maxRpm else quietRpm}
             cap=$quiet
             while true; do
+              last=$target
               temp=$(nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits | sort -n | tail -1) || temp=
               if ! [[ $temp =~ ^[0-9]+$ ]] || (( temp >= ${maxTemp} )); then
                 target=${maxRpm}
@@ -232,12 +233,16 @@
                   target=$(( target + change ))
                 fi
               fi
-              # Held to quietRpm in everyday use; the cap lifts at quietTemp and returns at targetTemp.
+              # Held to quietRpm in everyday use; the cap lifts at quietTemp and returns at targetTemp, when the speed
+              # eases back under it 50 rpm a step rather than dropping at once.
               if [[ $temp =~ ^[0-9]+$ ]]; then
                 if (( temp >= ${quietTemp} )); then cap=${maxRpm}
                 elif (( temp <= ${targetTemp} )); then cap=$quiet
                 fi
-                (( target > cap )) && target=$cap
+                if (( target > cap )); then
+                  (( target > last - 50 )) && target=$(( last - 50 ))
+                  (( target < cap )) && target=$cap
+                fi
               fi
               (( target < ${minRpm} )) && target=${minRpm}
               (( target > ${maxRpm} )) && target=${maxRpm}
