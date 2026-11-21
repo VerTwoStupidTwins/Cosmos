@@ -83,6 +83,8 @@ in
       ];
     in
     {
+      monitor.command = command;
+
       # The system services the host is reached through, where it has them.
       monitor.units = lib.filter (unit: config.systemd.services ? ${unit}) [
         "sshd"
@@ -137,7 +139,7 @@ in
         extraGroups = [ "systemd-journal" ];
         # sshd runs the forced command through the user's shell.
         shell = pkgs.bashInteractive;
-        openssh.authorizedKeys.keys = [ ''restrict,command="${lib.escapeShellArgs command}" ${stationKey}'' ];
+        openssh.authorizedKeys.keys = [ ''restrict,command="${lib.escapeShellArgs config.monitor.command}" ${stationKey}'' ];
       };
       users.groups.monitor = lib.mkIf m.allowStation { };
     };

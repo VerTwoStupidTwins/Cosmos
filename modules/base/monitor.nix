@@ -21,6 +21,12 @@
           description = "TCP ports that should be listening, by what listens on them.";
         };
 
+        command = mkOption {
+          type = types.listOf types.str;
+          readOnly = true;
+          description = "How to run this host's monitor (an MCP server on stdin and stdout), for whatever talks to it.";
+        };
+
         allowStation = mkOption {
           type = types.bool;
           default = false;
