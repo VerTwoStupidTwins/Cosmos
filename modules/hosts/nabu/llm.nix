@@ -27,6 +27,9 @@ in
     {
       imports = [ nixos.llm-swap ];
 
+      # The agent on lugh thinks with these models (modules/features/agent.nix).
+      llm.openOnMesh = true;
+
       # Swift 1.5 on Qwen3.8-27B with a Heretic edit against refusals: mradermacher's Q6_K, which carries the
       # model's MTP head. It spans both P100s through Kmic-68's fork (llama.cuda.src). It reads prompts at about 430
       # tokens a second and writes 50-70 with MTP, on cool cards. The most capable model, and the slowest.

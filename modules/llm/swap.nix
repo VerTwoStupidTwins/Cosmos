@@ -61,7 +61,16 @@ in
         port = lib.mkOption {
           type = lib.types.port;
           default = 8080;
-          description = "Where llama-swap serves the models' OpenAI-compatible API, on localhost.";
+          description = "Where llama-swap serves the models' OpenAI-compatible API.";
+        };
+
+        openOnMesh = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = ''
+            Serve the API to NetBird peers too, not just localhost. The port opens on nb-wt0 only, and NetBird's
+            CosmosModels policy decides which peers get in (modules/base/netbird.nix).
+          '';
         };
 
         models = lib.mkOption {
@@ -181,7 +190,9 @@ in
 
         services.llama-swap = {
           enable = true;
-          listenAddress = "127.0.0.1";
+          # On every address when open to the mesh: binding nb-wt0's address would race the interface at boot, and
+          # the firewall opens the port on nb-wt0 only.
+          listenAddress = if cfg.openOnMesh then "0.0.0.0" else "127.0.0.1";
           inherit (cfg) port;
 
           settings = {
@@ -204,6 +215,8 @@ in
             hooks.on_startup.preload = lib.attrNames (lib.filterAttrs (_: model: model.preload) cfg.models);
           };
         };
+
+        networking.firewall.interfaces."nb-wt0".allowedTCPPorts = lib.mkIf cfg.openOnMesh [ cfg.port ];
       };
     };
 }

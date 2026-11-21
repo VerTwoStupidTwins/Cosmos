@@ -11,6 +11,7 @@
   #   CosmosInfra   → CosmosWatched  TCP 9100, 9633, 9835  Prometheus scraping the exporters (observed.nix)
   #   CosmosInfra   → CosmosServers  ICMP                  blackbox ping probes (observability.nix)
   #   CosmosWatched → CosmosInfra    TCP 3100              Alloy pushing journals to Loki
+  #   CosmosInfra   → CosmosServers  TCP 8080              the agent on lugh using nabu's models (CosmosModels)
   #
   # A service that another host or the phone must reach needs a policy here as well as its own config.
   flake.modules.nixos.base =
