@@ -56,16 +56,16 @@ in
     # The board's fan headers and temperatures, from its Nuvoton NCT6796D, which nothing loads on its own.
     boot.kernelModules = [ "nct6775" ];
 
-    # The server fan on the P100s' shared shroud, an Arctic S12038-8K (800-8,000 rpm) on header 3. By ear: 1,400
-    # rpm goes unnoticed, 1,700 is noticeable but fine under load, 2,400 the most for everyday use. It idles at
-    # 1,400, holds the hotter card at 72 °C within 2,400 rpm, goes past that from 75 °C and runs flat out from
-    # 78 °C; the cards slow down at 82. At full speed it
-    # draws 2.2 A (3.2 A peak), more than the header's 1 A, so it's held to 5,000 rpm, roughly half an amp, until
-    # it's powered from the supply through a hub, with the header only setting its speed.
+    # The server fan on the P100s' shared shroud, an Arctic S12038-8K (800-8,000 rpm) on header 3. By ear: 1,100
+    # rpm goes unnoticed, 1,400 is audible, 1,700 noticeable but fine under load, 2,400 the most for everyday use.
+    # It idles at 1,100, holds the hotter card at 72 °C within 2,400 rpm, goes past that from 75 °C and runs flat
+    # out from 78 °C; the cards slow down at 82. At full speed it draws 2.2 A (3.2 A peak), more than the header's
+    # 1 A, so it's held to 5,000 rpm, roughly half an amp, until it's powered from the supply through a hub, with
+    # the header only setting its speed.
     gpu.nvidia.boardFan = {
       chip = "nct6796";
       header = 3;
-      minRpm = 1400;
+      minRpm = 1100;
       quietRpm = 2400;
       targetTemp = 72;
       maxRpm = 5000;
