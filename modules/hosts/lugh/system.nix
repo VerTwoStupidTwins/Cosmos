@@ -23,9 +23,6 @@ in
     # The desktop bar's homelab plate reads lugh's monitor.
     monitor.allowStation = true;
 
-    # The pretend restart_service, until the approval gate has been checked on the real service. Remove afterwards.
-    agent.testTools = true;
-
     nixpkgs.hostPlatform = "x86_64-linux";
     hardware.facter.reportPath = ./facter.json;
     system.stateVersion = "26.05";

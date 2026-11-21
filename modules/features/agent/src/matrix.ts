@@ -32,7 +32,11 @@ export class Matrix {
 			signal,
 		});
 		const text = await response.text();
-		if (!response.ok) throw new Error(`Matrix ${method} ${path.split("?")[0]}: ${response.status} ${text.slice(0, 200)}`);
+		if (!response.ok) {
+			// A proxy error page (nginx while the homeserver is down) is HTML; Matrix errors are JSON.
+			const detail = text.trimStart().startsWith("<") ? response.statusText : text.slice(0, 200);
+			throw new Error(`Matrix ${method} ${path.split("?")[0]}: ${response.status} ${detail}`);
+		}
 		return (text ? JSON.parse(text) : {}) as T;
 	}
 
