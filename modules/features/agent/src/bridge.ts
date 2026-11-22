@@ -652,10 +652,11 @@ export class Bridge {
 				const reason = answered && chat && owed.chat && chat.model === this.options.chat?.mainModel ? await this.#handOffReason(owed.chat) : undefined;
 				const next: Pending | undefined =
 					reason !== undefined ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
+				// Looked up before the commit: a Harness read inside a commit waits for that commit, for ever.
+				const conversation = next ? await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx) : undefined;
 				const continued = await this.#commitAdmitting(
 					async (tx) => {
-						if (reason === undefined || !next) return undefined;
-						const conversation = (await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx))!;
+						if (reason === undefined || !next || !conversation) return undefined;
 						const work = this.options.chat!.workModel;
 						const admitted = await conversation.submit(tx, {
 							type: "input",
