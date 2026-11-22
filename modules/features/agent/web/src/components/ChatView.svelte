@@ -158,7 +158,7 @@
 	.older { text-align: center; color: var(--muted); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 18px; }
 	.start { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 18vh; color: var(--dim); text-align: center; }
 	.start p { margin: 0; max-width: 420px; font-size: 12.5px; }
-	.banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 18px; --frame: color-mix(in srgb, var(--warn) 60%, transparent); }
+	.banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 18px; --frame-solid: color-mix(in srgb, var(--warn) 60%, var(--bg)); }
 	.grow { flex: 1; min-width: 160px; }
 	.call { flex: 1 1 100%; color: var(--dim); font-size: 11.5px; overflow-wrap: anywhere; }
 	.pending { margin: 0 0 18px; }

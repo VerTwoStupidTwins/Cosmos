@@ -19,6 +19,7 @@
 
 	/* Mixes the bar uses: a frame at 60% accent, faint fills and lines. */
 	--frame: color-mix(in srgb, var(--accent-color) 60%, transparent);
+	--frame-solid: color-mix(in srgb, var(--accent-color) 60%, var(--bg));
 	--line: color-mix(in srgb, var(--fg) 14%, transparent);
 	--leader: color-mix(in srgb, var(--fg) 25%, transparent);
 	--wash: color-mix(in srgb, var(--accent-color) 9%, var(--bg));
@@ -33,7 +34,7 @@
 /* The page never scrolls: the window holds the frame, and only the content inside scrolls. */
 html, body { height: 100%; margin: 0; overflow: hidden; }
 body {
-	background: var(--bg);
+	background: color-mix(in srgb, var(--bg) 82%, black);
 	color: var(--fg);
 	font: 13.5px/1.6 var(--font);
 	font-variant-numeric: tabular-nums;
@@ -43,15 +44,16 @@ body {
 * { scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
 
 /* ── Plates: cut corners, a 1px accent frame, a dark line outside it, a status strip on top ──
- * Set --tl --tr --br --bl (cut sizes) on the element; the frame and fill are two inset layers clipped the same way. */
+ * Set --tl --tr --br --bl (cut sizes) on the element. The frame and the fill are two layers clipped to the shape; the
+ * plate itself isn't clipped, so its shadow (which follows the layers' outline, cut corners included) can fall outside.
+ * The first shadow is the bar's dark line around the frame, the others lift the plate off the background. */
 .plate {
 	--tl: 0px; --tr: 0px; --br: var(--cut); --bl: 0px;
 	--shape: polygon(var(--tl) 0, calc(100% - var(--tr)) 0, 100% var(--tr), 100% calc(100% - var(--br)),
 		calc(100% - var(--br)) 100%, var(--bl) 100%, 0 calc(100% - var(--bl)), 0 var(--tl));
 	position: relative;
 	isolation: isolate;
-	clip-path: var(--shape);
-	background: var(--outline);
+	filter: drop-shadow(0 0 0.6px var(--outline)) drop-shadow(0 2px 3px rgb(0 0 0 / 0.45)) drop-shadow(0 10px 18px rgb(0 0 0 / 0.5));
 }
 .plate::before, .plate::after {
 	content: "";
@@ -59,8 +61,15 @@ body {
 	clip-path: var(--shape);
 	pointer-events: none;
 }
-.plate::before { inset: 1px; background: var(--frame); z-index: -2; }
-.plate::after { inset: 2px; background: var(--plate-fill, var(--bg)); z-index: -1; }
+.plate::before { inset: 0; background: var(--frame-solid); z-index: -2; }
+/* The fill catches a little light from the top, like a bevel: a faint accent highlight fading into the plate. */
+.plate::after {
+	inset: 1px;
+	z-index: -1;
+	background:
+		linear-gradient(180deg, color-mix(in srgb, var(--fg) 7%, transparent) 0, transparent 1px),
+		linear-gradient(180deg, color-mix(in srgb, var(--accent-color) 6%, var(--plate-fill, var(--bg))) 0, var(--plate-fill, var(--bg)) 90px);
+}
 /* The strip: a 26px bar and a 5px tick along the top edge, after the top-left cut. */
 .strip {
 	position: absolute;
