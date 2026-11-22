@@ -12,7 +12,9 @@
       - filesystems more than 85% full, or on course to fill within a week
         (observe__query on node_filesystem_avail_bytes and node_filesystem_size_bytes, real filesystems only);
       - disks whose SMART health isn't passing (observe__query: smartctl_device_smart_status == 0);
-      - open commitments in memory (memory__list with kind commitment and status open).
+      - open commitments in memory (memory__list with kind commitment and status open);
+      - NetBird access drift (netbird_access with view drift): policies or groups that differ between the dashboard
+        and the repo's modules/netbird-policies.nix. The "deliberately broad" list on its own needs no mention.
 
       If none of that needs attention, answer NOTHING.
 

@@ -131,7 +131,7 @@ if (config.testTools) install(TestTools, true);
 if (MapTool) install(MapTool);
 // NetBird's access settings, read-only, when the CosmosAuditor token is given (agent.netbirdApi).
 const netbirdToken = optionalCredential("netbird-api-token");
-if (netbirdToken) install(netbirdExtension(netbirdToken));
+if (netbirdToken) install(netbirdExtension(netbirdToken, config.netbirdDeclared));
 // Installed, but in no conversation by default: chats add the one for the model they're on.
 if (config.chat) {
 	registry.install(HandOff);

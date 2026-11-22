@@ -42,6 +42,34 @@ let
         in
         "- ${sv.name}${optionalString (sv.info != "") " — ${sv.info}"}"
         + optionalString (details != [ ]) "\n${concatMapStringsSep "\n" (d: "  - ${d}") details}";
+      netbird = config.cosmos.netbird;
+      groupsOf =
+        name:
+        lib.attrNames (
+          filterAttrs (_: g: lib.elem name (if g.members != null then g.members else g.known)) netbird.groups
+        );
+      ports =
+        p:
+        "${lib.toUpper p.protocol} ${if p.ports == [ ] then "all ports" else concatStringsSep "," p.ports}";
+      reachedBy =
+        name:
+        let
+          mine = groupsOf name;
+        in
+        mapAttrsToList (pn: p: "${concatStringsSep "," p.from} (${pn}: ${ports p})") (
+          filterAttrs (_: p: lib.any (g: lib.elem g mine) p.to) netbird.policies
+        );
+      policy =
+        name: p:
+        "- ${name}: ${concatStringsSep "," p.from} ${
+          if p.bidirectional then "<->" else "->"
+        } ${concatStringsSep "," p.to}, ${ports p}. ${p.why}"
+        + optionalString (p.broad != null) " (deliberately broad: ${p.broad})"
+        + optionalString (p.owner != "owner") " (the ${p.owner}'s)";
+      group =
+        name: g:
+        "- ${name}: ${if g.members != null then concatStringsSep ", " g.members else "members not tracked"}"
+        + optionalString (g.description != "") " — ${g.description}";
       node =
         name: n:
         let
@@ -57,6 +85,10 @@ let
           ++ [ "Interfaces:" ]
           ++ mapAttrsToList interface used
           ++ lib.optional (unused != [ ]) "- not connected: ${concatStringsSep ", " unused}"
+          ++ lib.optional (groupsOf name != [ ]) "NetBird groups: ${concatStringsSep ", " (groupsOf name)}"
+          ++ lib.optional (
+            reachedBy name != [ ]
+          ) "Reachable over NetBird by: ${concatStringsSep "; " (reachedBy name)}"
           ++ lib.optionals (services != { }) ([ "Services:" ] ++ mapAttrsToList service services)
         );
     in
@@ -73,6 +105,17 @@ let
         "## Nodes"
       ]
       ++ mapAttrsToList node topology.nodes
+      ++ [
+        (
+          "## Access over NetBird\n"
+          + "NetBird drops anything no policy allows, before the hosts' firewalls. Declared in modules/netbird-policies.nix; "
+          + "the netbird_access tool shows the live settings, and its drift view compares them with these.\n\n"
+          + "Policies:\n"
+          + concatStringsSep "\n" (mapAttrsToList policy netbird.policies)
+          + "\n\nGroups:\n"
+          + concatStringsSep "\n" (mapAttrsToList group netbird.groups)
+        )
+      ]
     )
     + "\n";
 in
@@ -116,6 +159,17 @@ in
             interfaces.lan = {
               network = "home";
               addresses = [ "10.77.10.1" ];
+            };
+          };
+
+          # The NAS shared with the brother: not a NixOS host of this flake, so described here.
+          nodes.hestia = config.lib.topology.mkDevice "hestia" {
+            info = "Shared NAS (Fedora 45), the owner's and his brother's; NFS shares, reached over NetBird only";
+            interfaceGroups = [ [ "nb-wt0" ] ];
+            interfaces.nb-wt0 = {
+              network = "netbird";
+              virtual = true;
+              addresses = [ "100.94.252.21" ];
             };
           };
 

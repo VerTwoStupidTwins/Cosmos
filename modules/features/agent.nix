@@ -111,6 +111,7 @@
           memory = if hasMemory then { inherit (cfg.memory) quietMinutes roomName; } else null;
           schedules = lib.mapAttrs (_: s: { inherit (s) roomName prompt quiet; }) cfg.schedules;
           topology = if cfg.topologyFile == null then null else "${cfg.topologyFile}";
+          netbirdDeclared = if cfg.netbirdDeclared == null then null else "${cfg.netbirdDeclared}";
           chat =
             if cfg.chat.enable then
               {
@@ -242,6 +243,12 @@
           type = lib.types.bool;
           default = true;
           description = "Give the agent the read-only NetBird token, for the netbird_access tool (policies, groups, peers).";
+        };
+
+        netbirdDeclared = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = "modules/netbird-policies.nix as JSON (set there), for netbird_access's drift view.";
         };
 
         topologyFile = lib.mkOption {

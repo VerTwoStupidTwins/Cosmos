@@ -17,6 +17,7 @@ export type Config = {
 	// Jobs the scheduler (systemd timers) starts by name; a quiet job posts nothing when it answers NOTHING.
 	schedules: Record<string, { roomName: string; prompt: string; quiet: boolean }>;
 	topology: string | null; // the homelab map (markdown), or null
+	netbirdDeclared: string | null; // modules/netbird-policies.nix as JSON, for the drift check
 	// Chats (web app + Matrix Chat room): they start on `mainModel` and hand off to `workModel` for homelab work.
 	chat: { roomName: string; port: number; mainModel: string; workModel: string; titleModel: string } | null;
 	models: {
