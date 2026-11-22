@@ -14,6 +14,8 @@ use crate::store::{KINDS, Patch, Point, STATUSES, Store, has_status};
 const PROMPT: &str = include_str!("consolidate_prompt.txt");
 /// A new item this close to a kept one is the same item said again.
 pub const DUPLICATE_SIMILARITY: f64 = 0.93;
+/// A new item this close to a kept one of the same kind is about the same thing: it updates that one.
+pub const SIMILAR_SIMILARITY: f64 = 0.80;
 const MAX_EXCHANGES: i64 = 40;
 const EXCHANGE_CHARS: usize = 1500;
 const MAX_TOPICS: usize = 3;
@@ -120,7 +122,14 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
 
     // The kept items nearest to each exchange, so the helper updates instead of repeating them.
     let items_only = json!({ "must": [{ "key": "type", "match": { "value": "item" } }] });
-    let mut near: BTreeSet<i64> = BTreeSet::new();
+    // Items saved or changed during the session, which the helper must check, then the kept items nearest each exchange.
+    // An item saved while an answer was written predates that exchange, which is stored after the answer.
+    let first = exchanges
+        .first()
+        .and_then(|e| chrono::DateTime::parse_from_rfc3339(&e.created).ok())
+        .map(|t| (t - chrono::Duration::minutes(15)).with_timezone(&chrono::Utc).to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_default();
+    let mut near: BTreeSet<i64> = app.store.lock().await.items_changed_since(&first, 10)?.into_iter().collect();
     for id in &ids {
         for (item, _) in app.qdrant.near_point(*id, &items_only, 4).await? {
             near.insert(item);
@@ -129,7 +138,7 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
             break;
         }
     }
-    let known_points = app.store.lock().await.get_many(&near.into_iter().collect::<Vec<_>>())?;
+    let mut known_points = app.store.lock().await.get_many(&near.into_iter().collect::<Vec<_>>())?;
     let known: HashSet<i64> = known_points.iter().map(|p| p.id).collect();
 
     let known_text =
@@ -143,16 +152,26 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
     let out = app.models.chat_json(PROMPT, &user, schema()).await?;
     let (topics, mut changes) = plan(&out, &known, &ids);
 
-    // A new item that says what a kept one already says is dropped.
+    // A new item that says what a kept one already says is dropped; one close to a kept item of the same kind is that
+    // item, updated (the helper often adds where it should update, such as an idea saved during the chat).
     let mut kept = Vec::new();
-    for c in changes.drain(..) {
+    for mut c in changes.drain(..) {
         if c.update.is_none() {
             let v = app.models.embed(&[item_text(&c.kind, &c.content)]).await?.remove(0);
-            if let Some((id, sim)) = app.qdrant.similar(&v, &items_only, 1).await?.first()
-                && *sim >= DUPLICATE_SIMILARITY
-            {
-                eprintln!("memory: dropped a new {} that repeats #{id} ({sim:.2}): {}", c.kind, c.content);
-                continue;
+            if let Some((id, sim)) = app.qdrant.similar(&v, &items_only, 1).await?.first().copied() {
+                if sim >= DUPLICATE_SIMILARITY {
+                    eprintln!("memory: dropped a new {} that repeats #{id} ({sim:.2}): {}", c.kind, c.content);
+                    continue;
+                }
+                let same_kind = app.store.lock().await.get(id)?.filter(|p| p.kind.as_deref() == Some(c.kind.as_str()));
+                if sim >= SIMILAR_SIMILARITY && let Some(existing) = same_kind {
+                    eprintln!("memory: a new {} is close to #{id} ({sim:.2}), so it updates it", c.kind);
+                    c.update = Some(id);
+                    c.links.retain(|l| *l != id);
+                    if !known_points.iter().any(|p| p.id == id) {
+                        known_points.push(existing);
+                    }
+                }
             }
         }
         kept.push(c);

@@ -416,6 +416,16 @@ impl Store {
         Ok(id)
     }
 
+    /// Items created or changed since a time, such as those saved during a session being consolidated.
+    pub fn items_changed_since(&self, since: &str, limit: i64) -> Result<Vec<i64>> {
+        let mut stmt = self.db.prepare(
+            "SELECT DISTINCT c.item FROM changes c JOIN points p ON p.id = c.item
+             WHERE c.at >= ?1 AND p.retracted = 0 ORDER BY c.item LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![since, limit], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     // ---- announcements
 
     fn change_row(&self, r: &Row) -> rusqlite::Result<Change> {

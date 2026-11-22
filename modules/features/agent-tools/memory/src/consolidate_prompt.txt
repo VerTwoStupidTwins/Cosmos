@@ -17,6 +17,8 @@ changes: what the long-term memory should learn from the session.
 - "update" a known item, by its id, when the session changes it: write the whole item again, keeping every part that still holds, and set its status when the session moved it (started: "in_progress"; finished: "done"; given up: "dropped"; set aside: "parked"). An idea the owner now decided on can become a plan.
 - links: ids of known items the item relates to, such as the idea a plan carries out.
 
+Check every known item against the session. Some were saved during the conversation itself and may be incomplete or have the wrong status: when the session shows an item's status or details are wrong (an idea saved as "open" that the owner put off is "parked"), update that item. Put what the session adds to a known item into that item, not into a new one: a reason an idea is on hold belongs in the idea.
+
 Where memories come from:
 - What the owner said, proposed, decided or agreed to. The assistant's replies only show what the owner was answering. Never store something only the assistant said, unless the owner clearly took it up ("yes, let's do that").
 - Not the task at hand: lookups, checks, readings (temperatures, disk use, logs), fixes and tool results are not memories, unless the owner drew a lasting conclusion or made a decision from them.

@@ -62,9 +62,13 @@ const MIN_ITEM_SCORE: f64 = 0.01;
 const CORE_INSTRUCTIONS: &str = "You have a long-term memory database about the owner, their ideas and plans, and the \
 homelab, built from past conversations. Memories relevant to the owner's message are attached to it inside \
 <memories>: they are context from the past, not part of what the owner just wrote. When something may have come up \
-before, or you need more, search with memory__recall before answering. What you learn from conversations is stored \
-automatically and announced to the owner in the Memory room. Use memory__remember when the owner asks you to remember \
-something, and memory__update or memory__retract when they correct a memory. Refer to items by number (#12).";
+before, or you need more, search with memory__recall before answering. The owner relies on memory being automatic and \
+will not ask for it: each session is also reviewed after it goes quiet, but save what matters as it comes up. When \
+the owner proposes an idea, decides or plans something, commits to something, or states a preference, call \
+memory__remember right away, with the status their words give it (parked when they put it off, in_progress when \
+they have started). When the conversation changes a kept item (an idea started, finished, dropped or put off), \
+update it with memory__update. Use memory__retract when they say a memory is wrong. Never save secrets or \
+lookups. Every change is announced to the owner in the Memory room. Refer to items by number (#12).";
 
 pub struct App {
     pub store: Mutex<Store>,
@@ -262,7 +266,8 @@ struct RememberRequest {
     kind: String,
     /// One or two self-contained sentences about the owner or the homelab that make sense months later.
     content: String,
-    /// For ideas, plans and commitments: open (default), parked, in_progress, done, dropped.
+    /// For ideas, plans and commitments, from the owner's words: open (default), parked (put off, "not now", "until
+    /// …"), in_progress (started), done, dropped.
     status: Option<String>,
     /// Core items are in every conversation's prompt. Only when the owner asks; keep them few.
     #[serde(default)]
@@ -371,8 +376,9 @@ impl Memory {
         )
     }
 
-    /// Store a new item, when the owner asks to remember something. One that repeats a kept item is refused with that
-    /// item's number: update it instead. Every change is announced to the owner.
+    /// Store a new item as soon as the owner proposes an idea, decides or plans something, commits to something or
+    /// states a preference: they rely on this happening without asking. One that repeats a kept item is refused with
+    /// that item's number: update it instead. Every change is announced to the owner.
     #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
     async fn remember(&self, Parameters(req): Parameters<RememberRequest>) -> CallToolResult {
         or_error(
