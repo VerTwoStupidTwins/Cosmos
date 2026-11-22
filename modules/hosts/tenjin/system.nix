@@ -15,6 +15,7 @@ in
       nixos.desktop
       nixos.niri
       nixos.build-client
+      nixos.deploy
       nixos.cache-push
       nixos.cache-pull
       nixos.claude-code

@@ -26,6 +26,9 @@ in
       };
     };
 
+  # A host built on a builder (rebuild-<host>, modules/features/deploy.nix) takes the builder's signed results.
+  flake.modules.nixos.build-target.nix.settings.trusted-public-keys = signingKeys;
+
   flake.modules.nixos.build-client =
     { config, ... }:
     {

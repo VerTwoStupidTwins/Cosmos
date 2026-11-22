@@ -12,6 +12,7 @@ in
       nixos.systemd-boot
       nixos.server
       nixos.cache-pull
+      nixos.build-target
       nixos.gpu-nvidia
       nixos.gpu-amd
       nixos.gpu-intel
