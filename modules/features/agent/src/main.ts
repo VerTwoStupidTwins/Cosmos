@@ -68,6 +68,23 @@ const HandOff = defineExtension({
 	],
 });
 
+// Only in chats on workhorse: the way back to main once the work is done.
+const HandBack = defineExtension({
+	name: "hand-back",
+	tools: [
+		defineTool({
+			name: "hand_back",
+			description:
+				"Hand this chat back to main, the quick everyday model, once the work is done and the conversation is casual again. It takes over from the owner's next message.",
+			parameters: obj({ reason: str() }),
+			replay: "safe",
+			execute: async () => ({
+				output: [{ type: "text", text: "Noted: main takes over from the owner's next message. Tell the owner in one short line." }],
+			}),
+		}),
+	],
+});
+
 const approval = new Set<string>(config.testTools ? ["restart_service"] : []);
 const registry = createRegistry();
 // What every conversation gets (the harness default), and of that what main doesn't get in a chat.
@@ -90,7 +107,11 @@ for (const [name, server] of Object.entries(config.tools)) {
 const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
 if (memory) install(memoryExtension(memory.call));
 if (config.testTools) install(TestTools, true);
-if (config.chat) registry.install(HandOff); // installed, but in no conversation by default
+// Installed, but in no conversation by default: chats add the one for the model they're on.
+if (config.chat) {
+	registry.install(HandOff);
+	registry.install(HandBack);
+}
 
 const bridge = new Bridge({
 	matrix,
@@ -110,6 +131,7 @@ const bridge = new Bridge({
 			endpoint: config.models.endpoint,
 			homelab,
 			handOff: HandOff,
+			handBack: HandBack,
 		},
 	}),
 	context,

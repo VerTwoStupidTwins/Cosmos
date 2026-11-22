@@ -64,6 +64,7 @@ export type ChatOptions = {
 	endpoint: string; // llama-swap's OpenAI API, for naming chats
 	homelab: Extension[]; // what main doesn't get: the homelab tools
 	handOff: Extension; // what only main gets: hand_off
+	handBack: Extension; // what only workhorse gets in a chat: hand_back
 };
 
 const CHAT_MAIN = [
@@ -74,8 +75,10 @@ const CHAT_MAIN = [
 	"that you're handing over to workhorse and why. Don't attempt that work yourself.",
 ].join(" ");
 const CHAT_WORK = [
-	"This chat was handed to you, workhorse, for work: you have the homelab tools.",
-	"Keep the conversational tone of the chat. The owner can switch back to main with /chat when the work is done.",
+	"This chat was handed to you, workhorse, for work: you have the homelab tools. Keep the chat's conversational tone.",
+	"When the work is done and the talk turns casual again (ideas, plans, small talk with no tools needed), call",
+	"hand_back with a short reason and tell the owner in one line that main takes it from here. Not while work is",
+	"still going on.",
 ].join(" ");
 const handOffPrompt = (reason: string) =>
 	`[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
@@ -647,24 +650,25 @@ export class Bridge {
 				if (owed.previous !== undefined) exchange.previous = owed.previous;
 				const at = Date.now(); // one value for the stored state and the copy in memory
 				// A chat whose answer came with a hand_off moves to workhorse in the commit that settles it, with a run
-				// that picks up the work, so a crash can't lose or repeat the switch.
+				// that picks up the work; one whose answer came with a hand_back moves to main, which answers the next
+				// message. In the settling commit, so a crash can't lose or repeat the switch.
+				const c = this.options.chat;
 				const chat = owed.chat !== undefined ? this.#state.chats[owed.chat] : undefined;
-				const reason = answered && chat && owed.chat && chat.model === this.options.chat?.mainModel ? await this.#handOffReason(owed.chat) : undefined;
+				const onMain = chat?.model === c?.mainModel;
+				const reason = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back") : undefined;
+				const target = onMain ? c?.workModel : c?.mainModel;
 				const next: Pending | undefined =
-					reason !== undefined ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
+					reason !== undefined && onMain ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
 				// Looked up before the commit: a Harness read inside a commit waits for that commit, for ever.
-				const conversation = next ? await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx) : undefined;
+				const conversation = reason !== undefined ? await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx) : undefined;
 				const continued = await this.#commitAdmitting(
 					async (tx) => {
-						if (reason === undefined || !next || !conversation) return undefined;
-						const work = this.options.chat!.workModel;
-						const admitted = await conversation.submit(tx, {
-							type: "input",
-							content: handOffPrompt(reason),
-							requestId: next.event,
-							entry: { kind: "cosmos.handoff", data: { reason, model: work } },
-						});
-						await configure(tx, conversation.id, this.#chatAgent(work));
+						if (reason === undefined || !conversation || !target) return undefined;
+						const entry = { kind: "cosmos.handoff", data: { reason, model: target } };
+						const admitted = next
+							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason), requestId: next.event, entry })
+							: await conversation.submit(tx, { type: "write", entry });
+						await configure(tx, conversation.id, this.#chatAgent(target));
 						return admitted;
 					},
 					(s, admitted) => {
@@ -673,17 +677,17 @@ export class Bridge {
 							if (!s.toIndex.some((x) => x.event === exchange.event)) s.toIndex.push(exchange);
 							if (this.#consolidated(owed.room)) s.sessions[key] = at;
 						}
-						if (admitted !== undefined && next && s.chats[owed.chat!]) {
-							s.pending[String(admitted)] = next;
-							s.chats[owed.chat!]!.model = this.options.chat!.workModel;
+						if (admitted !== undefined && target && s.chats[owed.chat!]) {
+							if (next) s.pending[String(admitted)] = next;
+							s.chats[owed.chat!]!.model = target;
 						}
 					},
 				);
 				if (remember) void this.#flushIndex();
-				if (continued !== undefined && next) {
-					console.error(`chat: ${owed.chat} handed to ${this.options.chat!.workModel}: ${reason}`);
-					await this.#notice({ room: owed.room, thread: next.thread! }, `🔀 Switched to ${this.options.chat!.workModel}: ${reason}`);
-					this.#deliver(String(continued));
+				if (continued !== undefined && chat) {
+					console.error(`chat: ${owed.chat} handed to ${target}: ${reason}`);
+					await this.#notice({ room: owed.room, thread: chat.thread }, `🔀 Switched to ${target}: ${reason}`);
+					if (next) this.#deliver(String(continued));
 				}
 				if (answered && chat && owed.chat && !chat.titled && owed.text !== undefined) void this.#title(owed.chat, owed.text, markdown);
 				this.#buffers.delete(id);
@@ -719,7 +723,7 @@ export class Bridge {
 		const c = this.options.chat!;
 		return model === c.mainModel
 			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: CHAT_MAIN }
-			: { model: { provider: "nabu", modelId: model }, extensions: null, instructions: CHAT_WORK };
+			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack] }, instructions: CHAT_WORK };
 	}
 
 	// The Chat room: made on the first chat, with the owner invited.
@@ -759,16 +763,18 @@ export class Bridge {
 			id = Object.entries(this.#state.chats).find(([, c]) => c.thread === root)?.[0];
 			if (!id) return;
 		} else id = await this.#newChat(event.event_id, text);
-		if (await this.#command(id, text)) return;
-		await this.#chatSubmit(id, text, event.event_id, "matrix");
+		const rest = await this.#command(id, text);
+		if (rest) await this.#chatSubmit(id, rest, event.event_id, "matrix");
 	}
 
-	async #command(id: string, text: string): Promise<boolean> {
+	// "/work" or "/chat" switches the chat; text after it is then sent as a message to the model switched to.
+	// Returns what is left to send.
+	async #command(id: string, text: string): Promise<string> {
 		const command = /^\/(work|chat)\b\s*([\s\S]*)$/.exec(text.trim());
-		if (!command) return false;
+		if (!command) return text;
 		const c = this.options.chat!;
-		await this.switchModel(id, command[1] === "work" ? c.workModel : c.mainModel, command[2]?.trim() || "the owner switched");
-		return true;
+		await this.switchModel(id, command[1] === "work" ? c.workModel : c.mainModel, "the owner switched");
+		return command[2]?.trim() ?? "";
 	}
 
 	async #chatSubmit(id: string, text: string, requestId: string, from: "web" | "matrix") {
@@ -796,8 +802,8 @@ export class Bridge {
 		this.#deliver(String(submitted));
 	}
 
-	// Did main call hand_off while answering? Read from the transcript, so it survives a restart.
-	async #handOffReason(id: string): Promise<string | undefined> {
+	// Did the model call `tool` (hand_off, hand_back) while answering? Read from the transcript, so it survives a restart.
+	async #switchRequest(id: string, tool: string): Promise<string | undefined> {
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
 		for (const entry of page?.items ?? []) {
@@ -805,7 +811,7 @@ export class Bridge {
 			for (const message of entry.model ?? []) {
 				if (message.role !== "assistant") continue;
 				for (const part of message.content) {
-					if (part.type === "toolCall" && part.name === "hand_off") return String(part.arguments.reason ?? "the conversation turned to work");
+					if (part.type === "toolCall" && part.name === tool) return String(part.arguments.reason ?? "the conversation moved on");
 				}
 			}
 		}
@@ -864,7 +870,8 @@ export class Bridge {
 		const room = await this.#chatRoom();
 		const root = await this.options.matrix.send(room, textContent(`🖥 ${text}`, html(`🖥 ${text}`)));
 		const id = await this.#newChat(root, text);
-		if (!(await this.#command(id, text))) await this.#chatSubmit(id, text, `web:${randomUUID()}`, "web");
+		const rest = await this.#command(id, text);
+		if (rest) await this.#chatSubmit(id, rest, `web:${randomUUID()}`, "web");
 		return id;
 	}
 
@@ -873,8 +880,8 @@ export class Bridge {
 		if (!chat) throw new Error(`no chat ${id}`);
 		const room = await this.#chatRoom();
 		await this.options.matrix.send(room, { ...textContent(`🖥 ${text}`, html(`🖥 ${text}`)), ...inThread(chat.thread) });
-		if (await this.#command(id, text)) return;
-		await this.#chatSubmit(id, text, `web:${randomUUID()}`, "web");
+		const rest = await this.#command(id, text);
+		if (rest) await this.#chatSubmit(id, rest, `web:${randomUUID()}`, "web");
 	}
 
 	async webApprove(id: string, event: string, allow: boolean) {
