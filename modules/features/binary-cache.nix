@@ -72,9 +72,14 @@ in
         wants = [ "network-online.target" ];
         after = [ "network-online.target" ];
         environment.XDG_CONFIG_HOME = "%t/attic-watch-store";
+        # It waits out an unreachable cache (lugh down, or tenjin away from NetBird) instead of failing: a unit that fails
+        # during a switch fails the activation, and nh then skips the boot entry.
         script = ''
           ${lib.getExe pkgs.attic-client} login --set-default ${cache} ${url} "$(< "$CREDENTIALS_DIRECTORY/token")"
-          exec ${lib.getExe pkgs.attic-client} watch-store ${cache}:${cache}
+          until ${lib.getExe pkgs.attic-client} watch-store ${cache}:${cache}; do
+            echo "Can't reach the cache; trying again in a minute."
+            sleep 60
+          done
         '';
         serviceConfig = {
           DynamicUser = true;
