@@ -1,8 +1,8 @@
-<!-- What memory holds, read-only: conversations and their consolidation, items, backlogs, the latest changes. -->
+<!-- What memory holds, read-only, as station plates: totals, conversations, items, and the latest changes. -->
 <script lang="ts">
 	import type { MemoryStatus } from "../../../src/api.ts";
 	import { api, report } from "../lib/api";
-	import { when } from "../lib/format";
+	import { when, zero } from "../lib/format";
 	import Bar from "./Bar.svelte";
 
 	let { onmenu }: { onmenu: () => void } = $props();
@@ -15,7 +15,7 @@
 	const sum = (numbers: number[]) => numbers.reduce((a, b) => a + b, 0);
 </script>
 
-<Bar title="Memory" {onmenu} />
+<Bar tag="MEM" title="Memory" {onmenu} />
 
 <div class="page">
 	<div class="inner">
@@ -24,62 +24,79 @@
 		{:else if !status.enabled}
 			<p class="empty">Memory isn't set up.</p>
 		{:else}
+			{@const backlog = status.unindexed + status.unannounced + status.owedToMemory}
 			<div class="stats">
-				<div class="stat"><b>{sum(status.items.map((i) => i.count))}</b><span>items kept</span></div>
-				<div class="stat"><b>{sum(status.conversations.map((c) => c.exchanges))}</b><span>exchanges stored</span></div>
-				<div class="stat"><b>{status.waiting.length}</b><span>waiting to consolidate</span></div>
-				<div class="stat"><b>{status.unindexed + status.unannounced + status.owedToMemory}</b><span>backlog</span></div>
+				<div class="stat plate"><span class="key">Items</span><b>{zero(sum(status.items.map((i) => i.count)), 3)}</b></div>
+				<div class="stat plate"><span class="key">Exchanges</span><b>{zero(sum(status.conversations.map((c) => c.exchanges)), 3)}</b></div>
+				<div class="stat plate"><span class="key">Waiting</span><b>{zero(status.waiting.length)}</b></div>
+				<div class="stat plate" class:alert={backlog > 0}><span class="key">Backlog</span><b>{zero(backlog)}</b></div>
 			</div>
 
-			<h3>Conversations</h3>
-			<table>
-				<thead><tr><th>Conversation</th><th>Stored</th><th>Consolidated</th><th>Topics</th><th>Next</th></tr></thead>
-				<tbody>
+			<section class="plate" style="--br: 10px">
+				<span class="strip"></span>
+				<div class="head"><span class="tag">CNV</span><span class="key">Conversations</span></div>
+				<div class="table">
+					<div class="tr th"><span>Conversation</span><span>Stored</span><span>Cons.</span><span>Topics</span><span>Next</span></div>
 					{#each status.conversations as c (c.room)}
-						<tr><td>{c.name}</td><td class="n">{c.exchanges}</td><td class="n">{c.consolidated}</td><td class="n">{c.topics}</td><td>{when(c.consolidateAt)}</td></tr>
+						<div class="tr">
+							<span class="name">{c.name}</span><span>{zero(c.exchanges)}</span><span>{zero(c.consolidated)}</span><span>{zero(c.topics)}</span>
+							<span class="muted">{c.consolidateAt ? when(c.consolidateAt).slice(11) : "—"}</span>
+						</div>
 					{/each}
-				</tbody>
-			</table>
+				</div>
+			</section>
 
-			<h3>Items</h3>
-			<table>
-				<thead><tr><th>Kind</th><th>Status</th><th>Count</th></tr></thead>
-				<tbody>
-					{#each status.items as i (`${i.kind}/${i.status}`)}
-						<tr><td>{i.kind}</td><td>{i.status.replace("_", " ") || "—"}</td><td class="n">{i.count}</td></tr>
-					{:else}
-						<tr><td colspan="3">None yet</td></tr>
-					{/each}
-				</tbody>
-			</table>
-			<p class="sub">
-				{status.core} core · {status.retracted} retracted · {status.unindexed} waiting to be indexed · {status.unannounced} not announced yet
-			</p>
-
-			<h3>Latest changes</h3>
-			<ul>
-				{#each status.changes as c (c.change)}
-					<li>{c.notice_text} <span class="sub">{when(c.at)} · {c.origin}</span></li>
+			<section class="plate" style="--br: 10px">
+				<span class="strip"></span>
+				<div class="head"><span class="tag">ITM</span><span class="key">Items</span></div>
+				{#each status.items as i (`${i.kind}/${i.status}`)}
+					<div class="stat-row">
+						<span>{i.kind}{i.status ? ` · ${i.status.replace("_", " ")}` : ""}</span>
+						<span class="leader"></span>
+						<b>{zero(i.count)}</b>
+					</div>
 				{:else}
-					<li>None yet</li>
+					<p class="muted">None yet.</p>
 				{/each}
-			</ul>
-			<p class="sub">Read-only. Correct a memory with a reply under its notice in Matrix's Memory room, or ❌ to undo it.</p>
+				<p class="sub">{status.core} core · {status.retracted} retracted · {status.unindexed} to index · {status.unannounced} to announce</p>
+			</section>
+
+			<section class="plate" style="--br: 10px">
+				<span class="strip"></span>
+				<div class="head"><span class="tag">LOG</span><span class="key">Latest changes</span></div>
+				{#each status.changes as c (c.change)}
+					<div class="change">
+						<span class="time">{when(c.at).slice(5)}</span>
+						<span class="what">{c.notice_text}</span>
+					</div>
+				{:else}
+					<p class="muted">None yet.</p>
+				{/each}
+				<p class="sub">Read-only. Correct a memory by replying under its notice in Matrix's Memory room, or ❌ to undo it.</p>
+			</section>
 		{/if}
 	</div>
 </div>
 
 <style>
-	.page { flex: 1; overflow-y: auto; padding: 20px 16px; }
-	.inner { max-width: 780px; margin: 0 auto; }
-	h3 { font-size: 14px; margin: 22px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-	table { width: 100%; font-size: 14px; }
-	.n { text-align: right; font-variant-numeric: tabular-nums; }
-	.sub { font-size: 12px; color: var(--muted); }
-	ul { padding-left: 18px; margin: 0; font-size: 14px; }
-	li { margin: 0 0 6px; }
-	.stats { display: flex; gap: 10px; flex-wrap: wrap; }
-	.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; min-width: 110px; }
-	.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
-	.stat span { font-size: 12px; color: var(--muted); }
+	.page { flex: 1; overflow-y: auto; padding: 16px; }
+	.inner { max-width: 860px; margin: 0 auto; display: grid; gap: 12px; }
+	.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+	.stat { display: flex; justify-content: space-between; align-items: baseline; padding: 10px 12px; --br: 8px; }
+	.stat b { font-size: 22px; color: var(--accent-color); }
+	.stat.alert b { color: var(--warn); }
+	section { padding: 14px; }
+	.head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+	.table { display: grid; font-size: 12px; }
+	.tr { display: grid; grid-template-columns: 1fr 56px 56px 56px 64px; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+	.tr > span:not(:first-child) { text-align: right; }
+	.th { color: var(--dim); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+	.name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+	.stat-row { display: flex; gap: 8px; font-size: 12px; padding: 2px 0; }
+	.stat-row b { color: var(--accent-color); }
+	.change { display: flex; gap: 10px; font-size: 12px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+	.time { color: var(--muted); white-space: nowrap; font-size: 11px; padding-top: 1px; }
+	.what { overflow-wrap: anywhere; }
+	.sub { color: var(--muted); font-size: 10.5px; margin: 10px 0 0; }
+	@media (max-width: 600px) { .tr { grid-template-columns: 1fr 44px 44px 44px; } .tr > :last-child { display: none; } }
 </style>

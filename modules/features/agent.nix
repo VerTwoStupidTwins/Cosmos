@@ -37,7 +37,7 @@
         };
         sourceRoot = "source/web";
         inherit nodejs;
-        npmDepsHash = "sha256-fjD9GpV1HpapaOyRz4CYuF0I0UASPyMtY9cxPzOYWSQ=";
+        npmDepsHash = "sha256-NrP7qTmnF0txwG4YowryBEd/J7vF6dNiy7OJ3wwGpc0=";
         npmFlags = [ "--ignore-scripts" ];
         buildPhase = ''
           runHook preBuild
@@ -410,6 +410,10 @@
           sops.secrets.chat-password = lib.mkIf cfg.chat.enable {
             sopsFile = ../../secrets/${config.networking.hostName}.yaml;
           };
+          # tenjin pushes its wallpaper palette with this (modules/desktop/chat-theme.nix); shared, so common.yaml.
+          sops.secrets.chat-theme-token = lib.mkIf cfg.chat.enable {
+            sopsFile = ../../secrets/common.yaml;
+          };
 
           # The chat web app; streaming answers need nginx to pass events through as they come.
           web.sites.chat = lib.mkIf cfg.chat.enable {
@@ -445,7 +449,10 @@
               ]
               # memory reads it from $CREDENTIALS_DIRECTORY.
               ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}"
-              ++ lib.optional cfg.chat.enable "chat-password:${config.sops.secrets.chat-password.path}";
+              ++ lib.optionals cfg.chat.enable [
+                "chat-password:${config.sops.secrets.chat-password.path}"
+                "chat-theme-token:${config.sops.secrets.chat-theme-token.path}"
+              ];
               Restart = "always";
               RestartSec = 5;
               NoNewPrivileges = true;

@@ -1,4 +1,4 @@
-<!-- The sign-in form: one password, then a cookie good for 30 days. -->
+<!-- The sign-in plate: one password, then a cookie good for 30 days. -->
 <script lang="ts">
 	import { api } from "../lib/api";
 
@@ -27,9 +27,13 @@
 </script>
 
 <div class="login">
-	<form onsubmit={submit}>
-		<h1>Cosmos Chat</h1>
-		<input bind:this={field} bind:value={password} type="password" placeholder="Password" autocomplete="current-password" required />
+	<form class="plate" style="--br: 14px; --tl: 14px" onsubmit={submit}>
+		<span class="strip"></span>
+		<div class="head"><span class="tag">AUTH</span><h1>Cosmos<span class="sep">//</span>Chat</h1></div>
+		<label>
+			<span class="key">Key</span>
+			<input bind:this={field} bind:value={password} type="password" autocomplete="current-password" required />
+		</label>
 		<button class="primary" disabled={busy}>Sign in</button>
 		{#if error}<p class="error">{error}</p>{/if}
 	</form>
@@ -37,8 +41,12 @@
 
 <style>
 	.login { display: grid; place-items: center; height: 100%; padding: 16px; }
-	form { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; width: min(360px, 100%); display: grid; gap: 12px; }
-	h1 { margin: 0; font-size: 18px; }
-	input { font: inherit; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
-	.error { color: var(--warn); margin: 0; }
+	form { width: min(360px, 100%); display: grid; gap: 14px; padding: 24px 22px 22px; }
+	.head { display: flex; align-items: center; gap: 10px; }
+	h1 { margin: 0; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; }
+	.sep { color: var(--accent-color); margin: 0 2px; }
+	label { display: grid; gap: 4px; }
+	input { background: var(--raise); border: 1px solid var(--line); padding: 7px 9px; outline: none; }
+	input:focus { border-color: var(--frame); }
+	.error { color: var(--urgent); margin: 0; font-size: 12px; }
 </style>

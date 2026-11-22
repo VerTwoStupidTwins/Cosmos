@@ -1,6 +1,6 @@
-<!-- The message box: Enter sends, Shift+Enter makes a new line; it grows with the text. -->
+<!-- The message box plate: Enter sends, Shift+Enter makes a new line; it grows with the text. -->
 <script lang="ts">
-	let { placeholder, onsend }: { placeholder: string; onsend: (text: string) => Promise<void> } = $props();
+	let { model, onsend }: { model: string; onsend: (text: string) => Promise<void> } = $props();
 
 	let text = $state("");
 	let sending = $state(false);
@@ -36,15 +36,28 @@
 	}
 </script>
 
-<form onsubmit={send}>
-	<div class="inner">
-		<textarea bind:this={box} bind:value={text} rows="1" {placeholder} oninput={grow} onkeydown={keydown}></textarea>
-		<button class="primary" disabled={sending}>Send</button>
+<form class="plate" style="--br: 0px; --tl: 12px" onsubmit={send}>
+	<span class="strip"></span>
+	<div class="head">
+		<span class="tag">TX</span>
+		<span class="key">to {model}</span>
+		<span class="leader"></span>
+		<span class="hint">Enter send · Shift+Enter line · /work · /chat</span>
+	</div>
+	<div class="row">
+		<span class="prompt">▸</span>
+		<textarea bind:this={box} bind:value={text} rows="1" placeholder="message" oninput={grow} onkeydown={keydown} spellcheck="true"></textarea>
+		<button class="primary" disabled={sending || !text.trim()}>Send</button>
 	</div>
 </form>
 
 <style>
-	form { padding: 10px 16px 16px; }
-	.inner { max-width: 780px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
-	textarea { flex: 1; resize: none; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; max-height: 40vh; }
+	form { padding: 10px 12px 12px; }
+	.head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+	.hint { color: var(--muted); font-size: 10px; letter-spacing: 0.04em; }
+	.row { display: flex; align-items: flex-end; gap: 8px; }
+	.prompt { color: var(--accent-color); padding-bottom: 5px; }
+	textarea { flex: 1; resize: none; background: none; border: 0; outline: none; padding: 4px 0; max-height: 40vh; line-height: 1.55; }
+	textarea::placeholder { color: var(--muted); }
+	@media (max-width: 760px) { .hint { display: none; } }
 </style>

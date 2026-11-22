@@ -4,9 +4,10 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createRegistry, defineExtension, defineTool, type Extension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createServer } from "node:http";
+import { join } from "node:path";
 import { obj, str } from "@earendil-works/pi-schema";
 import { type AlertPayload, Bridge } from "./bridge.js";
-import { credential, loadConfig } from "./config.js";
+import { credential, loadConfig, optionalCredential } from "./config.js";
 import { Matrix } from "./matrix.js";
 import { mcpExtension, type ServerCall } from "./mcp.js";
 import { memoryExtension } from "./memory.js";
@@ -177,7 +178,13 @@ const alertServer = createServer((request, response) => {
 	});
 });
 alertServer.listen(config.alerts.port, "127.0.0.1", () => console.error(`alerts: listening on 127.0.0.1:${config.alerts.port}`));
-const webServer = config.chat ? startWeb(bridge, { port: config.chat.port, password: credential("chat-password"), context }) : undefined;
+const webServer = config.chat ? startWeb(bridge, {
+			port: config.chat.port,
+			password: credential("chat-password"),
+			context,
+			themeToken: optionalCredential("chat-theme-token"),
+			themeFile: join(process.env.STATE_DIRECTORY ?? ".", "theme.json"),
+		}) : undefined;
 
 let closing = false;
 const shutdown = async () => {

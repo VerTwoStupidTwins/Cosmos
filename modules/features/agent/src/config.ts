@@ -36,3 +36,12 @@ export function credential(name: string): string {
 	if (!dir) throw new Error(`no CREDENTIALS_DIRECTORY for ${name}`);
 	return readFileSync(join(dir, name), "utf8").trim();
 }
+
+// A credential the service may run without (a feature that is simply off when it's missing).
+export function optionalCredential(name: string): string | undefined {
+	try {
+		return credential(name);
+	} catch {
+		return undefined;
+	}
+}

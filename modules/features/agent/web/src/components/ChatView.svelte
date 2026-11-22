@@ -1,10 +1,11 @@
-<!-- A chat: its bar, its items (following the server's event stream), and the message box. No `id`: a new chat. -->
+<!-- A chat: its bar, its log (following the server's event stream), and the message box. No `id`: a new chat. -->
 <script lang="ts">
 	import type { ChatDetail, ChatEvent, ChatItem } from "../../../src/api.ts";
 	import { MAIN_MODEL, WORK_MODEL } from "../../../src/api.ts";
 	import { api, report } from "../lib/api";
 	import { when } from "../lib/format";
-	import { markdown } from "../lib/markdown";
+	import { copyButtons, markdown } from "../lib/markdown";
+	import { modelTag } from "../lib/types";
 	import Bar from "./Bar.svelte";
 	import Composer from "./Composer.svelte";
 	import Message from "./Message.svelte";
@@ -23,6 +24,9 @@
 	let partial = $state("");
 	let truncated = $state(false);
 	let log: HTMLDivElement | undefined = $state();
+
+	const messages = $derived(items.filter((i) => i.kind !== "notice").length);
+	const model = $derived(chat?.model ?? MAIN_MODEL);
 
 	// Follow the open chat; a new id closes the old stream and starts afresh.
 	$effect(() => {
@@ -101,51 +105,64 @@
 	}
 </script>
 
-<Bar title={chat?.title ?? (id ? "" : "New chat")} {chat} {actions} {onmenu} />
+<Bar tag="CHT" title={chat?.title ?? (id ? "" : "New chat")} {chat} {busy} {messages} {actions} {onmenu} />
 
 <div class="log" bind:this={log}>
 	<div class="inner">
 		{#if chat?.deleted != null}
-			<div class="banner">
-				<span>🗑 In the Trash since {when(chat.deleted)}. Its ideas went to memory; restore it to carry on.</span>
+			<div class="banner plate" style="--br: 8px">
+				<span class="tag warn">TRS</span>
+				<span class="grow">In the Trash since {when(chat.deleted)}. Its ideas went to memory; restore it to carry on.</span>
 				<button class="primary" onclick={restore}>Restore</button>
 			</div>
 		{/if}
-		{#if truncated}<div class="notice">Earlier messages aren't shown.</div>{/if}
+		{#if truncated}<div class="older">· · · earlier messages not shown · · ·</div>{/if}
 		{#if id === null}
-			<p class="empty">Start a chat with main. It hands over to workhorse when the talk turns to work.</p>
+			<div class="start">
+				<span class="tag">New</span>
+				<p>Start a chat with main. It hands over to workhorse when the talk turns to work, and says so.</p>
+			</div>
 		{/if}
 		{#each items as item, i (i)}
 			<Message {item} />
 		{/each}
 		{#each chat?.approvals ?? [] as approval (approval.event)}
-			<div class="banner">
-				<span>🔐 Approval needed</span>
-				<code>{approval.call}</code>
+			<div class="banner plate" style="--br: 8px">
+				<span class="tag warn">Auth</span>
+				<span class="grow">Approval needed</span>
 				<button class="primary" onclick={() => id && api.approve(id, approval.event, true).catch(report)}>Approve</button>
 				<button onclick={() => id && api.approve(id, approval.event, false).catch(report)}>Deny</button>
+				<code class="call">{approval.call}</code>
 			</div>
 		{/each}
 		{#if busy}
-			{#if partial}
-				<div class="pending">{@html markdown(partial)}</div>
-			{:else}
-				<div class="notice"><span class="dots">{chat?.model ?? MAIN_MODEL} is thinking</span></div>
-			{/if}
+			<article class="pending">
+				<header>
+					<span class="tag">{modelTag(model)}</span>
+					<span class="leader"></span>
+					<span class="state dots">{partial ? "writing" : "thinking"}</span>
+				</header>
+				{#if partial}<div class="prose" use:copyButtons>{@html markdown(partial)}</div>{/if}
+			</article>
 		{/if}
 	</div>
 </div>
 
 {#if chat?.deleted == null}
-	<Composer placeholder={`Message ${chat?.model ?? MAIN_MODEL}…`} onsend={send} />
+	<Composer {model} onsend={send} />
 {/if}
 
 <style>
-	.log { flex: 1; overflow-y: auto; padding: 20px 16px 8px; }
-	.inner { max-width: 780px; margin: 0 auto; }
-	.notice { text-align: center; color: var(--muted); font-size: 13px; margin: 0 0 16px; }
-	.pending { color: var(--muted); margin: 0 0 16px; overflow-wrap: anywhere; }
-	.banner { border: 1px solid var(--warn); border-radius: 10px; padding: 10px 12px; margin: 0 0 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-	.banner span { flex: 1; }
-	.banner code { flex: 1 1 100%; }
+	.log { flex: 1; overflow-y: auto; padding: 18px 16px 6px; }
+	.inner { max-width: 860px; margin: 0 auto; }
+	.older { text-align: center; color: var(--muted); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 18px; }
+	.start { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-top: 18vh; color: var(--dim); text-align: center; }
+	.start p { margin: 0; max-width: 420px; font-size: 12.5px; }
+	.banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 18px; --frame: color-mix(in srgb, var(--warn) 60%, transparent); }
+	.grow { flex: 1; min-width: 160px; }
+	.call { flex: 1 1 100%; color: var(--dim); font-size: 11.5px; overflow-wrap: anywhere; }
+	.pending { margin: 0 0 18px; }
+	.pending header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+	.state { color: var(--dim); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; }
+	.pending .prose { padding-left: 12px; border-left: 2px solid var(--frame); color: color-mix(in srgb, var(--fg) 80%, var(--bg)); }
 </style>

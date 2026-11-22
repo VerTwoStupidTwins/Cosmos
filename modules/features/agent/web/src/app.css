@@ -1,36 +1,170 @@
-/* Colours for light and dark (the system's setting), used by every component. */
+/* The cockpit look of tenjin's Quickshell bar, in CSS.
+ *
+ * Colours: /theme.css (served by the agent) sets --base00…--base0f and --accent from the desktop's wallpaper palette;
+ * the fallbacks here only show until tenjin has sent one. The roles match the bar's Theme.qml. */
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-700.css";
+
 :root {
-	--bg: #f6f5f2; --panel: #ffffff; --line: #e3e1db; --text: #1d1c1a; --muted: #6d6a63;
-	--accent: #3d6b5a; --accent-text: #ffffff; --user: #e7efe9; --code: #f0eee9; --warn: #9a5b13; --danger: #a33a2f;
-	--main: #3d6b5a; --work: #7a4fa0;
+	color-scheme: dark;
+	--bg: var(--base00, #1e1e2e);
+	--surface: var(--base01, #181825);
+	--muted: var(--base03, #45475a);
+	--dim: var(--base04, #a6adc8);
+	--fg: var(--base05, #cdd6f4);
+	--urgent: var(--base08, #f38ba8);
+	--warn: var(--base0a, #f9e2af);
+	--good: var(--base0b, #a6e3a1);
+	--accent-color: var(--accent, #89b4fa);
+
+	/* Mixes the bar uses: a frame at 60% accent, faint fills and lines. */
+	--frame: color-mix(in srgb, var(--accent-color) 60%, transparent);
+	--line: color-mix(in srgb, var(--fg) 14%, transparent);
+	--leader: color-mix(in srgb, var(--fg) 25%, transparent);
+	--wash: color-mix(in srgb, var(--accent-color) 9%, var(--bg));
+	--raise: color-mix(in srgb, var(--surface) 70%, var(--bg));
+	--outline: rgb(0 0 0 / 0.75);
+
+	--font: "JetBrainsMono Nerd Font", "JetBrains Mono", ui-monospace, monospace;
+	--cut: 10px;
 }
-@media (prefers-color-scheme: dark) {
-	:root:not([data-theme="light"]) {
-		--bg: #161615; --panel: #1f1f1d; --line: #33322f; --text: #e9e7e2; --muted: #9b978e;
-		--accent: #6fa58f; --accent-text: #0d1310; --user: #26332c; --code: #2a2926; --warn: #e0a35a; --danger: #e07a6e;
-		--main: #6fa58f; --work: #b48ad6;
-	}
-}
-:root[data-theme="dark"] {
-	--bg: #161615; --panel: #1f1f1d; --line: #33322f; --text: #e9e7e2; --muted: #9b978e;
-	--accent: #6fa58f; --accent-text: #0d1310; --user: #26332c; --code: #2a2926; --warn: #e0a35a; --danger: #e07a6e;
-	--main: #6fa58f; --work: #b48ad6;
-}
+
 * { box-sizing: border-box; }
-/* The page never scrolls: the window holds the bar, the chat list and the composer, and only the content scrolls. */
+/* The page never scrolls: the window holds the frame, and only the content inside scrolls. */
 html, body { height: 100%; margin: 0; overflow: hidden; }
-body { background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
-button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 12px; }
-button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-button.danger { color: var(--danger); }
-button:disabled { opacity: .5; cursor: default; }
-button:focus-visible, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
-code { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: .92em; }
-:not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
-table { border-collapse: collapse; }
-td, th { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
-.muted { color: var(--muted); }
-.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
-.dots::after { content: "…"; animation: blink 1.2s infinite; }
-@keyframes blink { 50% { opacity: .2; } }
+body {
+	background: var(--bg);
+	color: var(--fg);
+	font: 13.5px/1.6 var(--font);
+	font-variant-numeric: tabular-nums;
+	-webkit-font-smoothing: antialiased;
+}
+::selection { background: color-mix(in srgb, var(--accent-color) 35%, transparent); }
+* { scrollbar-width: thin; scrollbar-color: var(--muted) transparent; }
+
+/* ── Plates: cut corners, a 1px accent frame, a dark line outside it, a status strip on top ──
+ * Set --tl --tr --br --bl (cut sizes) on the element; the frame and fill are two inset layers clipped the same way. */
+.plate {
+	--tl: 0px; --tr: 0px; --br: var(--cut); --bl: 0px;
+	--shape: polygon(var(--tl) 0, calc(100% - var(--tr)) 0, 100% var(--tr), 100% calc(100% - var(--br)),
+		calc(100% - var(--br)) 100%, var(--bl) 100%, 0 calc(100% - var(--bl)), 0 var(--tl));
+	position: relative;
+	isolation: isolate;
+	clip-path: var(--shape);
+	background: var(--outline);
+}
+.plate::before, .plate::after {
+	content: "";
+	position: absolute;
+	clip-path: var(--shape);
+	pointer-events: none;
+}
+.plate::before { inset: 1px; background: var(--frame); z-index: -2; }
+.plate::after { inset: 2px; background: var(--plate-fill, var(--bg)); z-index: -1; }
+/* The strip: a 26px bar and a 5px tick along the top edge, after the top-left cut. */
+.strip {
+	position: absolute;
+	top: 1px;
+	left: calc(var(--tl) + 10px);
+	width: 34px;
+	height: 3px;
+	background: linear-gradient(90deg, var(--accent-color) 0 26px, transparent 26px 29px,
+		color-mix(in srgb, var(--accent-color) 50%, transparent) 29px 34px);
+	pointer-events: none;
+}
+.strip.right { left: auto; right: calc(var(--tr) + 10px); transform: scaleX(-1); }
+
+/* ── HUD tags: VOL, PWR… boxed, bold, spaced ── */
+.tag {
+	display: inline-flex;
+	align-items: center;
+	height: 16px;
+	padding: 0 5px;
+	border: 1px solid color-mix(in srgb, var(--accent-color) 70%, transparent);
+	color: var(--accent-color);
+	font-size: 9.5px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	line-height: 1;
+	white-space: nowrap;
+	text-transform: uppercase;
+}
+.tag.solid { background: var(--accent-color); color: var(--bg); }
+.tag.dim { border-color: var(--line); color: var(--dim); }
+.tag.warn { border-color: var(--warn); color: var(--warn); }
+.tag.urgent { border-color: var(--urgent); color: var(--urgent); }
+
+/* Readouts: a dim key, a value; and a dotted leader between them, like the station's Stat. */
+.key { color: var(--dim); font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; }
+.leader { flex: 1; min-width: 12px; height: 1px; align-self: center; background: radial-gradient(circle, var(--leader) 0.6px, transparent 0.8px) 0 0 / 4px 1px repeat-x; }
+
+/* ── Buttons: angular, uppercase, a small cut corner ── */
+button {
+	font: inherit;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--fg);
+	background: transparent;
+	border: 1px solid var(--line);
+	padding: 5px 10px;
+	cursor: pointer;
+	clip-path: polygon(0 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%);
+}
+button:hover { border-color: var(--frame); color: var(--accent-color); background: var(--wash); }
+button.primary { background: var(--accent-color); border-color: var(--accent-color); color: var(--bg); }
+button.primary:hover { background: color-mix(in srgb, var(--accent-color) 85%, var(--fg)); color: var(--bg); }
+button.danger { color: var(--urgent); }
+button.danger:hover { border-color: var(--urgent); background: color-mix(in srgb, var(--urgent) 12%, transparent); }
+button.bare { border-color: transparent; clip-path: none; }
+button:disabled { opacity: 0.45; cursor: default; }
+:focus-visible { outline: 1px solid var(--accent-color); outline-offset: 2px; }
+input, textarea { font: inherit; color: var(--fg); }
+
+/* ── Markdown in answers ── */
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p, .prose ul, .prose ol { margin: 0 0 0.7em; }
+.prose ul, .prose ol { padding-left: 1.5em; }
+.prose li::marker { color: var(--accent-color); }
+.prose h1, .prose h2, .prose h3, .prose h4 {
+	font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-color); margin: 1.2em 0 0.5em;
+	display: flex; gap: 8px; align-items: center;
+}
+.prose h1::after, .prose h2::after, .prose h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.prose a { color: var(--accent-color); }
+.prose strong { color: color-mix(in srgb, var(--fg) 80%, white); }
+.prose blockquote { margin: 0 0 0.7em; padding-left: 10px; border-left: 2px solid var(--frame); color: var(--dim); }
+.prose hr { border: 0; height: 1px; background: var(--line); margin: 1em 0; }
+.prose table { border-collapse: collapse; margin: 0 0 0.7em; font-size: 12.5px; display: block; overflow-x: auto; }
+.prose th { color: var(--dim); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; text-align: left; }
+.prose th, .prose td { border-bottom: 1px solid var(--line); padding: 3px 12px 3px 0; }
+.prose :not(pre) > code { color: var(--accent-color); background: var(--wash); padding: 0 4px; }
+
+/* Code blocks (lib/markdown.ts): a header with the language and a copy button above the code. */
+.code { margin: 0 0 0.8em; border: 1px solid var(--line); background: var(--raise); }
+.code-head { display: flex; align-items: center; gap: 8px; padding: 2px 2px 2px 8px; border-bottom: 1px solid var(--line); }
+.code-head .key { flex: 1; }
+.code-head button { padding: 2px 8px; font-size: 9.5px; border-color: transparent; clip-path: none; }
+.code pre { margin: 0; padding: 8px 10px; overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+
+/* highlight.js colours from the palette, as base16 themes assign them. */
+.hljs-comment, .hljs-quote { color: var(--base03, var(--muted)); font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-meta .hljs-keyword { color: var(--base0e, var(--accent-color)); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-symbol { color: var(--base0b, var(--good)); }
+.hljs-number, .hljs-literal, .hljs-variable.constant_, .hljs-params { color: var(--base09, var(--warn)); }
+.hljs-title, .hljs-title.function_, .hljs-section { color: var(--base0d, var(--accent-color)); }
+.hljs-type, .hljs-title.class_, .hljs-attr, .hljs-attribute { color: var(--base0a, var(--warn)); }
+.hljs-variable, .hljs-template-variable, .hljs-tag, .hljs-name, .hljs-deletion { color: var(--base08, var(--urgent)); }
+.hljs-meta, .hljs-subst { color: var(--base0c, var(--dim)); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* ── Small shared bits ── */
+.muted { color: var(--dim); }
+.empty { color: var(--dim); text-align: center; margin-top: 18vh; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; }
+.dots::after { content: "▮"; margin-left: 4px; animation: blink 1s steps(1) infinite; color: var(--accent-color); }
+@keyframes blink { 50% { opacity: 0; } }
+.pulse { display: inline-block; width: 6px; height: 6px; background: var(--accent-color); animation: blink 1s steps(1) infinite; }
+@media (prefers-reduced-motion: reduce) { .dots::after, .pulse { animation: none; } }

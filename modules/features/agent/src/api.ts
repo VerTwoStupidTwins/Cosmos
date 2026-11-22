@@ -3,10 +3,12 @@
 
 export type ToolCall = { name: string; args: string; id?: string; result?: string; error?: boolean };
 
+// `at`: when (ms), when known. An answer's `model` is the llama-swap model that wrote it, `tokens` what it wrote and
+// `ms` how long the model took, summed over its tool rounds.
 export type ChatItem =
-	| { kind: "user"; text: string; from: string }
-	| { kind: "answer"; text: string; tools: ToolCall[] }
-	| { kind: "notice"; text: string };
+	| { kind: "user"; text: string; from: string; at?: number }
+	| { kind: "answer"; text: string; tools: ToolCall[]; at?: number; model?: string; tokens?: number; ms?: number }
+	| { kind: "notice"; text: string; at?: number };
 
 // A chat in the list.
 export type ChatSummary = { id: string; title: string; model: string; updated: number; pinned: boolean; busy: boolean };

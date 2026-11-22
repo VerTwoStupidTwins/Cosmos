@@ -3,7 +3,7 @@
 // A chat's page follows its conversation with a Pi Durable watch, sent as server-sent events: the transcript as chat
 // items when it changes, and the answer being written while a run is busy.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -50,7 +50,30 @@ function loadAssets(dir: string) {
 }
 const assets = loadAssets(join(here, "../web"));
 
-type Message = { role: string; content: unknown; toolCallId?: string; isError?: boolean };
+// The desktop's colours (tenjin's wallpaper palette, base16 + accent), pushed by tenjin when the wallpaper changes and
+// served as CSS variables the app's styles are built on. Colours only: nothing else is accepted.
+const PALETTE_KEYS = [..."0123456789abcdef"].map((d) => `base0${d}`).concat("accent");
+function paletteCss(file: string): string {
+	try {
+		const palette = JSON.parse(readFileSync(file, "utf8")) as Record<string, string>;
+		const lines = PALETTE_KEYS.filter((k) => /^#[0-9a-f]{6}$/i.test(palette[k] ?? "")).map((k) => `--${k}:${palette[k]};`);
+		return `:root{${lines.join("")}}\n`;
+	} catch {
+		return "/* no desktop palette yet: the app's own colours apply */\n";
+	}
+}
+
+// The parts of pi-ai's messages read here (user, assistant and tool result messages share the one shape).
+type Message = {
+	role: string;
+	content: unknown;
+	toolCallId?: string;
+	isError?: boolean;
+	timestamp?: number;
+	model?: string;
+	usage?: { output?: number };
+	durationMs?: number;
+};
 const textOf = (content: unknown): string =>
 	typeof content === "string"
 		? content
@@ -68,28 +91,34 @@ export function chatItems(entries: readonly EntryRecord[]): ChatItem[] {
 	const items: ChatItem[] = [];
 	let answer: Extract<ChatItem, { kind: "answer" }> | undefined;
 	const data = (e: EntryRecord) => (e.data ?? {}) as Record<string, unknown>;
+	const stamp = (e: EntryRecord) => {
+		const at = (e.model?.[0] as { timestamp?: unknown } | undefined)?.timestamp ?? data(e).at;
+		return typeof at === "number" ? { at } : {};
+	};
 	for (const entry of entries) {
 		if (entry.kind === "cosmos.message") {
-			items.push({ kind: "user", text: String(data(entry).text ?? ""), from: String(data(entry).from ?? "") });
+			items.push({ kind: "user", text: String(data(entry).text ?? ""), from: String(data(entry).from ?? ""), ...stamp(entry) });
 			answer = undefined;
 			continue;
 		}
 		if (entry.kind === "cosmos.handoff") {
-			items.push({ kind: "notice", text: `🔀 Switched to ${String(data(entry).model)}: ${String(data(entry).reason)}` });
+			items.push({ kind: "notice", text: `🔀 Switched to ${String(data(entry).model)}: ${String(data(entry).reason)}`, ...stamp(entry) });
 			answer = undefined;
 			continue;
 		}
 		if (entry.kind === "cosmos.notice") {
-			items.push({ kind: "notice", text: String(data(entry).text ?? "") });
+			items.push({ kind: "notice", text: String(data(entry).text ?? ""), ...stamp(entry) });
 			answer = undefined;
 			continue;
 		}
 		for (const message of (entry.model ?? []) as unknown as Message[]) {
 			if (message.role === "user") {
-				items.push({ kind: "user", text: textOf(message.content).replace(/\n\n<memories>[\s\S]*$/, ""), from: "" });
+				items.push({ kind: "user", text: textOf(message.content).replace(/\n\n<memories>[\s\S]*$/, ""), from: "", at: message.timestamp });
 				answer = undefined;
 			} else if (message.role === "assistant") {
-				if (!answer) items.push((answer = { kind: "answer", text: "", tools: [] }));
+				if (!answer) items.push((answer = { kind: "answer", text: "", tools: [], at: message.timestamp, model: message.model }));
+				answer.tokens = (answer.tokens ?? 0) + (message.usage?.output ?? 0);
+				if (message.durationMs !== undefined) answer.ms = (answer.ms ?? 0) + message.durationMs;
 				for (const part of (message.content ?? []) as { type: string; text?: string; name?: string; id?: string; arguments?: unknown }[]) {
 					if (part.type === "text" && part.text) answer.text += (answer.text ? "\n\n" : "") + part.text;
 					if (part.type === "toolCall") {
@@ -113,7 +142,7 @@ function live(docs: Readonly<Record<string, unknown>>) {
 	return { busy: state.run !== undefined, partial: textOf(state.generation?.message?.content) };
 }
 
-export function startWeb(bridge: Bridge, options: { port: number; password: string; context: Context }) {
+export function startWeb(bridge: Bridge, options: { port: number; password: string; context: Context; themeToken?: string; themeFile: string }) {
 	const key = createHmac("sha256", "cosmos-chat-session").update(options.password).digest();
 	const sign = (expires: number) => `${expires}.${createHmac("sha256", key).update(String(expires)).digest("base64url")}`;
 	const signedIn = (request: IncomingMessage) => {
@@ -195,6 +224,27 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 					"referrer-policy": "no-referrer",
 				})
 				.end(asset.body);
+		}
+		// Public: colours aren't secret, and the login page wears them too. Revalidated on every load.
+		if (request.method === "GET" && path === "/theme.css") {
+			return response.writeHead(200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" }).end(paletteCss(options.themeFile));
+		}
+		// tenjin's palette push: a bearer token (sops chat-theme-token), not the owner's session.
+		if (request.method === "POST" && path === "/api/theme") {
+			const token = options.themeToken;
+			const given = Buffer.from(/^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1] ?? "");
+			if (!token || given.length !== token.length || !timingSafeEqual(given, Buffer.from(token))) return json(response, 401, { error: "bad token" });
+			const palette = await body(request);
+			const clean: Record<string, string> = {};
+			for (const k of PALETTE_KEYS) {
+				const v = palette[k];
+				if (typeof v !== "string" || !/^#[0-9a-f]{6}$/i.test(v)) return json(response, 400, { error: `${k}: want #rrggbb` });
+				clean[k] = v.toLowerCase();
+			}
+			writeFileSync(`${options.themeFile}.new`, JSON.stringify(clean));
+			renameSync(`${options.themeFile}.new`, options.themeFile);
+			console.error(`web: desktop palette updated (accent ${clean.accent})`);
+			return json(response, 200, { ok: true });
 		}
 		if (request.method === "POST" && path === "/api/login") {
 			const { password } = await body(request);
