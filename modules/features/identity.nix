@@ -24,6 +24,9 @@
           TRUST_PROXY = true;
           ANALYTICS_DISABLED = true;
           VERSION_CHECK_DISABLED = true;
+          # There's no mail to verify addresses with, and every account is made by the owner (no sign-ups), so its
+          # email is the owner's word. oauth2-proxy refuses an unverified one.
+          EMAILS_VERIFIED = true;
         };
       };
 
