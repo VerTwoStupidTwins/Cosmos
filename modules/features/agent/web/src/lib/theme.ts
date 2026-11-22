@@ -3,6 +3,7 @@
 export function followDesktopTheme() {
 	const sheet = (href: string) => Object.assign(document.createElement("link"), { rel: "stylesheet", href });
 	let current = sheet("/theme.css");
+	current.onload = () => window.dispatchEvent(new Event("cosmos-theme"));
 	document.head.append(current);
 	let last = Date.now();
 	const refresh = () => {
@@ -13,6 +14,8 @@ export function followDesktopTheme() {
 		next.onload = () => {
 			current.remove();
 			current = next;
+			// Diagrams take their colours when drawn, so they redraw (lib/markdown.ts codeBlocks).
+			window.dispatchEvent(new Event("cosmos-theme"));
 		};
 		document.head.append(next);
 	};

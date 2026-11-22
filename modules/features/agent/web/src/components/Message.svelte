@@ -3,7 +3,7 @@
 <script lang="ts">
 	import type { ChatItem } from "../../../src/api.ts";
 	import { clock, duration } from "../lib/format";
-	import { copyButtons, markdown } from "../lib/markdown";
+	import { codeBlocks, markdown } from "../lib/markdown";
 	import { modelTag } from "../lib/types";
 
 	let { item }: { item: ChatItem } = $props();
@@ -62,7 +62,7 @@
 				{/each}
 			</details>
 		{/if}
-		<div class="prose" use:copyButtons>{@html markdown(item.text)}</div>
+		<div class="prose" use:codeBlocks={item.text}>{@html markdown(item.text)}</div>
 	</article>
 {/if}
 

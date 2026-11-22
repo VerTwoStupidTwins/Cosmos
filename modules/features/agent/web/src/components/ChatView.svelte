@@ -4,7 +4,7 @@
 	import { MAIN_MODEL, WORK_MODEL } from "../../../src/api.ts";
 	import { api, report } from "../lib/api";
 	import { when } from "../lib/format";
-	import { copyButtons, markdown } from "../lib/markdown";
+	import { codeBlocks, markdown } from "../lib/markdown";
 	import { modelTag } from "../lib/types";
 	import Bar from "./Bar.svelte";
 	import Composer from "./Composer.svelte";
@@ -142,7 +142,7 @@
 					<span class="leader"></span>
 					<span class="state dots">{partial ? "writing" : "thinking"}</span>
 				</header>
-				{#if partial}<div class="prose" use:copyButtons>{@html markdown(partial)}</div>{/if}
+				{#if partial}<div class="prose" use:codeBlocks={""}>{@html markdown(partial, { diagrams: false })}</div>{/if}
 			</article>
 		{/if}
 	</div>

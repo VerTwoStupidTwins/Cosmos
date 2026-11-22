@@ -88,6 +88,14 @@ const CHAT_MAIN = [
 	"change anything. Scheduled jobs post on their own: the morning check",
 	"at 08:00 and the open-threads nudge on Sundays; firing alerts get explained in the Alerts room.",
 ].join(" ");
+// Both chat models may draw: the web app renders mermaid blocks (Matrix shows their text).
+const CHAT_DIAGRAMS = [
+	"When a picture explains something better than words (how hosts or services connect, a flow or sequence of steps,",
+	"a timeline, a state machine), include a small Mermaid diagram in a ```mermaid code block: the owner's web app",
+	"draws it (on the phone it shows as text, so say in words what matters too). Keep it under ~15 nodes; use",
+	"flowchart, sequenceDiagram, stateDiagram-v2, timeline or erDiagram; put labels with spaces or symbols in quotes,",
+	'like A["nabu (P100)"]. Only when it helps; never for something one sentence covers.',
+].join(" ");
 const CHAT_WORK = [
 	"This chat was handed to you, workhorse, for work: you have the homelab tools. Keep the chat's conversational tone.",
 	"When the work is done and the talk turns casual again (ideas, plans, small talk with no tools needed), call",
@@ -739,8 +747,8 @@ export class Bridge {
 	#chatAgent(model: string): AgentChange {
 		const c = this.options.chat!;
 		return model === c.mainModel
-			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: CHAT_MAIN }
-			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack] }, instructions: CHAT_WORK };
+			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: `${CHAT_MAIN} ${CHAT_DIAGRAMS}` }
+			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack] }, instructions: `${CHAT_WORK} ${CHAT_DIAGRAMS}` };
 	}
 
 	// The Chat room: made on the first chat, with the owner invited.

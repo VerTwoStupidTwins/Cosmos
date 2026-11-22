@@ -37,7 +37,7 @@
         };
         sourceRoot = "source/web";
         inherit nodejs;
-        npmDepsHash = "sha256-NrP7qTmnF0txwG4YowryBEd/J7vF6dNiy7OJ3wwGpc0=";
+        npmDepsHash = "sha256-9TXrzjiV3DhMSmEfbn2GJIEISaSFBaz6YxkbAbGJHaE=";
         npmFlags = [ "--ignore-scripts" ];
         buildPhase = ''
           runHook preBuild
