@@ -42,6 +42,8 @@
             enable_cors = false;
           };
           telemetry_disabled = true;
+          # Its metrics read /proc/sys/vm/max_map_count, which the service's sandbox hides, and warn every 30 s.
+          log_level = "INFO,qdrant::common::metrics=error";
         };
       };
       # The keys come from the environment, never the config file in the Nix store.

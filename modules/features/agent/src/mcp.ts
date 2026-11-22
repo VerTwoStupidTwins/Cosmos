@@ -22,7 +22,10 @@ class Connection {
 			try {
 				const client = new Client({ name: "cosmos-agent", version: "1" });
 				const [command, ...args] = this.server.command;
-				await client.connect(new StdioClientTransport({ command: command!, args, stderr: "inherit" }));
+				// The SDK starts servers with a minimal environment; they need the agent's, such as
+				// $CREDENTIALS_DIRECTORY for systemd credentials.
+				const env = Object.fromEntries(Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined));
+				await client.connect(new StdioClientTransport({ command: command!, args, env, stderr: "inherit" }));
 				client.onclose = () => {
 					console.error(`mcp ${this.name}: server exited`);
 					this.#client = undefined;
