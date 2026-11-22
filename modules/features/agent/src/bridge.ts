@@ -815,11 +815,20 @@ export class Bridge {
 	async #switchRequest(id: string, tool: string, answer: string): Promise<string | undefined> {
 		const called = await this.#calledWhileAnswering(id, tool);
 		if (called !== undefined) return called;
-		const said =
-			tool === "hand_off"
-				? /\bhand(?:ing)?(?: (?:this|it))? (?:over|off) to workhorse\b|\bworkhorse (?:will )?take(?:s)? (?:it )?(?:over|from here)\b/i
-				: /\bhand(?:ing)?(?: (?:this|it))? back to main\b|\bmain (?:will )?take(?:s)? (?:it )?(?:over|from here)\b/i;
-		if (!said.test(answer)) return undefined;
+		// Only an announcement of a switch happening now ("I'm handing this over to workhorse", "let me hand you off to
+		// workhorse", "switching to workhorse"), not a description of how chats work ("unless I hand off to workhorse").
+		const target = tool === "hand_off" ? "workhorse" : "main";
+		const move = tool === "hand_off" ? "(?:over|off)" : "back";
+		const said = new RegExp(
+			[
+				`\\b(?:i'?m|i am|i'?ll|i will|let me|going to|now) (?:\\w+ ){0,2}hand(?:ing)?(?: (?:this|it|you|us))? ${move} to ${target}\\b`,
+				`\\bhanding(?: (?:this|it|you|us))? ${move} to ${target}\\b`,
+				`\\bswitching (?:\\w+ )?(?:over |back )?to ${target}\\b`,
+			].join("|"),
+			"i",
+		);
+		const line = answer.split(/\n/).find((l) => said.test(l));
+		if (line === undefined || /\b(?:unless|if|when|whenever)\b[^.]*\bhand/i.test(line)) return undefined;
 		console.error(`chat: ${id} said it hands over without calling ${tool}; switching anyway`);
 		return tool === "hand_off" ? "main said it's handing over" : "workhorse said main takes it from here";
 	}
