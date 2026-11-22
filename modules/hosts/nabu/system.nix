@@ -13,6 +13,7 @@ in
       nixos.server
       nixos.cache-pull
       nixos.build-target
+      nixos.dns
       nixos.gpu-nvidia
       nixos.gpu-amd
       nixos.gpu-intel

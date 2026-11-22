@@ -26,8 +26,16 @@ in
       };
     };
 
-  # A host built on a builder (rebuild-<host>, modules/features/deploy.nix) takes the builder's signed results.
-  flake.modules.nixos.build-target.nix.settings.trusted-public-keys = signingKeys;
+  # A host built on a builder (rebuild-<host>, modules/features/deploy.nix) takes the builder's signed results, and
+  # whatever the deploying admin copies over: small paths tenjin builds itself reach lugh unsigned, as inputs to its
+  # remote builds. Trusting wheel adds nothing it couldn't do with sudo already.
+  flake.modules.nixos.build-target.nix.settings = {
+    trusted-public-keys = signingKeys;
+    trusted-users = [
+      "root"
+      "@wheel"
+    ];
+  };
 
   flake.modules.nixos.build-client =
     { config, ... }:

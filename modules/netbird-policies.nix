@@ -167,8 +167,9 @@ in
           "9100"
           "9633"
           "9835"
+          "4000"
         ];
-        why = "Prometheus on lugh scrapes the exporters (observed.nix)";
+        why = "Prometheus on lugh scrapes the exporters (observed.nix) and Blocky (4000, dns.nix)";
       };
       CosmosPing = {
         from = [ "CosmosInfra" ];
@@ -189,6 +190,16 @@ in
         protocol = "tcp";
         ports = [ "8080" ];
         why = "the agent on lugh uses nabu's models (llama-swap)";
+      };
+      CosmosDNS = {
+        from = [
+          "CosmosAdmin"
+          "CosmosInfra"
+        ];
+        to = [ "CosmosServers" ];
+        protocol = "udp";
+        ports = [ "5300" ];
+        why = "the owner's devices use Blocky on lugh and nabu (nameserver group Cosmos DNS, dns.nix); lugh probes both";
       };
       CosmosCache = {
         from = [ "CosmosServers" ];

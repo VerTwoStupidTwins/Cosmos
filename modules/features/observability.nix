@@ -133,6 +133,17 @@ in
               prober = "icmp";
               icmp.preferred_ip_protocol = "ip4";
             };
+            # A DNS server that answers grafana.gatica.one with an address (dns.nix).
+            dns_gatica = {
+              prober = "dns";
+              dns = {
+                query_name = "grafana.gatica.one";
+                query_type = "A";
+                preferred_ip_protocol = "ip4";
+                valid_rcodes = [ "NOERROR" ];
+                validate_answer_rrs.fail_if_none_matches_regexp = [ ".*\\sA\\s.*" ];
+              };
+            };
           };
         }
       );
@@ -159,8 +170,11 @@ in
         ];
       };
 
-      # Dashboards from grafana.com, pinned. Both choose their data source with a template variable.
-      dashboards = pkgs.linkFarm "grafana-dashboards" [
+      # Dashboards from grafana.com, pinned, plus those other modules add (observability.dashboards). Each chooses its
+      # data source with a template variable.
+      dashboards = pkgs.linkFarm "grafana-dashboards" (
+        config.observability.dashboards
+        ++ [
         {
           name = "node-exporter-full.json";
           path = pkgs.fetchurl {
@@ -175,12 +189,31 @@ in
             hash = "sha256-N0GyDIMaG1NW9K4gMZvQaHUqjDnEosUMaYo0mCqSGxc=";
           };
         }
-      ];
+        ]
+      );
 
       secretFile = name: "$__file{${config.sops.secrets.${name}.path}}";
       hostSecrets = ../../secrets/${config.networking.hostName}.yaml;
     in
     {
+      # What other modules can add to the watchtower.
+      imports = [
+        {
+          options.observability = {
+            dashboards = lib.mkOption {
+              type = lib.types.listOf lib.types.attrs;
+              default = [ ];
+              description = "More Grafana dashboards, as linkFarm entries ({ name = \"x.json\"; path = …; }).";
+            };
+            dnsProbeTargets = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "DNS servers (host:port) that must answer grafana.gatica.one.";
+            };
+          };
+        }
+      ];
+
       services.prometheus = {
         enable = true;
         listenAddress = "127.0.0.1";
@@ -219,6 +252,7 @@ in
             lib.mapAttrsToList (name: site: "https://${name}.gatica.one${site.healthPath}") config.web.sites
           ))
           (probe "icmp" (map (h: "${h}.netbird.cloud") servers))
+          (probe "dns_gatica" config.observability.dnsProbeTargets)
         ];
 
         alertmanager = {
