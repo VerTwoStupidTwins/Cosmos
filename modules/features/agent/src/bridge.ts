@@ -88,9 +88,11 @@ const ALERT_INSTRUCTIONS = [
 	"Investigate with your read-only tools (observe for metrics, alerts and logs across hosts; monitor for lugh's services).",
 	"Confirm what's happening, find the likely cause, and say what the owner should check or do.",
 	"Keep it short: a few sentences or bullets. Change nothing.",
+	"Only suggest commands, API calls or settings you have seen in the tools' output or know exist; if you are unsure how to fix something, say what to look at instead.",
 ].join(" ");
 
 const Approval = defineSignal({ name: "cosmos.approval", version: 1, schema: obj({ allow: bool() }) });
+const NO_TEXT = "(no answer text)";
 const APPROVAL_WINDOW_MS = 60 * 60 * 1000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const html = (markdown: string) => marked.parse(markdown, { async: false }) as string;
@@ -386,7 +388,7 @@ export class Bridge {
 		const conversation = await this.#conversation(room);
 		const content = [
 			job.prompt,
-			job.quiet ? "If nothing needs the owner's attention, answer with exactly one word: NOTHING" : "",
+			job.quiet ? "If nothing needs the owner's attention, answer with exactly one word, NOTHING, and no other text: anything else is posted to the owner." : "",
 			`(Scheduled job "${name}", ${now.toString()}.)`,
 		]
 			.filter(Boolean)
@@ -563,7 +565,7 @@ export class Bridge {
 						const conversation = await this.#harness!.conversation(settled.conversationId, this.#ctx);
 						const entry = await conversation?.commit((tx) => tx.entry(AssistantEntry, settled.answer), this.#ctx);
 						const message = entry?.model?.[0] as { content: { type: string; text?: string }[] } | undefined;
-						markdown = message?.content.filter((c) => c.type === "text").map((c) => c.text).join("").trim() || "(no answer text)";
+						markdown = message?.content.filter((c) => c.type === "text").map((c) => c.text).join("").trim() || NO_TEXT;
 						answered = true;
 					} else markdown = `⚠ No answer: ${"reason" in settled ? settled.reason : settled.status}${"detail" in settled && settled.detail ? ` (${settled.detail})` : ""}`;
 				}
@@ -572,11 +574,15 @@ export class Bridge {
 					// that found nothing posts nothing.
 					const lines = this.#buffers.get(id) ?? [];
 					const quiet = this.options.schedules[owed.event.split(":")[1] ?? ""]?.quiet ?? false;
-					if (answered && quiet && /^\W*NOTHING\W*$/.test(markdown)) {
+					// "NOTHING", a short answer that starts with it ("NOTHING — no stale threads"), or no text at all
+					// (the model sometimes ends a run after an empty tool result without writing anything) counts.
+					const nothing = /^\W*NOTHING\b/.test(markdown) && markdown.length < 300;
+					if (answered && quiet && (nothing || markdown === NO_TEXT || !markdown.replace(/\W/g, ""))) {
 						console.error(`schedule: ${owed.event} found nothing to report (${lines.length} tool calls)`);
 					} else {
 						const post = await this.options.matrix.send(owed.room, textContent(markdown, html(markdown)));
 						for (const line of lines) await this.#notice({ room: owed.room, thread: post }, line);
+						console.error(`schedule: ${owed.event} posted (${lines.length} tool calls)`);
 					}
 				} else {
 					const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
