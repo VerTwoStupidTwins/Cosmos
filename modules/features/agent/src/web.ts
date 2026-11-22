@@ -179,12 +179,13 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 
 		if (request.method === "GET" && path === "/api/chats") return json(response, 200, { chats: bridge.chats() });
 		if (request.method === "GET" && path === "/api/memory/status") return json(response, 200, await bridge.memoryStatus());
+		if (request.method === "GET" && path === "/api/trash") return json(response, 200, { chats: bridge.trash() });
 		if (request.method === "POST" && path === "/api/chats") {
 			const { text } = await body(request);
 			if (typeof text !== "string" || !text.trim()) return json(response, 400, { error: "empty message" });
 			return json(response, 200, { id: await bridge.webNewChat(text.trim()) });
 		}
-		const match = /^\/api\/chats\/(\d+)(?:\/(events|messages|model|approve))?$/.exec(path);
+		const match = /^\/api\/chats\/(\d+)(?:\/(events|messages|model|approve|rename|pin|delete|restore))?$/.exec(path);
 		if (!match) return json(response, 404, { error: "not found" });
 		const [, id, action] = match as unknown as [string, string, string | undefined];
 		if (!bridge.chat(id)) return json(response, 404, { error: "no such chat" });
@@ -200,6 +201,28 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 			const { model } = await body(request);
 			if (typeof model !== "string") return json(response, 400, { error: "no model" });
 			await bridge.switchModel(id, model, "switched from the web app");
+			return json(response, 200, { ok: true });
+		}
+		if (request.method === "POST" && action === "rename") {
+			const { title } = await body(request);
+			if (typeof title !== "string") return json(response, 400, { error: "no title" });
+			await bridge.renameChat(id, title);
+			return json(response, 200, { ok: true });
+		}
+		if (request.method === "POST" && action === "pin") {
+			const { pinned } = await body(request);
+			if (typeof pinned !== "boolean") return json(response, 400, { error: "pinned: true or false" });
+			await bridge.pinChat(id, pinned);
+			return json(response, 200, { ok: true });
+		}
+		if (request.method === "POST" && action === "delete") {
+			await body(request);
+			await bridge.deleteChat(id);
+			return json(response, 200, { ok: true });
+		}
+		if (request.method === "POST" && action === "restore") {
+			await body(request);
+			await bridge.restoreChat(id);
 			return json(response, 200, { ok: true });
 		}
 		if (request.method === "POST" && action === "approve") {

@@ -24,8 +24,8 @@ export class Matrix {
 		readonly token: string,
 	) {}
 
-	async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-		const response = await fetch(`${this.homeserver}/_matrix/client/v3${path}`, {
+	async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal, version = "v3"): Promise<T> {
+		const response = await fetch(`${this.homeserver}/_matrix/client/${version}${path}`, {
 			method,
 			headers: { Authorization: `Bearer ${this.token}`, ...(body !== undefined && { "Content-Type": "application/json" }) },
 			body: body === undefined ? undefined : JSON.stringify(body),
@@ -73,6 +73,40 @@ export class Matrix {
 			content,
 		);
 		return event_id;
+	}
+
+	// Removes an event's content (the agent can redact others' messages in rooms it made, where it is admin).
+	redact(roomId: string, eventId: string, reason: string) {
+		const txn = `${Date.now()}-${this.#txn++}`;
+		return this.request("PUT", `/rooms/${encodeURIComponent(roomId)}/redact/${encodeURIComponent(eventId)}/${txn}`, { reason });
+	}
+
+	// Every event in a thread (not its root), oldest last, following the pages.
+	async threadEvents(roomId: string, root: string): Promise<string[]> {
+		const ids: string[] = [];
+		let from: string | undefined;
+		for (let page = 0; page < 50; page++) {
+			const query = new URLSearchParams({ limit: "100", ...(from && { from }) });
+			const response = await this.request<{ chunk: { event_id: string }[]; next_batch?: string }>(
+				"GET",
+				`/rooms/${encodeURIComponent(roomId)}/relations/${encodeURIComponent(root)}/m.thread?${query}`,
+				undefined,
+				undefined,
+				"v1",
+			);
+			ids.push(...response.chunk.map((e) => e.event_id));
+			if (!response.next_batch) break;
+			from = response.next_batch;
+		}
+		return ids;
+	}
+
+	async roomName(roomId: string): Promise<string | undefined> {
+		try {
+			return (await this.request<{ name?: string }>("GET", `/rooms/${encodeURIComponent(roomId)}/state/m.room.name/`)).name;
+		} catch {
+			return undefined;
+		}
 	}
 
 	typing(roomId: string, userId: string, on: boolean) {

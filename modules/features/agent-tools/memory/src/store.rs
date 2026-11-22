@@ -115,6 +115,7 @@ pub struct Change {
     /// The notice of the change this one undoes, so the agent can answer in its thread.
     pub thread_of: Option<String>,
     pub notice_text: String,
+    pub at: String,
 }
 
 /// What an item should become; `None` leaves a field as it is.
@@ -464,6 +465,7 @@ impl Store {
             change: r.get(0)?,
             item,
             notice_text: notice_text(&action, item, before.as_ref(), &after, undoes.is_some()),
+            at: r.get(8)?,
             action,
             origin: r.get(3)?,
             before,
@@ -474,7 +476,7 @@ impl Store {
     }
 
     const CHANGE_FIELDS: &str = "c.id, c.item, c.action, c.origin, c.before, c.after, c.undoes,
-        (SELECT notice FROM changes u WHERE u.id = c.undoes)";
+        (SELECT notice FROM changes u WHERE u.id = c.undoes), c.at";
 
     pub fn unannounced(&self) -> Result<Vec<Change>> {
         let mut stmt = self

@@ -54,7 +54,9 @@ type Pending = { room: string; event: string; thread?: string; text?: string; pr
 
 // A chat: one conversation, shared by the web app and a thread in the Matrix Chat room (`thread`, its root event).
 // Keyed by conversation ID. `model` is the catalog model it is on now.
-export type ChatInfo = { title: string; model: string; thread: string; created: number; updated: number; titled?: boolean };
+// `deleted`: when it went to the Trash (hidden, its Matrix thread redacted); it leaves the Trash for good 7 days later.
+export type ChatInfo = { title: string; model: string; thread: string; created: number; updated: number; titled?: boolean; pinned?: boolean; deleted?: number };
+const TRASH_MS = 7 * 86_400_000;
 
 export type ChatOptions = {
 	roomName: string;
@@ -172,6 +174,7 @@ export class Bridge {
 	#delivering = new Set<string>();
 	#approvals = new Map<string, { taskId: TaskId; key: string; conversation: string }>(); // approval message → parked call
 	#titling = new Set<string>(); // chats being named
+	#roomNames = new Map<string, string>(); // room ID → its Matrix name, for the memory status
 	#stopped = new AbortController();
 	#indexing = false;
 	#announcing: Promise<void> | undefined;
@@ -257,6 +260,7 @@ export class Bridge {
 	// A scheduled run has no message to thread under yet: its lines are kept and posted under its answer.
 	#where(conversationId: ConversationId): { room: string; thread?: string; buffer?: string[] } | undefined {
 		const chat = this.#state.chats[String(conversationId)];
+		if (chat?.deleted) return undefined; // a chat in the Trash shows nothing in Matrix
 		if (chat && this.#state.chatRoom) return { room: this.#state.chatRoom, thread: chat.thread };
 		const room = Object.entries(this.#state.rooms).find(([, id]) => id === Number(conversationId))?.[0];
 		if (!room) return undefined;
@@ -532,6 +536,7 @@ export class Bridge {
 			await sleep(60_000);
 			await this.#flushIndex();
 			await this.#announce();
+			await this.#expireTrash().catch((error) => console.error(`chat: emptying the Trash failed: ${String(error)}`));
 			for (const [room, last] of Object.entries(this.#state.sessions)) {
 				if (Date.now() - last < memory.quietMs) continue;
 				if (this.#state.toIndex.some((x) => x.room === room) || Object.values(this.#state.pending).some((p) => memoryKey(p) === room)) continue;
@@ -640,7 +645,7 @@ export class Bridge {
 						for (const line of lines) await this.#notice({ room: owed.room, thread: post }, line);
 						console.error(`schedule: ${owed.event} posted (${lines.length} tool calls)`);
 					}
-				} else {
+				} else if (!(owed.chat && this.#state.chats[owed.chat]?.deleted)) {
 					const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
 					await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...where });
 				}
@@ -685,7 +690,7 @@ export class Bridge {
 					},
 				);
 				if (remember) void this.#flushIndex();
-				if (continued !== undefined && chat) {
+				if (continued !== undefined && chat && !chat.deleted) {
 					console.error(`chat: ${owed.chat} handed to ${target}: ${reason}`);
 					await this.#notice({ room: owed.room, thread: chat.thread }, `🔀 Switched to ${target}: ${reason}`);
 					if (next) this.#deliver(String(continued));
@@ -761,7 +766,7 @@ export class Bridge {
 		let id: string | undefined;
 		if (relation?.rel_type === "m.thread") {
 			const root = relation.event_id;
-			id = Object.entries(this.#state.chats).find(([, c]) => c.thread === root)?.[0];
+			id = Object.entries(this.#state.chats).find(([, c]) => c.thread === root && !c.deleted)?.[0];
 			if (!id) return;
 		} else id = await this.#newChat(event.event_id, text);
 		const rest = await this.#command(id, text);
@@ -781,6 +786,7 @@ export class Bridge {
 	async #chatSubmit(id: string, text: string, requestId: string, from: "web" | "matrix") {
 		const chat = this.#state.chats[id];
 		if (!chat) throw new Error(`no chat ${id}`);
+		if (chat.deleted) throw new Error("this chat is in the Trash: restore it first");
 		const room = await this.#chatRoom();
 		const key = `chat:${id}`;
 		const recalled = await this.#recall(key, text);
@@ -872,12 +878,19 @@ export class Bridge {
 		const memory = this.options.memory;
 		if (!memory) return { enabled: false };
 		const status = (await memory.call("status")) as { conversations: { room: string }[] } & Record<string, unknown>;
+		// Rooms by their Matrix names, looked up once.
+		for (const c of status.conversations) {
+			if (c.room.startsWith("!") && !this.#roomNames.has(c.room)) this.#roomNames.set(c.room, (await this.options.matrix.roomName(c.room)) ?? c.room);
+		}
 		const name = (key: string) => {
-			if (key.startsWith("chat:")) return `Chat: ${this.#state.chats[key.slice(5)]?.title ?? key}`;
+			if (key.startsWith("chat:")) {
+				const chat = this.#state.chats[key.slice(5)];
+				return `Chat: ${chat?.title ?? key}${chat?.deleted ? " (in the Trash)" : ""}`;
+			}
 			if (key === this.#state.alertsRoom) return "Alerts";
 			const job = Object.entries(this.#state.scheduleRooms).find(([, room]) => room === key)?.[0];
 			if (job) return `Schedule: ${job}`;
-			return Object.keys(this.#state.rooms).includes(key) ? `Room ${key}` : key;
+			return this.#roomNames.get(key) ?? key;
 		};
 		const due = (key: string) => {
 			const last = this.#state.sessions[key];
@@ -892,17 +905,121 @@ export class Bridge {
 		};
 	}
 
+	// Pinned first, then the latest.
 	chats() {
 		return Object.entries(this.#state.chats)
-			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))
-			.sort((a, b) => b.updated - a.updated);
+			.filter(([, c]) => !c.deleted)
+			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, pinned: c.pinned === true, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))
+			.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated);
+	}
+
+	// The Trash: deleted chats, whether their consolidation is done, and when they leave for good.
+	trash() {
+		return Object.entries(this.#state.chats)
+			.filter(([, c]) => c.deleted !== undefined)
+			.map(([id, c]) => ({ id, title: c.title, deleted: c.deleted!, gone: c.deleted! + TRASH_MS, consolidated: this.#state.sessions[`chat:${id}`] === undefined }))
+			.sort((a, b) => b.deleted - a.deleted);
+	}
+
+	// To the Trash: hidden at once, its Matrix thread redacted, and consolidated within a minute instead of after the
+	// quiet time, so its ideas reach memory now. Memory keeps everything.
+	async deleteChat(id: string) {
+		const chat = this.#state.chats[id];
+		if (!chat || chat.deleted) return;
+		const key = `chat:${id}`;
+		const now = Date.now();
+		const quiet = this.options.memory?.quietMs ?? 0;
+		await this.#commit((s) => {
+			const c = s.chats[id];
+			if (!c) return;
+			c.deleted = now;
+			if (s.sessions[key] !== undefined) s.sessions[key] = Math.min(s.sessions[key]!, now - quiet);
+		});
+		console.error(`chat: ${id} moved to the Trash`);
+		void this.#redactThread(chat.thread);
+	}
+
+	async #redactThread(root: string) {
+		const room = this.#state.chatRoom;
+		if (!room) return;
+		try {
+			const events = await this.options.matrix.threadEvents(room, root);
+			for (const event of [...events, root]) {
+				await this.options.matrix.redact(room, event, "chat deleted").catch((error) => console.error(`chat: redacting ${event} failed: ${String(error)}`));
+				await sleep(150); // stay under the homeserver's rate limit
+			}
+			console.error(`chat: redacted ${events.length + 1} messages of thread ${root}`);
+		} catch (error) {
+			console.error(`chat: redacting thread ${root} failed: ${String(error)}`);
+		}
+	}
+
+	// Back from the Trash: listed again, with a new Matrix thread (the old one is redacted).
+	async restoreChat(id: string) {
+		const chat = this.#state.chats[id];
+		if (!chat?.deleted) return;
+		const room = await this.#chatRoom();
+		const label = `♻ ${chat.title}`;
+		const root = await this.options.matrix.send(room, textContent(label, html(label)));
+		await this.#notice({ room, thread: root }, "Restored from the Trash; the earlier messages are in the web app.");
+		const now = Date.now();
+		await this.#commit((s) => {
+			const c = s.chats[id];
+			if (!c) return;
+			delete c.deleted;
+			c.thread = root;
+			c.updated = now;
+		});
+		console.error(`chat: ${id} restored`);
+	}
+
+	async renameChat(id: string, title: string) {
+		const chat = this.#state.chats[id];
+		if (!chat) throw new Error(`no chat ${id}`);
+		const clean = clip(title.replace(/\s+/g, " ").trim(), 80);
+		if (!clean) throw new Error("empty title");
+		await this.#commit((s) => {
+			if (s.chats[id]) Object.assign(s.chats[id]!, { title: clean, titled: true });
+		});
+		if (!chat.deleted && this.#state.chatRoom) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, `✏ Renamed: ${clean}`);
+	}
+
+	async pinChat(id: string, pinned: boolean) {
+		if (!this.#state.chats[id]) throw new Error(`no chat ${id}`);
+		await this.#commit((s) => {
+			if (s.chats[id]) s.chats[id]!.pinned = pinned;
+		});
+	}
+
+	// Chats 7 days in the Trash leave it, once memory has everything from them.
+	async #expireTrash() {
+		const now = Date.now();
+		for (const [id, c] of Object.entries(this.#state.chats)) {
+			const key = `chat:${id}`;
+			if (c.deleted === undefined || now - c.deleted < TRASH_MS) continue;
+			if (this.#state.sessions[key] !== undefined || this.#state.toIndex.some((x) => x.room === key)) continue;
+			if (Object.values(this.#state.pending).some((p) => p.chat === id)) continue;
+			await this.#commit((s) => {
+				delete s.chats[id];
+				delete s.lastMessage[key];
+			});
+			console.error(`chat: ${id} left the Trash for good (its transcript stays in the agent's store, its memories in memory)`);
+		}
 	}
 
 	chat(id: string) {
 		const c = this.#state.chats[id];
 		if (!c) return undefined;
 		const approvals = [...this.#approvals].filter(([, a]) => a.conversation === id).map(([event, a]) => ({ event, call: a.key }));
-		return { id, title: c.title, model: c.model, busy: Object.values(this.#state.pending).some((p) => p.chat === id), approvals };
+		return {
+			id,
+			title: c.title,
+			model: c.model,
+			pinned: c.pinned === true,
+			deleted: c.deleted ?? null,
+			busy: Object.values(this.#state.pending).some((p) => p.chat === id),
+			approvals,
+		};
 	}
 
 	// A chat begun on the web gets its Matrix thread at once, rooted at the owner's first message, so the phone has it.
