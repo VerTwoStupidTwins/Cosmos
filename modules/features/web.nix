@@ -3,6 +3,7 @@
 let
   # The addresses private sites answer (modules/netbird-policies.nix): the owner's devices and lugh.
   privateClients = config.cosmos.netbird.privateSiteClients;
+  peers = config.cosmos.netbird.peers;
 in
 {
   # The host's web services under <name>.gatica.one, through nginx with one wildcard certificate, reachable only over
@@ -29,6 +30,12 @@ in
                 shared = lib.mkOption {
                   type = lib.types.bool;
                   description = "Whether others on the NetBird account (the brother's devices) may use it; by default only NAS-fronted sites.";
+                };
+                peers = lib.mkOption {
+                  type = lib.types.listOf (lib.types.enum (builtins.attrNames peers));
+                  default = [ ];
+                  example = [ "nabu" ];
+                  description = "Other NetBird peers (modules/netbird-policies.nix) a private site also answers, such as a server that pulls from it.";
                 };
                 port = lib.mkOption {
                   type = lib.types.nullOr lib.types.port;
@@ -110,6 +117,7 @@ in
                     "::1"
                   ]
                   ++ privateClients
+                  ++ map (peer: peers.${peer}.ip) site.peers
                 )
                 + "deny all;\n"
               );

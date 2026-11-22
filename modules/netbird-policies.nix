@@ -190,6 +190,13 @@ in
         ports = [ "8080" ];
         why = "the agent on lugh uses nabu's models (llama-swap)";
       };
+      CosmosCache = {
+        from = [ "CosmosServers" ];
+        to = [ "CosmosInfra" ];
+        protocol = "tcp";
+        ports = [ "443" ];
+        why = "nabu pulls from the binary cache, cache.gatica.one on lugh (binary-cache.nix; nginx lets it in by web.sites.cache.peers)";
+      };
       CosmosNasProxy = {
         from = [ "CosmosInfra" ];
         to = [ "SharedNas" ];
