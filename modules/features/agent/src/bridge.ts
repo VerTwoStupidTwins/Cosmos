@@ -22,6 +22,7 @@ import {
 import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
+import type { Config } from "./config.js";
 import type { ServerCall } from "./mcp.js";
 import { type Change, type Exchange, type Hit, memoriesBlock, recalledNotice } from "./memory.js";
 
@@ -36,11 +37,13 @@ const emptyState = (): BridgeState => ({
 	lastMessage: {},
 	toIndex: [],
 	sessions: {},
+	scheduleRooms: {},
+	scheduleLast: {},
 });
 
 // A message still owed its answer. `text` and `previous` are what memory stores of it once answered; `thread` is set
 // when the answer belongs in a thread (a reply under a Memory room notice).
-type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string };
+type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string; schedule?: boolean };
 
 type BridgeState = {
 	since: string | null;
@@ -56,11 +59,14 @@ type BridgeState = {
 	lastMessage: Record<string, string>;
 	toIndex: Exchange[];
 	sessions: Record<string, number>;
+	// Scheduled jobs: each job's room, and the run each last started (so a timer fired twice runs once).
+	scheduleRooms: Record<string, string>;
+	scheduleLast: Record<string, string>;
 };
 
 export const BridgeDoc = defineDoc<BridgeState>({
 	kind: "cosmos.bridge",
-	version: 3,
+	version: 4,
 	scope: "session",
 	initial: emptyState,
 	migrate: (value) => ({ ...emptyState(), ...(value as Partial<BridgeState>) }),
@@ -100,6 +106,7 @@ export type BridgeOptions = {
 	// The memory server's agent-only tools, how long a room stays quiet before its session is consolidated, and the
 	// name of the room memory changes are announced in.
 	memory?: { call: ServerCall; quietMs: number; roomName: string };
+	schedules: Config["schedules"];
 	context: Context;
 };
 
@@ -119,6 +126,7 @@ export class Bridge {
 	#stopped = new AbortController();
 	#indexing = false;
 	#announcing: Promise<void> | undefined;
+	#buffers = new Map<string, string[]>(); // scheduled run → its tool lines, posted under its answer
 
 	constructor(readonly options: BridgeOptions) {}
 
@@ -197,14 +205,23 @@ export class Bridge {
 	}
 
 	// The room and the message whose thread shows a conversation's tool calls: the newest one still owed an answer.
-	#where(conversationId: ConversationId): { room: string; thread?: string } | undefined {
+	// A scheduled run has no message to thread under yet: its lines are kept and posted under its answer.
+	#where(conversationId: ConversationId): { room: string; thread?: string; buffer?: string[] } | undefined {
 		const room = Object.entries(this.#state.rooms).find(([, id]) => id === Number(conversationId))?.[0];
 		if (!room) return undefined;
-		const owed = Object.values(this.#state.pending).filter((p) => p.room === room).at(-1);
+		const [id, owed] = Object.entries(this.#state.pending).filter(([, p]) => p.room === room).at(-1) ?? [];
+		if (id && owed?.schedule && !owed.thread) {
+			if (!this.#buffers.has(id)) this.#buffers.set(id, []);
+			return { room, buffer: this.#buffers.get(id)! };
+		}
 		return { room, thread: owed?.thread ?? owed?.event };
 	}
 
-	#notice(where: { room: string; thread?: string }, text: string) {
+	#notice(where: { room: string; thread?: string; buffer?: string[] }, text: string) {
+		if (where.buffer) {
+			where.buffer.push(text);
+			return Promise.resolve();
+		}
 		return this.options.matrix
 			.send(where.room, { msgtype: "m.notice", body: text, ...(where.thread && inThread(where.thread)) })
 			.catch((error) => console.error(`bridge: notice failed: ${String(error)}`));
@@ -276,10 +293,13 @@ export class Bridge {
 		let thread: string | undefined;
 		let content: string;
 		if (relation?.rel_type === "m.thread") {
-			if (!this.options.memory || room !== this.#state.memoryRoom || typeof relation.event_id !== "string") return;
+			if (typeof relation.event_id !== "string") return;
 			const root: string = relation.event_id;
+			// Under a Memory notice: a correction. Under a scheduled job's post: a follow-up to it. Elsewhere: the call log.
+			if (this.options.memory && room === this.#state.memoryRoom) content = await this.#correction(root, text);
+			else if (this.#isScheduleRoom(room)) content = await this.#withMemories(room, event.event_id, text);
+			else return;
 			thread = root;
-			content = await this.#correction(root, text);
 		} else content = await this.#withMemories(room, event.event_id, text);
 		const conversation = await this.#conversation(room);
 		const owed: Pending = { room, event: event.event_id, text, ...(thread && { thread }) };
@@ -337,7 +357,52 @@ export class Bridge {
 
 	// Rooms memory stores exchanges from (all but its own), and rooms whose sessions become topics and items (not Alerts).
 	#indexed(room: string) {
-		return this.options.memory !== undefined && room !== this.#state.memoryRoom;
+		return this.options.memory !== undefined && room !== this.#state.memoryRoom && !this.#isScheduleRoom(room);
+	}
+	#isScheduleRoom(room: string) {
+		return Object.values(this.#state.scheduleRooms).includes(room);
+	}
+
+	// A scheduled job (a systemd timer posted /schedule/<name>): one run per job per hour, in the job's own room.
+	// Returns once the run is committed; it then runs and is delivered like any message.
+	async onSchedule(name: string) {
+		const job = this.options.schedules[name];
+		if (!job) throw new Error(`no schedule named ${name}`);
+		const now = new Date();
+		const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}h`;
+		if (this.#state.scheduleLast[name] === stamp) {
+			console.error(`schedule: ${name} already ran for ${stamp}`);
+			return;
+		}
+		let room = this.#state.scheduleRooms[name];
+		if (!room) {
+			room = await this.options.matrix.createRoom(job.roomName, [this.options.owner]);
+			const made = room;
+			await this.#commit((s) => {
+				s.scheduleRooms[name] = made;
+			});
+			console.error(`schedule: made the ${job.roomName} room ${room} for ${name}`);
+		}
+		const conversation = await this.#conversation(room);
+		const content = [
+			job.prompt,
+			job.quiet ? "If nothing needs the owner's attention, answer with exactly one word: NOTHING" : "",
+			`(Scheduled job "${name}", ${now.toString()}.)`,
+		]
+			.filter(Boolean)
+			.join("\n\n");
+		const owed: Pending = { room, event: `schedule:${name}:${stamp}`, schedule: true };
+		const id = await this.#harness!.commit(async (tx) => {
+			const submissionId = await conversation.submit(tx, { type: "input", content, requestId: owed.event });
+			const state = (await tx.doc(BridgeDoc)) as BridgeState;
+			state.pending[String(submissionId)] = owed;
+			state.scheduleLast[name] = stamp;
+			return submissionId;
+		}, this.#ctx);
+		this.#state.pending[String(id)] = owed;
+		this.#state.scheduleLast[name] = stamp;
+		console.error(`schedule: started ${name} for ${stamp}`);
+		this.#deliver(String(id));
 	}
 	#consolidated(room: string) {
 		return this.#indexed(room) && room !== this.#state.alertsRoom;
@@ -502,8 +567,21 @@ export class Bridge {
 						answered = true;
 					} else markdown = `⚠ No answer: ${"reason" in settled ? settled.reason : settled.status}${"detail" in settled && settled.detail ? ` (${settled.detail})` : ""}`;
 				}
-				const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
-				await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...where });
+				if (owed.schedule && !owed.thread) {
+					// A scheduled run: its answer is a post of its own, its tool lines go under it, and a quiet job
+					// that found nothing posts nothing.
+					const lines = this.#buffers.get(id) ?? [];
+					const quiet = this.options.schedules[owed.event.split(":")[1] ?? ""]?.quiet ?? false;
+					if (answered && quiet && /^\W*NOTHING\W*$/.test(markdown)) {
+						console.error(`schedule: ${owed.event} found nothing to report (${lines.length} tool calls)`);
+					} else {
+						const post = await this.options.matrix.send(owed.room, textContent(markdown, html(markdown)));
+						for (const line of lines) await this.#notice({ room: owed.room, thread: post }, line);
+					}
+				} else {
+					const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
+					await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...where });
+				}
 				// The answered exchange is owed to memory in the same commit that settles the message.
 				const remember = answered && owed.text !== undefined && this.#indexed(owed.room);
 				const exchange: Exchange = { room: owed.room, event: owed.event, message: owed.text ?? "", answer: markdown };
@@ -517,6 +595,7 @@ export class Bridge {
 					}
 				});
 				if (remember) void this.#flushIndex();
+				this.#buffers.delete(id);
 				if (!Object.values(this.#state.pending).some((p) => p.room === owed.room)) void this.options.matrix.typing(owed.room, this.#me, false);
 			} catch (error) {
 				console.error(`bridge: delivering ${id} failed: ${String(error)}; retrying in 30 s`);
@@ -570,7 +649,8 @@ export class Bridge {
 	async #typingLoop() {
 		while (!this.#stopped.signal.aborted) {
 			await sleep(45_000);
-			const rooms = new Set(Object.values(this.#state.pending).map((p) => p.room));
+			// Scheduled runs work silently; only messages from the owner show typing.
+			const rooms = new Set(Object.values(this.#state.pending).filter((p) => !p.schedule).map((p) => p.room));
 			for (const room of rooms) void this.options.matrix.typing(room, this.#me, true);
 		}
 	}

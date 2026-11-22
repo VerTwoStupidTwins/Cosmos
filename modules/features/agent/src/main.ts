@@ -71,6 +71,7 @@ const bridge = new Bridge({
 	maxTurns: config.maxTurns,
 	needsApproval: (tool) => approval.has(tool),
 	alertsRoomName: config.alerts.roomName,
+	schedules: config.schedules,
 	...(memory && { memory }),
 	context,
 });
@@ -89,10 +90,12 @@ const harness = await Harness.open(
 harness.resume();
 await bridge.start(harness);
 
-// Alertmanager's webhook, on localhost only. Alerts are handled one at a time; Alertmanager retries on an error.
+// Alertmanager's webhook (/alertmanager) and the scheduler's timers (/schedule/<name>), on localhost only. Requests are
+// handled one at a time; Alertmanager and the timers' oneshots retry on an error.
 let alertQueue: Promise<void> = Promise.resolve();
 const alertServer = createServer((request, response) => {
-	if (request.method !== "POST" || request.url !== "/alertmanager") {
+	const schedule = request.url?.match(/^\/schedule\/([\w-]+)$/)?.[1];
+	if (request.method !== "POST" || (request.url !== "/alertmanager" && !schedule)) {
 		response.writeHead(404).end();
 		return;
 	}
@@ -101,7 +104,8 @@ const alertServer = createServer((request, response) => {
 	request.on("end", () => {
 		alertQueue = alertQueue.then(async () => {
 			try {
-				await bridge.onAlerts(JSON.parse(Buffer.concat(chunks).toString("utf8")) as AlertPayload);
+				if (schedule) await bridge.onSchedule(schedule);
+				else await bridge.onAlerts(JSON.parse(Buffer.concat(chunks).toString("utf8")) as AlertPayload);
 				response.writeHead(200).end();
 			} catch (error) {
 				console.error(`alerts: ${String(error)}`);

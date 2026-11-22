@@ -181,7 +181,31 @@ impl Store {
         db.pragma_update(None, "journal_mode", "WAL")?;
         db.pragma_update(None, "foreign_keys", "ON")?;
         db.execute_batch(SCHEMA)?;
+        // Columns added after the first release, for databases made before them.
+        let has = |column: &str| -> Result<bool> {
+            Ok(db.query_row("SELECT count(*) FROM pragma_table_info('points') WHERE name = ?1", [column], |r| r.get::<_, i64>(0))? > 0)
+        };
+        if !has("nudged")? {
+            db.execute_batch("ALTER TABLE points ADD COLUMN nudged TEXT")?;
+        }
         Ok(Store { db })
+    }
+
+    /// Open threads gone quiet: ideas, plans and commitments still open or parked, unchanged for `days` and not shown
+    /// in the last `renudge_days`, oldest first. Marks them shown.
+    pub fn stale_threads(&self, days: i64, renudge_days: i64, limit: i64) -> Result<Vec<Point>> {
+        let ago = |d: i64| (Utc::now() - chrono::Duration::days(d)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let mut stmt = self.db.prepare(&format!(
+            "SELECT {POINT_FIELDS} FROM points WHERE type = 'item' AND retracted = 0
+               AND kind IN ('idea', 'plan', 'commitment') AND status IN ('open', 'parked')
+               AND updated < ?1 AND (nudged IS NULL OR nudged < ?2)
+             ORDER BY updated LIMIT ?3"
+        ))?;
+        let points: Vec<Point> = stmt.query_map(params![ago(days), ago(renudge_days), limit], row_point)?.collect::<rusqlite::Result<_>>()?;
+        for p in &points {
+            self.db.execute("UPDATE points SET nudged = ?1 WHERE id = ?2", params![now(), p.id])?;
+        }
+        Ok(points)
     }
 
     pub fn get(&self, id: i64) -> Result<Option<Point>> {
@@ -544,6 +568,37 @@ mod tests {
         s.undo(c1).unwrap();
         assert!(s.get(item).unwrap().unwrap().retracted);
         assert!(s.get_many(&[item]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn stale_threads_once_a_month() {
+        let mut s = store();
+        let tx = s.transaction().unwrap();
+        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], None, "t").unwrap();
+        Store::create_item(&tx, "idea", "Fresh idea.", None, false, &[], None, "t").unwrap();
+        Store::create_item(&tx, "fact", "nabu has two P100s.", None, false, &[], None, "t").unwrap();
+        Store::create_item(&tx, "plan", "Done plan.", Some("done"), false, &[], None, "t").unwrap();
+        tx.commit().unwrap();
+        s.db.execute("UPDATE points SET updated = '2026-01-01T00:00:00Z' WHERE content != 'Fresh idea.'", []).unwrap();
+        let stale = s.stale_threads(30, 30, 7).unwrap();
+        assert_eq!(stale.iter().map(|p| p.content.as_str()).collect::<Vec<_>>(), vec!["Per-card ducts."]);
+        assert!(s.stale_threads(30, 30, 7).unwrap().is_empty(), "shown once, not again within 30 days");
+    }
+
+    #[test]
+    fn migrates_an_old_database() {
+        let path = std::env::temp_dir().join(format!("memory-migrate-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        {
+            let db = Connection::open(&path).unwrap();
+            // The first release's tables: SCHEMA without the columns added since.
+            db.execute_batch(SCHEMA).unwrap();
+            db.execute("INSERT INTO points (type, content, created, updated) VALUES ('item', 'x', 'a', 'a')", []).unwrap();
+        }
+        let s = Store::open(path.to_str().unwrap()).unwrap();
+        assert!(s.stale_threads(30, 30, 7).is_ok());
+        assert!(s.get(1).unwrap().is_some());
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

@@ -14,6 +14,8 @@ export type Config = {
 	alerts: { port: number; roomName: string };
 	// Present when the memory tool server is configured.
 	memory: { quietMinutes: number; roomName: string } | null;
+	// Jobs the scheduler (systemd timers) starts by name; a quiet job posts nothing when it answers NOTHING.
+	schedules: Record<string, { roomName: string; prompt: string; quiet: boolean }>;
 	models: {
 		endpoint: string;
 		default: string;

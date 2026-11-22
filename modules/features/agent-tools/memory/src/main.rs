@@ -428,6 +428,28 @@ impl Memory {
         )
     }
 
+    /// Open threads gone quiet: ideas, plans and commitments still open or parked that nobody has touched for a month,
+    /// oldest first, at most 7. Each is shown once a month at most: what it returns is marked as shown.
+    #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
+    async fn stale_threads(&self) -> CallToolResult {
+        or_error(
+            async {
+                let items = self.app.store.lock().await.stale_threads(30, 30, 7)?;
+                let today = chrono::Utc::now().date_naive();
+                let rows: Vec<Value> = items
+                    .iter()
+                    .map(|p| {
+                        let updated = chrono::DateTime::parse_from_rfc3339(&p.updated).map(|t| t.date_naive()).unwrap_or(today);
+                        json!({ "id": p.id, "kind": p.kind, "status": p.status, "content": p.content, "since": p.date(),
+                                "untouched_days": (today - updated).num_days() })
+                    })
+                    .collect();
+                Ok(json!({ "threads": rows }))
+            }
+            .await,
+        )
+    }
+
     // ---- for the agent's code
 
     /// (Agent) Memories for an incoming message, above the auto-recall score.

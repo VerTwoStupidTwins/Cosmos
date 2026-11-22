@@ -74,6 +74,7 @@
             ;
           alerts = { inherit (cfg.alerts) port roomName; };
           memory = if hasMemory then { inherit (cfg.memory) quietMinutes roomName; } else null;
+          schedules = lib.mapAttrs (_: s: { inherit (s) roomName prompt quiet; }) cfg.schedules;
           state = "/var/lib/agent/agent.sqlite";
           models = {
             inherit (cfg.models) endpoint default;
@@ -152,6 +153,37 @@
             default = "Memory";
             description = "The room the agent makes, with the owner invited, to announce every memory change.";
           };
+        };
+
+        schedules = lib.mkOption {
+          default = { };
+          description = ''
+            Jobs the agent runs on a timer, one file each in modules/timers/. Each becomes a systemd timer (see
+            `systemctl list-timers`) that starts one run per hour at most, in the job's own room.
+          '';
+          type = lib.types.attrsOf (
+            lib.types.submodule {
+              options = {
+                onCalendar = lib.mkOption {
+                  type = lib.types.str;
+                  description = "When, as systemd.time(7) calendar events, in lugh's time zone.";
+                };
+                roomName = lib.mkOption {
+                  type = lib.types.str;
+                  description = "The room the agent makes for the job, with the owner invited, on its first run.";
+                };
+                prompt = lib.mkOption {
+                  type = lib.types.lines;
+                  description = "What the job asks the agent to do.";
+                };
+                quiet = lib.mkOption {
+                  type = lib.types.bool;
+                  default = true;
+                  description = "Post nothing when there is nothing to report (the agent answers NOTHING).";
+                };
+              };
+            }
+          );
         };
 
         testTools = lib.mkOption {
@@ -244,86 +276,131 @@
         };
       };
 
-      config = {
-        # host-monitor, run locally: system, hardware, services, logs and config lookups, all read-only.
-        agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
-        # Metrics, alerts and logs from every host, where the observability stack runs.
-        agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
-        # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
-        # consolidation, announcements and undo are for the bridge.
-        agent.tools.memory = lib.mkIf config.services.qdrant.enable {
-          command = [
-            (lib.getExe memory)
-            "--data"
-            "/var/lib/agent/memory.sqlite"
-            "--qdrant"
-            "http://127.0.0.1:${toString config.services.qdrant.settings.service.http_port}"
-            "--models"
-            (lib.removeSuffix "/v1" cfg.models.endpoint)
-          ];
-          tools =
-            lib.genAttrs [ "remember" "update" "retract" ] (_: {
-              replay = "unsafe";
-            })
-            // lib.genAttrs [
-              "auto_recall"
-              "core_block"
-              "index_exchange"
-              "consolidate"
-              "unannounced"
-              "announced"
-              "notice"
-              "undo"
-            ] (_: { expose = false; });
-        };
-
-        sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
-
-        systemd.services.agent = {
-          description = "Cosmos homelab agent";
-          wantedBy = [ "multi-user.target" ];
-          after = [
-            "network-online.target"
-            "netbird-wt0.service"
-          ]
-          ++ lib.optional config.services.matrix-tuwunel.enable "tuwunel.service"
-          ++ lib.optional hasMemory "qdrant.service";
-          wants = [ "network-online.target" ];
-          restartTriggers = [ configFile ];
-          serviceConfig = {
-            ExecStart = "${lib.getExe nodejs} --disable-warning=ExperimentalWarning ${package}/lib/agent/dist/main.js ${configFile}";
-            DynamicUser = true;
-            StateDirectory = "agent";
-            WorkingDirectory = "/var/lib/agent";
-            # host-monitor's log tool reads the journal.
-            SupplementaryGroups = [ "systemd-journal" ];
-            LoadCredential = [
-              "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
-            ]
-            # memory reads it from $CREDENTIALS_DIRECTORY.
-            ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}";
-            Restart = "always";
-            RestartSec = 5;
-            NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            PrivateTmp = true;
-            PrivateDevices = true;
-            ProtectKernelTunables = true;
-            ProtectKernelModules = true;
-            ProtectControlGroups = true;
-            RestrictNamespaces = true;
-            LockPersonality = true;
-            RestrictSUIDSGID = true;
-            RestrictAddressFamilies = [
-              "AF_INET"
-              "AF_INET6"
-              "AF_UNIX"
+      config = lib.mkMerge [
+        {
+          # host-monitor, run locally: system, hardware, services, logs and config lookups, all read-only.
+          agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
+          # Metrics, alerts and logs from every host, where the observability stack runs.
+          agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
+          # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
+          # consolidation, announcements and undo are for the bridge.
+          agent.tools.memory = lib.mkIf config.services.qdrant.enable {
+            command = [
+              (lib.getExe memory)
+              "--data"
+              "/var/lib/agent/memory.sqlite"
+              "--qdrant"
+              "http://127.0.0.1:${toString config.services.qdrant.settings.service.http_port}"
+              "--models"
+              (lib.removeSuffix "/v1" cfg.models.endpoint)
             ];
+            tools =
+              lib.genAttrs
+                [
+                  "remember"
+                  "update"
+                  "retract"
+                  # marks what it returns as shown: a rerun after a crash would find nothing
+                  "stale_threads"
+                ]
+                (_: {
+                  replay = "unsafe";
+                })
+              //
+                lib.genAttrs
+                  [
+                    "auto_recall"
+                    "core_block"
+                    "index_exchange"
+                    "consolidate"
+                    "unannounced"
+                    "announced"
+                    "notice"
+                    "undo"
+                  ]
+                  (_: {
+                    expose = false;
+                  });
           };
-        };
 
-        monitor.units = [ "agent" ];
-      };
+          sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+
+          systemd.services.agent = {
+            description = "Cosmos homelab agent";
+            wantedBy = [ "multi-user.target" ];
+            after = [
+              "network-online.target"
+              "netbird-wt0.service"
+            ]
+            ++ lib.optional config.services.matrix-tuwunel.enable "tuwunel.service"
+            ++ lib.optional hasMemory "qdrant.service";
+            wants = [ "network-online.target" ];
+            restartTriggers = [ configFile ];
+            serviceConfig = {
+              ExecStart = "${lib.getExe nodejs} --disable-warning=ExperimentalWarning ${package}/lib/agent/dist/main.js ${configFile}";
+              DynamicUser = true;
+              StateDirectory = "agent";
+              WorkingDirectory = "/var/lib/agent";
+              # host-monitor's log tool reads the journal.
+              SupplementaryGroups = [ "systemd-journal" ];
+              LoadCredential = [
+                "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
+              ]
+              # memory reads it from $CREDENTIALS_DIRECTORY.
+              ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}";
+              Restart = "always";
+              RestartSec = 5;
+              NoNewPrivileges = true;
+              ProtectSystem = "strict";
+              ProtectHome = true;
+              PrivateTmp = true;
+              PrivateDevices = true;
+              ProtectKernelTunables = true;
+              ProtectKernelModules = true;
+              ProtectControlGroups = true;
+              RestrictNamespaces = true;
+              LockPersonality = true;
+              RestrictSUIDSGID = true;
+              RestrictAddressFamilies = [
+                "AF_INET"
+                "AF_INET6"
+                "AF_UNIX"
+              ];
+            };
+          };
+
+          monitor.units = [ "agent" ];
+        }
+
+        {
+          # The scheduler: each schedule's timer starts a oneshot that asks the agent (on localhost) to run the job. A run
+          # missed while lugh was off happens at boot; a failed request (the agent restarting) is retried.
+          systemd.services = lib.mapAttrs' (
+            name: _:
+            lib.nameValuePair "agent-schedule-${name}" {
+              description = "Start the agent's ${name} job";
+              after = [ "agent.service" ];
+              serviceConfig = {
+                Type = "oneshot";
+                DynamicUser = true;
+                ExecStart = "${lib.getExe pkgs.curl} --fail --silent --show-error --max-time 120 -X POST http://127.0.0.1:${toString cfg.alerts.port}/schedule/${name}";
+                Restart = "on-failure";
+                RestartSec = 60;
+              };
+              unitConfig.StartLimitIntervalSec = 0;
+            }
+          ) cfg.schedules;
+          systemd.timers = lib.mapAttrs' (
+            name: s:
+            lib.nameValuePair "agent-schedule-${name}" {
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnCalendar = s.onCalendar;
+                Persistent = true;
+              };
+            }
+          ) cfg.schedules;
+        }
+      ];
     };
 }
