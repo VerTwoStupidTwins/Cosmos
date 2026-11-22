@@ -15,6 +15,23 @@ let
 in
 {
   options.cosmos.netbird = {
+    peers = mkOption {
+      description = "The owner's peers and their NetBird IPs (stable per peer), for things that allow by address, like the private web sites.";
+      type = types.attrsOf (types.submodule { options.ip = mkOption { type = types.str; }; });
+    };
+
+    # The addresses a private web site (web.sites.<name>.shared = false) answers: the owner's devices and lugh itself.
+    privateSiteClients = mkOption {
+      type = types.listOf types.str;
+      readOnly = true;
+      default =
+        let
+          cfg = config.cosmos.netbird;
+          members = lib.unique (cfg.groups.CosmosAdmin.members ++ cfg.groups.CosmosInfra.members);
+        in
+        map (m: cfg.peers.${m}.ip) members;
+    };
+
     groups = mkOption {
       description = "NetBird groups, by their name in the dashboard.";
       type = types.attrsOf (
@@ -85,6 +102,14 @@ in
   };
 
   config.cosmos.netbird = {
+    peers = {
+      tenjin.ip = "100.94.61.153";
+      akita.ip = "100.94.136.207";
+      lugh.ip = "100.94.36.6";
+      nabu.ip = "100.94.123.249";
+      hestia.ip = "100.94.252.21";
+    };
+
     groups = {
       All = {
         owner = "NetBird";
@@ -184,7 +209,7 @@ in
         to = [ "CosmosInfra" ];
         protocol = "tcp";
         ports = [ "443" ];
-        why = "the brother's devices reach the *.gatica.one sites on lugh (NAS-fronted ones included)";
+        why = "the brother's devices reach the *.gatica.one sites on lugh, but nginx only lets them into the shared ones (the NAS's services; web.sites.<name>.shared): the others answer 403 to anyone but the owner's devices";
       };
       "Homelab Access" = {
         from = [ "Olympus" ];

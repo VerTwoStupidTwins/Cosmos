@@ -1,4 +1,9 @@
 # modules/features/web.nix
+{ config, ... }:
+let
+  # The addresses private sites answer (modules/netbird-policies.nix): the owner's devices and lugh.
+  privateClients = config.cosmos.netbird.privateSiteClients;
+in
 {
   # The host's web services under <name>.gatica.one, through nginx with one wildcard certificate, reachable only over
   # NetBird. Public DNS points each name at the host's NetBird address, which only NetBird peers can reach, and the
@@ -14,40 +19,50 @@
         description = "Services served at <name>.${domain}, proxied to a port on this host.";
         default = { };
         type = lib.types.attrsOf (
-          lib.types.submodule {
-            options = {
-              port = lib.mkOption {
-                type = lib.types.nullOr lib.types.port;
-                default = null;
-                description = "The local port the service listens on, on 127.0.0.1. Either this or upstream.";
+          lib.types.submodule (
+            { config, ... }:
+            {
+              # Shared sites (by default those fronting the shared NAS) answer anyone NetBird lets reach lugh, the brother's
+              # devices included; private ones only the owner's devices and lugh itself, and 403 to the rest.
+              config.shared = lib.mkDefault (config.upstream != null);
+              options = {
+                shared = lib.mkOption {
+                  type = lib.types.bool;
+                  description = "Whether others on the NetBird account (the brother's devices) may use it; by default only NAS-fronted sites.";
+                };
+                port = lib.mkOption {
+                  type = lib.types.nullOr lib.types.port;
+                  default = null;
+                  description = "The local port the service listens on, on 127.0.0.1. Either this or upstream.";
+                };
+                upstream = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                  example = "https://100.94.10.20:5001";
+                  description = ''
+                    A service on another machine, by its NetBird address (scheme, address, port), for things lugh only
+                    fronts, like the shared NAS. Its own certificate isn't checked: the hop runs inside NetBird's
+                    encrypted tunnel. Either this or port.
+                  '';
+                };
+                healthPath = lib.mkOption {
+                  type = lib.types.str;
+                  default = "/";
+                  description = "A path that answers 2xx while the service is healthy, for the blackbox probe.";
+                };
+                websockets = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = "Pass WebSocket upgrades through.";
+                };
+                extraConfig = lib.mkOption {
+                  type = lib.types.lines;
+                  default = "";
+                  description = "Extra nginx directives for the site's location.";
+                };
               };
-              upstream = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                example = "https://100.94.10.20:5001";
-                description = ''
-                  A service on another machine, by its NetBird address (scheme, address, port), for things lugh only
-                  fronts, like the shared NAS. Its own certificate isn't checked: the hop runs inside NetBird's
-                  encrypted tunnel. Either this or port.
-                '';
-              };
-              healthPath = lib.mkOption {
-                type = lib.types.str;
-                default = "/";
-                description = "A path that answers 2xx while the service is healthy, for the blackbox probe.";
-              };
-              websockets = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Pass WebSocket upgrades through.";
-              };
-              extraConfig = lib.mkOption {
-                type = lib.types.lines;
-                default = "";
-                description = "Extra nginx directives for the site's location.";
-              };
-            };
-          }
+            }
+          )
         );
       };
 
@@ -88,8 +103,19 @@
             lib.nameValuePair "${name}.${domain}" {
               useACMEHost = domain;
               forceSSL = true;
+              extraConfig = lib.optionalString (!site.shared) (
+                lib.concatMapStrings (ip: "allow ${ip};\n") (
+                  [
+                    "127.0.0.1"
+                    "::1"
+                  ]
+                  ++ privateClients
+                )
+                + "deny all;\n"
+              );
               locations."/" = {
-                proxyPass = if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
+                proxyPass =
+                  if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
                 proxyWebsockets = site.websockets;
                 inherit (site) extraConfig;
               };

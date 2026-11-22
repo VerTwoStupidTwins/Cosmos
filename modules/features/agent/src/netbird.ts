@@ -21,6 +21,7 @@ const names = (list: Named[] | undefined) => (list ?? []).map((n) => n.name ?? "
 
 // What the repo says should be set (modules/netbird-policies.nix, as JSON).
 type Declared = {
+	peers: Record<string, { ip: string }>;
 	groups: Record<string, { members: string[] | null; owner: string; description: string }>;
 	policies: Record<
 		string,
@@ -33,8 +34,15 @@ const list = (a: readonly string[]) => (a.length ? a.join(",") : "all");
 
 // Declared against live: what's missing, extra or different. Groups whose members are null (someone else's, or
 // built in) are checked for existence only.
-function drift(declared: Declared, live: Policy[], groups: Group[]): string {
+function drift(declared: Declared, live: Policy[], groups: Group[], peers: Peer[]): string {
 	const lines: string[] = [];
+	// The owner's peers' addresses: private web sites allow by them, so a changed one locks that device out.
+	const peerByName = new Map(peers.map((p) => [p.name, p]));
+	for (const [name, want] of Object.entries(declared.peers ?? {})) {
+		const have = peerByName.get(name);
+		if (!have) lines.push(`MISSING peer ${name} (${want.ip}): not in NetBird`);
+		else if (have.ip !== want.ip) lines.push(`CHANGED peer ${name}: NetBird IP ${have.ip} (repo: ${want.ip}; private sites allow by it)`);
+	}
 	const liveByName = new Map(live.map((p) => [p.name, p]));
 	for (const [name, want] of Object.entries(declared.policies)) {
 		const have = liveByName.get(name);
@@ -77,7 +85,7 @@ function drift(declared: Declared, live: Policy[], groups: Group[]): string {
 	const broad = Object.entries(declared.policies).filter(([, p]) => p.broad);
 	const summary = lines.length
 		? `${lines.length} difference(s) between the repo (modules/netbird-policies.nix) and NetBird:\n${lines.join("\n")}`
-		: `No drift: NetBird matches the repo (${Object.keys(declared.policies).length} policies, ${Object.keys(declared.groups).length} groups).`;
+		: `No drift: NetBird matches the repo (${Object.keys(declared.policies).length} policies, ${Object.keys(declared.groups).length} groups, ${Object.keys(declared.peers ?? {}).length} peers' addresses).`;
 	return broad.length ? `${summary}\nDeliberately broad (known): ${broad.map(([n, p]) => `${n} (${p.broad})`).join("; ")}` : summary;
 }
 
@@ -121,7 +129,7 @@ export function netbirdExtension(token: string, declaredFile: string | null) {
 					if (view === "drift") {
 						if (!declaredFile) throw new Error("the repo's NetBird declaration isn't available to the agent");
 						const declared = JSON.parse(readFileSync(declaredFile, "utf8")) as Declared;
-						text = drift(declared, (await get("policies")) as Policy[], (await get("groups")) as Group[]);
+						text = drift(declared, (await get("policies")) as Policy[], (await get("groups")) as Group[], (await get("peers")) as Peer[]);
 					} else if (view === "policies") text = policies((await get("policies")) as Policy[]);
 					else if (view === "groups")
 						text = ((await get("groups")) as Group[]).map((g) => `${g.name} (${g.peers_count ?? 0} peers): ${names(g.peers)}`).join("\n");
