@@ -141,6 +141,12 @@ in
           443
         ];
 
+        # The host finds its own sites without DNS (services here sign in at id.gatica.one), at the NetBird address the
+        # private sites let in.
+        networking.hosts.${peers.${config.networking.hostName}.ip} = map (name: "${name}.${domain}") (
+          builtins.attrNames cfg.sites
+        );
+
         monitor = {
           units = [ "nginx" ];
           ports.nginx = 443;

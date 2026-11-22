@@ -15,6 +15,7 @@ in
       nixos.builder
       nixos.binary-cache
       nixos.dns
+      nixos.identity
       nixos.cache-push
       nixos.monitor
       nixos.web
