@@ -11,6 +11,7 @@ in
     imports = [
       nixos.systemd-boot
       nixos.server
+      nixos.cache-pull
       nixos.gpu-nvidia
       nixos.gpu-amd
       nixos.gpu-intel

@@ -16,6 +16,7 @@ in
       nixos.niri
       nixos.build-client
       nixos.cache-push
+      nixos.cache-pull
       nixos.claude-code
       nixos.krita
       nixos.monitor-station

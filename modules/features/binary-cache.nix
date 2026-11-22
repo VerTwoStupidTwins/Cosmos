@@ -93,7 +93,7 @@ in
   flake.modules.nixos.cache-pull = {
     nix.settings = {
       extra-substituters = [ "${url}/${cache}" ];
-      extra-trusted-public-keys = [ "@CACHE_PUBLIC_KEY@" ];
+      extra-trusted-public-keys = [ "cosmos:Aq7eiOMuPeIYeXtzhFVzsTKzrJOsX4IRvQyc/PR0NoI=" ];
       connect-timeout = 5;
       fallback = true;
     };
