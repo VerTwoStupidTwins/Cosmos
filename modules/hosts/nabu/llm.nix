@@ -66,6 +66,9 @@ in
           # from rather than reading them again.
           "--cache-ram 32768"
           "--jinja"
+          # Its own template, except that it accepts a system message later in a conversation (the agent sends a changed
+          # prompt section there instead of rewriting the start, which would make it read the whole conversation again).
+          "--chat-template-file ${./workhorse-template.jinja}"
           # The model card's sampling.
           "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0.0"
         ];
