@@ -13,6 +13,7 @@ import { Matrix } from "./matrix.js";
 import { mcpExtension, type ServerCall } from "./mcp.js";
 import { memoryExtension } from "./memory.js";
 import { nabuModels } from "./models.js";
+import { netbirdExtension } from "./netbird.js";
 import { startWeb } from "./web.js";
 
 const config = loadConfig(process.argv[2] ?? "/etc/agent/config.json");
@@ -128,6 +129,9 @@ const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: co
 if (memory) install(memoryExtension(memory.call));
 if (config.testTools) install(TestTools, true);
 if (MapTool) install(MapTool);
+// NetBird's access settings, read-only, when the CosmosAuditor token is given (agent.netbirdApi).
+const netbirdToken = optionalCredential("netbird-api-token");
+if (netbirdToken) install(netbirdExtension(netbirdToken));
 // Installed, but in no conversation by default: chats add the one for the model they're on.
 if (config.chat) {
 	registry.install(HandOff);

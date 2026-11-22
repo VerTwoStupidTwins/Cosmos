@@ -238,6 +238,12 @@
           };
         };
 
+        netbirdApi = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Give the agent the read-only NetBird token, for the netbird_access tool (policies, groups, peers).";
+        };
+
         topologyFile = lib.mkOption {
           type = lib.types.nullOr lib.types.path;
           default = null;
@@ -434,6 +440,10 @@
           sops.secrets.chat-password = lib.mkIf cfg.chat.enable {
             sopsFile = ../../secrets/${config.networking.hostName}.yaml;
           };
+          # The read-only NetBird token (CosmosAuditor, modules/features/netbird-api.nix) for the netbird_access tool.
+          sops.secrets.netbird-api-token = lib.mkIf cfg.netbirdApi {
+            sopsFile = ../../secrets/common.yaml;
+          };
           # tenjin pushes its wallpaper palette with this (modules/desktop/chat-theme.nix); shared, so common.yaml.
           sops.secrets.chat-theme-token = lib.mkIf cfg.chat.enable {
             sopsFile = ../../secrets/common.yaml;
@@ -473,6 +483,7 @@
               ]
               # memory reads it from $CREDENTIALS_DIRECTORY.
               ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}"
+              ++ lib.optional cfg.netbirdApi "netbird-api-token:${config.sops.secrets.netbird-api-token.path}"
               ++ lib.optionals cfg.chat.enable [
                 "chat-password:${config.sops.secrets.chat-password.path}"
                 "chat-theme-token:${config.sops.secrets.chat-theme-token.path}"
