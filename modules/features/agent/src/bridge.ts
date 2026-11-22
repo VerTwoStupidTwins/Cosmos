@@ -72,13 +72,14 @@ const CHAT_MAIN = [
 	"Talk naturally and keep it brief unless they want depth. You have memory but none of the homelab tools.",
 	"When the conversation turns to work on the homelab (checking hosts, services, metrics, logs or configs, or changing",
 	"anything) or needs heavier reasoning or long code, call hand_off with a short reason and tell the owner in one line",
-	"that you're handing over to workhorse and why. Don't attempt that work yourself.",
+	"that you're handing over to workhorse and why. Don't attempt that work yourself. Saying you're handing over does",
+	"nothing by itself: always call hand_off, every time, even if you handed over earlier in this chat.",
 ].join(" ");
 const CHAT_WORK = [
 	"This chat was handed to you, workhorse, for work: you have the homelab tools. Keep the chat's conversational tone.",
 	"When the work is done and the talk turns casual again (ideas, plans, small talk with no tools needed), call",
 	"hand_back with a short reason and tell the owner in one line that main takes it from here. Not while work is",
-	"still going on.",
+	"still going on. Saying it does nothing by itself: always call hand_back.",
 ].join(" ");
 const handOffPrompt = (reason: string) =>
 	`[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
@@ -655,7 +656,7 @@ export class Bridge {
 				const c = this.options.chat;
 				const chat = owed.chat !== undefined ? this.#state.chats[owed.chat] : undefined;
 				const onMain = chat?.model === c?.mainModel;
-				const reason = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back") : undefined;
+				const reason = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back", markdown) : undefined;
 				const target = onMain ? c?.workModel : c?.mainModel;
 				const next: Pending | undefined =
 					reason !== undefined && onMain ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
@@ -803,7 +804,20 @@ export class Bridge {
 	}
 
 	// Did the model call `tool` (hand_off, hand_back) while answering? Read from the transcript, so it survives a restart.
-	async #switchRequest(id: string, tool: string): Promise<string | undefined> {
+	// An answer that says it hands over without the call counts too: a promised switch must not leave the chat stranded.
+	async #switchRequest(id: string, tool: string, answer: string): Promise<string | undefined> {
+		const called = await this.#calledWhileAnswering(id, tool);
+		if (called !== undefined) return called;
+		const said =
+			tool === "hand_off"
+				? /\bhand(?:ing)?(?: (?:this|it))? (?:over|off) to workhorse\b|\bworkhorse (?:will )?take(?:s)? (?:it )?(?:over|from here)\b/i
+				: /\bhand(?:ing)?(?: (?:this|it))? back to main\b|\bmain (?:will )?take(?:s)? (?:it )?(?:over|from here)\b/i;
+		if (!said.test(answer)) return undefined;
+		console.error(`chat: ${id} said it hands over without calling ${tool}; switching anyway`);
+		return tool === "hand_off" ? "main said it's handing over" : "workhorse said main takes it from here";
+	}
+
+	async #calledWhileAnswering(id: string, tool: string): Promise<string | undefined> {
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
 		for (const entry of page?.items ?? []) {
