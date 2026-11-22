@@ -363,6 +363,10 @@ in
           sopsFile = hostSecrets;
           owner = "grafana";
         };
+        grafana-oidc-secret = {
+          sopsFile = hostSecrets;
+          owner = "grafana";
+        };
         grafana-secret-key = {
           sopsFile = hostSecrets;
           owner = "grafana";
@@ -384,6 +388,31 @@ in
             secret_key = secretFile "grafana-secret-key";
           };
           users.allow_sign_up = false;
+          # Sign-in with Pocket ID (identity.nix): its Grafana client only lets the cosmos group in, and they're Grafana
+          # admins. It signs in on its own; the local admin above is the way in when Pocket ID is down, at
+          # /login?disableAutoLogin=true.
+          auth.oauth_allow_insecure_email_lookup = true;
+          "auth.generic_oauth" = {
+            enabled = true;
+            name = "Pocket ID";
+            auto_login = true;
+            client_id = "a239d743-0fed-436e-8501-ab6d66910aaa";
+            client_secret = secretFile "grafana-oidc-secret";
+            scopes = "openid email profile groups";
+            auth_url = "https://id.gatica.one/authorize";
+            token_url = "https://id.gatica.one/api/oidc/token";
+            api_url = "https://id.gatica.one/api/oidc/userinfo";
+            signout_redirect_url = "https://id.gatica.one/api/oidc/end-session";
+            use_pkce = true;
+            login_attribute_path = "preferred_username";
+            name_attribute_path = "name";
+            email_attribute_path = "email";
+            groups_attribute_path = "groups";
+            role_attribute_path = "contains(groups[*], 'cosmos') && 'GrafanaAdmin' || 'None'";
+            role_attribute_strict = true;
+            allow_assign_grafana_admin = true;
+            allow_sign_up = true;
+          };
           analytics = {
             reporting_enabled = false;
             check_for_updates = false;

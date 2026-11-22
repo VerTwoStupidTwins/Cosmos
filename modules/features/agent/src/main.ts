@@ -204,7 +204,7 @@ const alertServer = createServer((request, response) => {
 alertServer.listen(config.alerts.port, "127.0.0.1", () => console.error(`alerts: listening on 127.0.0.1:${config.alerts.port}`));
 const webServer = config.chat ? startWeb(bridge, {
 			port: config.chat.port,
-			password: credential("chat-password"),
+			password: optionalCredential("chat-password"),
 			context,
 			themeToken: optionalCredential("chat-theme-token"),
 			themeFile: join(process.env.STATE_DIRECTORY ?? ".", "theme.json"),

@@ -14,6 +14,7 @@ in
     let
       domain = "gatica.one";
       cfg = config.web;
+      target = site: if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
     in
     {
       options.web.sites = lib.mkOption {
@@ -30,6 +31,20 @@ in
                 shared = lib.mkOption {
                   type = lib.types.bool;
                   description = "Whether others on the NetBird account (the brother's devices) may use it; by default only NAS-fronted sites.";
+                };
+                sso = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = ''
+                    Sign in with Pocket ID first (oauth2-proxy, identity.nix): only the cosmos group gets through. The
+                    health path and ssoBypass stay open, for the probe and for clients with their own tokens.
+                  '';
+                };
+                ssoBypass = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                  default = [ ];
+                  example = [ "/api/theme" ];
+                  description = "Exact paths that skip the sign-in, for callers that bring their own credentials.";
                 };
                 peers = lib.mkOption {
                   type = lib.types.listOf (lib.types.enum (builtins.attrNames peers));
@@ -121,20 +136,42 @@ in
                 )
                 + "deny all;\n"
               );
-              locations."/" = {
-                proxyPass =
-                  if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
-                proxyWebsockets = site.websockets;
-                inherit (site) extraConfig;
-              };
+              locations =
+                let
+                  location = extra: {
+                    proxyPass = target site;
+                    proxyWebsockets = site.websockets;
+                    extraConfig = extra + site.extraConfig;
+                  };
+                in
+                {
+                  "/" = location "";
+                }
+                # Signed-in sites still answer these without the sign-in.
+                // lib.optionalAttrs site.sso (
+                  lib.genAttrs' (lib.unique ([ site.healthPath ] ++ site.ssoBypass)) (path: {
+                    name = "= ${path}";
+                    value = location "auth_request off;\n";
+                  })
+                );
             }
           ) cfg.sites;
         };
 
-        assertions = lib.mapAttrsToList (name: site: {
-          assertion = (site.port == null) != (site.upstream == null);
-          message = "web.sites.${name}: set exactly one of port or upstream.";
-        }) cfg.sites;
+        services.oauth2-proxy.nginx.virtualHosts = lib.mapAttrs' (
+          name: _: lib.nameValuePair "${name}.${domain}" { allowed_groups = [ "cosmos" ]; }
+        ) (lib.filterAttrs (_: site: site.sso) cfg.sites);
+
+        assertions =
+          lib.mapAttrsToList (name: site: {
+            assertion = (site.port == null) != (site.upstream == null);
+            message = "web.sites.${name}: set exactly one of port or upstream.";
+          }) cfg.sites
+          ++ lib.mapAttrsToList (name: site: {
+            # Without oauth2-proxy the nginx module adds no sign-in at all, and the site would be open.
+            assertion = !site.sso || config.services.oauth2-proxy.enable;
+            message = "web.sites.${name}.sso needs sign-in on this host (nixos.identity).";
+          }) cfg.sites;
 
         networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [
           80

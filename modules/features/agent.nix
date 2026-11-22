@@ -210,9 +210,17 @@
             type = lib.types.bool;
             default = true;
             description = ''
-              Chats with the owner's models: a web app at chat.<domain> (mesh-only, behind the chat-password secret) and
+              Chats with the owner's models: a web app at chat.<domain> (mesh-only, behind Pocket ID or the chat-password secret) and
               a Chat room in Matrix, sharing the same conversations. A chat starts on mainModel, which hands it to
               workModel (with the homelab tools) when the talk turns to work.
+            '';
+          };
+          sso = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Sign in with Pocket ID (web.sites.chat.sso) instead of the app's own password: the agent then trusts that
+              nginx lets only signed-in requests through, and chat-password isn't used.
             '';
           };
           roomName = lib.mkOption {
@@ -444,7 +452,7 @@
           };
 
           sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
-          sops.secrets.chat-password = lib.mkIf cfg.chat.enable {
+          sops.secrets.chat-password = lib.mkIf (cfg.chat.enable && !cfg.chat.sso) {
             sopsFile = ../../secrets/${config.networking.hostName}.yaml;
           };
           # The read-only NetBird token (CosmosAuditor, modules/features/netbird-api.nix) for the netbird_access tool.
@@ -460,6 +468,9 @@
           web.sites.chat = lib.mkIf cfg.chat.enable {
             inherit (cfg.chat) port;
             healthPath = "/healthz";
+            inherit (cfg.chat) sso;
+            # tenjin's palette push brings its own token (chat-theme-token).
+            ssoBypass = [ "/api/theme" ];
             extraConfig = ''
               proxy_buffering off;
               proxy_cache off;
@@ -491,10 +502,10 @@
               # memory reads it from $CREDENTIALS_DIRECTORY.
               ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}"
               ++ lib.optional cfg.netbirdApi "netbird-api-token:${config.sops.secrets.netbird-api-token.path}"
-              ++ lib.optionals cfg.chat.enable [
-                "chat-password:${config.sops.secrets.chat-password.path}"
-                "chat-theme-token:${config.sops.secrets.chat-theme-token.path}"
-              ];
+              ++ lib.optional cfg.chat.enable "chat-theme-token:${config.sops.secrets.chat-theme-token.path}"
+              ++ lib.optional (
+                cfg.chat.enable && !cfg.chat.sso
+              ) "chat-password:${config.sops.secrets.chat-password.path}";
               Restart = "always";
               RestartSec = 5;
               NoNewPrivileges = true;

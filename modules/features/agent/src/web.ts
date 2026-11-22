@@ -1,5 +1,6 @@
 // The chat web app: a small page and its API, served on 127.0.0.1 (nginx puts it at chat.gatica.one, mesh-only).
-// One password (the chat-password credential) gives a signed cookie good for 30 days; the API answers only with it.
+// Signed in by nginx (Pocket ID), or, without it, one password (the chat-password credential) gives a signed cookie
+// good for 30 days; the API answers only with it.
 // A chat's page follows its conversation with a Pi Durable watch, sent as server-sent events: the transcript as chat
 // items when it changes, and the answer being written while a run is busy.
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -142,10 +143,14 @@ function live(docs: Readonly<Record<string, unknown>>) {
 	return { busy: state.run !== undefined, partial: textOf(state.generation?.message?.content) };
 }
 
-export function startWeb(bridge: Bridge, options: { port: number; password: string; context: Context; themeToken?: string; themeFile: string }) {
-	const key = createHmac("sha256", "cosmos-chat-session").update(options.password).digest();
+// Without a password, nginx's sign-in (Pocket ID through oauth2-proxy, agent.chat.sso) is the gate: every request that
+// reaches this port has passed it, so the app's own login is skipped.
+export function startWeb(bridge: Bridge, options: { port: number; password?: string; context: Context; themeToken?: string; themeFile: string }) {
+	const password = options.password;
+	const key = createHmac("sha256", "cosmos-chat-session").update(password ?? "").digest();
 	const sign = (expires: number) => `${expires}.${createHmac("sha256", key).update(String(expires)).digest("base64url")}`;
 	const signedIn = (request: IncomingMessage) => {
+		if (password === undefined) return true;
 		const value = /(?:^|;\s*)cosmos_chat=([^;]+)/.exec(request.headers.cookie ?? "")?.[1];
 		const expires = Number(value?.split(".")[0]);
 		if (!value || !(expires > Date.now())) return false;
@@ -154,8 +159,9 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 		return good.length === given.length && timingSafeEqual(good, given);
 	};
 	const passwordOk = (given: string) => {
+		if (password === undefined) return true;
 		const a = createHmac("sha256", key).update(given).digest();
-		const b = createHmac("sha256", key).update(options.password).digest();
+		const b = createHmac("sha256", key).update(password).digest();
 		return timingSafeEqual(a, b);
 	};
 
