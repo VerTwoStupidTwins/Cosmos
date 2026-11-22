@@ -7,6 +7,7 @@ in
   # ntfy), runs the homelab's Matrix server and its agent (with its memory's Qdrant), and builds for the others. Game streaming from the
   # B580 and modded Minecraft and Foundry VTT servers come later, all over NetBird.
   hosts.lugh = {
+    topology.self.hardware.info = "AMD Ryzen 9 5900X, 64 GB, Arc B580; infrastructure server";
     imports = [
       nixos.systemd-boot
       nixos.server

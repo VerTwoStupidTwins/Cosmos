@@ -25,6 +25,13 @@
         };
       };
 
+      # For the homelab map (modules/topology.nix).
+      topology.self.services.ntfy = {
+        name = "ntfy";
+        info = "ntfy.gatica.one";
+        details.role.text = "Push notifications to the owner's phone (Alertmanager alerts).";
+      };
+
       web.sites.ntfy = {
         healthPath = "/v1/health";
         inherit port;

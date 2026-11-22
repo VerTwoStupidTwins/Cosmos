@@ -49,6 +49,13 @@
       # The keys come from the environment, never the config file in the Nix store.
       systemd.services.qdrant.serviceConfig.EnvironmentFile = config.sops.templates."qdrant.env".path;
 
+      # For the homelab map (modules/topology.nix).
+      topology.self.services.qdrant = {
+        name = "Qdrant";
+        info = "127.0.0.1:6333, dashboard memory.gatica.one";
+        details.role.text = "The agent's memory index (dense + BM25 vectors); the truth is SQLite in /var/lib/agent.";
+      };
+
       web.sites.memory = {
         inherit port;
         healthPath = "/healthz";

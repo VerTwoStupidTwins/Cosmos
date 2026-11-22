@@ -32,6 +32,11 @@
       url = "github:Kmic-68/llama.cpp/p100-optimizations";
       flake = false;
     };
+    # Infrastructure and network diagrams from the NixOS configs (modules/topology.nix).
+    nix-topology = {
+      url = "github:oddlama/nix-topology";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     stylix = {
       url = "github:nix-community/stylix";
       inputs.nixpkgs.follows = "nixpkgs";

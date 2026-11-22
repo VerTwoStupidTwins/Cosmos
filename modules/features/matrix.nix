@@ -43,6 +43,14 @@
         owner = config.services.matrix-tuwunel.user;
       };
 
+      # For the homelab map (modules/topology.nix).
+      topology.self.services.tuwunel = {
+        name = "Matrix (tuwunel)";
+        icon = "services.matrix";
+        info = "matrix.gatica.one";
+        details.role.text = "The homelab's Matrix server; the agent talks to the owner here (Agent, Chat, Alerts, Memory and schedule rooms). Not federated.";
+      };
+
       web.sites.matrix = {
         inherit port;
         healthPath = "/_matrix/client/versions";

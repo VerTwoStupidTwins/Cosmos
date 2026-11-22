@@ -7,6 +7,7 @@ in
   # Its GPUs come from three vendors: two Tesla P100s (16 GB HBM2 each), lugh's Radeon RX 7900 XT (20 GB) and
   # lugh's Arc Pro B50 (16 GB). Named for the Mesopotamian god of scribes and wisdom.
   hosts.nabu = {
+    topology.self.hardware.info = "Xeon W-2145, 128 GB, 2× Tesla P100, RX 7900 XT, Arc Pro B50; LLM server";
     imports = [
       nixos.systemd-boot
       nixos.server

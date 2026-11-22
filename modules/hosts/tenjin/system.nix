@@ -6,6 +6,7 @@ in
   # A Lenovo ThinkPad C13 Yoga Chromebook (Google "Morphius") with MrChromebox's UEFI firmware.
   # The main workstation; the touchscreen and stylus are for drawing and media work.
   hosts.tenjin = {
+    topology.self.hardware.info = "ThinkPad C13 Yoga (convertible Chromebook); main workstation";
     imports = [
       nixos.systemd-boot
       nixos.laptop

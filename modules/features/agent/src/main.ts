@@ -3,6 +3,7 @@
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import { createRegistry, defineExtension, defineTool, type Extension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { obj, str } from "@earendil-works/pi-schema";
@@ -86,6 +87,24 @@ const HandBack = defineExtension({
 	],
 });
 
+// The homelab map (modules/topology.nix: nix-topology's view of the deployed configs, as text), for every conversation
+// including main's chats: read-only, so asking how things connect needs no hand-off.
+const MapTool = config.topology
+	? defineExtension({
+			name: "homelab-map",
+			tools: [
+				defineTool({
+					name: "homelab_map",
+					description:
+						"The homelab's map, generated from the deployed NixOS configs: networks, each host's hardware, interfaces (network, addresses, what they connect to) and services (what they are, where they answer). Use it for questions about how things are set up, connected or reached; it shows configuration, not live state.",
+					parameters: obj({}),
+					replay: "safe",
+					execute: async () => ({ output: [{ type: "text", text: readFileSync(config.topology!, "utf8") }] }),
+				}),
+			],
+		})
+	: undefined;
+
 const approval = new Set<string>(config.testTools ? ["restart_service"] : []);
 const registry = createRegistry();
 // What every conversation gets (the harness default), and of that what main doesn't get in a chat.
@@ -108,6 +127,7 @@ for (const [name, server] of Object.entries(config.tools)) {
 const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
 if (memory) install(memoryExtension(memory.call));
 if (config.testTools) install(TestTools, true);
+if (MapTool) install(MapTool);
 // Installed, but in no conversation by default: chats add the one for the model they're on.
 if (config.chat) {
 	registry.install(HandOff);

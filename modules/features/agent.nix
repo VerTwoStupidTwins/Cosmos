@@ -110,6 +110,7 @@
           alerts = { inherit (cfg.alerts) port roomName; };
           memory = if hasMemory then { inherit (cfg.memory) quietMinutes roomName; } else null;
           schedules = lib.mapAttrs (_: s: { inherit (s) roomName prompt quiet; }) cfg.schedules;
+          topology = if cfg.topologyFile == null then null else "${cfg.topologyFile}";
           chat =
             if cfg.chat.enable then
               {
@@ -235,6 +236,12 @@
             default = "helper";
             description = "The llama-swap model that names chats.";
           };
+        };
+
+        topologyFile = lib.mkOption {
+          type = lib.types.nullOr lib.types.path;
+          default = null;
+          description = "The homelab map as markdown (set by modules/topology.nix), for the homelab_map tool.";
         };
 
         schedules = lib.mkOption {
@@ -404,6 +411,23 @@
                   (_: {
                     expose = false;
                   });
+          };
+
+          # For the homelab map (modules/topology.nix): what the agent is and what it can reach, from its own options.
+          topology.self.services.agent = {
+            name = "Cosmos agent";
+            icon = "services.open-webui";
+            info = "Matrix bot @agent${lib.optionalString cfg.chat.enable ", chat.gatica.one"}";
+            details = {
+              models.text = "thinks with nabu's llama-swap (${cfg.models.endpoint}); default ${cfg.models.default}, may use ${lib.concatStringsSep ", " (lib.attrNames cfg.models.catalog)}";
+              tools.text = "MCP servers: ${lib.concatStringsSep ", " (lib.attrNames cfg.tools)}";
+              schedules.text =
+                if cfg.schedules == { } then
+                  "none"
+                else
+                  lib.concatStringsSep "; " (lib.mapAttrsToList (n: sc: "${n} (${sc.onCalendar})") cfg.schedules);
+              hooks.text = "Alertmanager webhook and schedule triggers on 127.0.0.1:8091${lib.optionalString cfg.chat.enable "; chat web app on 127.0.0.1:${toString cfg.chat.port}"}";
+            };
           };
 
           sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;

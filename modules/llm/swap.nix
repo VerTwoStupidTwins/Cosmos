@@ -175,6 +175,16 @@ in
             path = lib.concatMap (model: model.path) (lib.attrValues cfg.models);
           };
 
+        # For the homelab map (modules/topology.nix): the API and each model with what runs it.
+        topology.self.services.llama-swap = {
+          name = "llama-swap";
+          icon = "services.ollama";
+          info = "OpenAI-compatible API on port ${toString cfg.port}";
+          details = lib.mapAttrs (name: model: {
+            text = if model.backend != null then "llama.cpp on ${model.backend}" else "own server";
+          }) cfg.models;
+        };
+
         assertions = lib.concatLists (
           lib.mapAttrsToList (name: model: [
             {
