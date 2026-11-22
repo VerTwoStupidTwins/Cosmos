@@ -1,7 +1,7 @@
 // The Cosmos homelab agent: Pi Durable on lugh, thinking with nabu's models, talking in Matrix, using the Rust tools
 // the config lists as MCP servers.  node dist/main.js /etc/agent/config.json
 import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
-import { createRegistry, defineExtension, defineTool, Harness, section } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, defineTool, type Extension, Harness, section } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { createServer } from "node:http";
 import { obj, str } from "@earendil-works/pi-schema";
@@ -11,6 +11,7 @@ import { Matrix } from "./matrix.js";
 import { mcpExtension, type ServerCall } from "./mcp.js";
 import { memoryExtension } from "./memory.js";
 import { nabuModels } from "./models.js";
+import { startWeb } from "./web.js";
 
 const config = loadConfig(process.argv[2] ?? "/etc/agent/config.json");
 const matrix = new Matrix(config.homeserver, credential("matrix-token"));
@@ -49,20 +50,47 @@ const TestTools = defineExtension({
 	],
 });
 
+// Only in chats on main: the way it passes a conversation to workhorse. The bridge sees the call in the transcript and
+// switches the chat once main's answer is out.
+const HandOff = defineExtension({
+	name: "hand-off",
+	tools: [
+		defineTool({
+			name: "hand_off",
+			description:
+				"Hand this chat to workhorse, the bigger model with the homelab tools, when the conversation turns to work on the homelab or needs heavier reasoning. It takes over right after your answer.",
+			parameters: obj({ reason: str() }),
+			replay: "safe",
+			execute: async () => ({
+				output: [{ type: "text", text: "Noted: workhorse takes over after your answer. Tell the owner in one short line that you're handing over and why; don't start the work yourself." }],
+			}),
+		}),
+	],
+});
+
 const approval = new Set<string>(config.testTools ? ["restart_service"] : []);
 const registry = createRegistry();
-registry.install(Persona);
+// What every conversation gets (the harness default), and of that what main doesn't get in a chat.
+const defaults: Extension[] = [];
+const homelab: Extension[] = [];
+const install = (extension: Extension, isHomelab = false) => {
+	registry.install(extension);
+	defaults.push(extension);
+	if (isHomelab) homelab.push(extension);
+};
+install(Persona);
 const calls: Record<string, ServerCall> = {};
 for (const [name, server] of Object.entries(config.tools)) {
 	const tools = await mcpExtension(name, server);
 	for (const tool of tools.approval) approval.add(tool);
-	registry.install(tools.extension);
+	install(tools.extension, name !== "memory");
 	calls[name] = tools.call;
 }
 // Long-term memory: the core block in every conversation, and the bridge's recall, storing and announcing.
 const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
-if (memory) registry.install(memoryExtension(memory.call));
-if (config.testTools) registry.install(TestTools);
+if (memory) install(memoryExtension(memory.call));
+if (config.testTools) install(TestTools, true);
+if (config.chat) registry.install(HandOff); // installed, but in no conversation by default
 
 const bridge = new Bridge({
 	matrix,
@@ -73,9 +101,20 @@ const bridge = new Bridge({
 	alertsRoomName: config.alerts.roomName,
 	schedules: config.schedules,
 	...(memory && { memory }),
+	...(config.chat && {
+		chat: {
+			roomName: config.chat.roomName,
+			mainModel: config.chat.mainModel,
+			workModel: config.chat.workModel,
+			titleModel: config.chat.titleModel,
+			endpoint: config.models.endpoint,
+			homelab,
+			handOff: HandOff,
+		},
+	}),
 	context,
 });
-registry.install(bridge.extension);
+install(bridge.extension);
 
 const harness = await Harness.open(
 	await openNodeSqliteStorage(config.state),
@@ -83,6 +122,7 @@ const harness = await Harness.open(
 		models: nabuModels(config.models),
 		registry,
 		identity: { attribution: null },
+		settings: { extensions: defaults },
 		onReport: (report) => console.error(`report: ${report.kind}${"reason" in report ? ` (${String(report.reason)})` : ""}: ${String(report.error ?? "")}`),
 	},
 	context,
@@ -115,6 +155,7 @@ const alertServer = createServer((request, response) => {
 	});
 });
 alertServer.listen(config.alerts.port, "127.0.0.1", () => console.error(`alerts: listening on 127.0.0.1:${config.alerts.port}`));
+const webServer = config.chat ? startWeb(bridge, { port: config.chat.port, password: credential("chat-password"), context }) : undefined;
 
 let closing = false;
 const shutdown = async () => {
@@ -122,6 +163,7 @@ const shutdown = async () => {
 	closing = true;
 	bridge.stop();
 	alertServer.close();
+	webServer?.close();
 	await harness.close(context);
 	process.exit(0);
 };

@@ -7,18 +7,23 @@
 // finishes after a restart still reaches the room (twice at worst, if the process dies between posting and noting it).
 import type { Context } from "@earendil-works/chord/context";
 import {
+	type AgentChange,
 	AssistantEntry,
+	configure,
 	type Conversation,
 	type ConversationId,
 	defineDoc,
 	defineExtension,
 	defineSignal,
+	type Extension,
 	type Harness,
 	hook,
 	type SubmissionId,
 	type TaskId,
 	ToolTask,
+	type Tx,
 } from "@earendil-works/pi-durable";
+import { randomUUID } from "node:crypto";
 import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
@@ -39,11 +44,41 @@ const emptyState = (): BridgeState => ({
 	sessions: {},
 	scheduleRooms: {},
 	scheduleLast: {},
+	chatRoom: null,
+	chats: {},
 });
 
 // A message still owed its answer. `text` and `previous` are what memory stores of it once answered; `thread` is set
 // when the answer belongs in a thread (a reply under a Memory room notice).
-type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string; schedule?: boolean };
+type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string; schedule?: boolean; chat?: string };
+
+// A chat: one conversation, shared by the web app and a thread in the Matrix Chat room (`thread`, its root event).
+// Keyed by conversation ID. `model` is the catalog model it is on now.
+export type ChatInfo = { title: string; model: string; thread: string; created: number; updated: number; titled?: boolean };
+
+export type ChatOptions = {
+	roomName: string;
+	mainModel: string;
+	workModel: string;
+	titleModel: string;
+	endpoint: string; // llama-swap's OpenAI API, for naming chats
+	homelab: Extension[]; // what main doesn't get: the homelab tools
+	handOff: Extension; // what only main gets: hand_off
+};
+
+const CHAT_MAIN = [
+	"This is a chat with the owner, in their web app or on their phone. You are main, the quick everyday model.",
+	"Talk naturally and keep it brief unless they want depth. You have memory but none of the homelab tools.",
+	"When the conversation turns to work on the homelab (checking hosts, services, metrics, logs or configs, or changing",
+	"anything) or needs heavier reasoning or long code, call hand_off with a short reason and tell the owner in one line",
+	"that you're handing over to workhorse and why. Don't attempt that work yourself.",
+].join(" ");
+const CHAT_WORK = [
+	"This chat was handed to you, workhorse, for work: you have the homelab tools.",
+	"Keep the conversational tone of the chat. The owner can switch back to main with /chat when the work is done.",
+].join(" ");
+const handOffPrompt = (reason: string) =>
+	`[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
 
 type BridgeState = {
 	since: string | null;
@@ -62,11 +97,14 @@ type BridgeState = {
 	// Scheduled jobs: each job's room, and the run each last started (so a timer fired twice runs once).
 	scheduleRooms: Record<string, string>;
 	scheduleLast: Record<string, string>;
+	// Chats: the Matrix room their threads live in, and each chat.
+	chatRoom: string | null;
+	chats: Record<string, ChatInfo>;
 };
 
 export const BridgeDoc = defineDoc<BridgeState>({
 	kind: "cosmos.bridge",
-	version: 4,
+	version: 5,
 	scope: "session",
 	initial: emptyState,
 	migrate: (value) => ({ ...emptyState(), ...(value as Partial<BridgeState>) }),
@@ -109,11 +147,15 @@ export type BridgeOptions = {
 	// name of the room memory changes are announced in.
 	memory?: { call: ServerCall; quietMs: number; roomName: string };
 	schedules: Config["schedules"];
+	chat?: ChatOptions;
 	context: Context;
 };
 
 const MEMORY_TOOLS_THAT_WRITE = new Set(["memory__remember", "memory__update", "memory__retract"]);
 const AUTO_RECALL_TIMEOUT_MS = 5000;
+
+// What memory knows a message's conversation as: a chat by its own key, everything else by its room.
+const memoryKey = (p: Pending) => (p.chat !== undefined ? `chat:${p.chat}` : p.room);
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 	return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms))]);
@@ -124,7 +166,8 @@ export class Bridge {
 	#state: BridgeState = emptyState();
 	#me = "";
 	#delivering = new Set<string>();
-	#approvals = new Map<string, { taskId: TaskId; key: string }>(); // approval message → parked call
+	#approvals = new Map<string, { taskId: TaskId; key: string; conversation: string }>(); // approval message → parked call
+	#titling = new Set<string>(); // chats being named
 	#stopped = new AbortController();
 	#indexing = false;
 	#announcing: Promise<void> | undefined;
@@ -163,7 +206,7 @@ export class Bridge {
 							await api.memo(`approval.event.${key}`, eventId, context);
 						}
 						if (eventId !== undefined) {
-							this.#approvals.set(eventId, { taskId: api.taskId, key });
+							this.#approvals.set(eventId, { taskId: api.taskId, key, conversation: String(api.conversationId) });
 							// A reaction may already be waiting (sent while the agent was down).
 							setTimeout(() => void this.#resolve(eventId!), 0);
 						}
@@ -209,6 +252,8 @@ export class Bridge {
 	// The room and the message whose thread shows a conversation's tool calls: the newest one still owed an answer.
 	// A scheduled run has no message to thread under yet: its lines are kept and posted under its answer.
 	#where(conversationId: ConversationId): { room: string; thread?: string; buffer?: string[] } | undefined {
+		const chat = this.#state.chats[String(conversationId)];
+		if (chat && this.#state.chatRoom) return { room: this.#state.chatRoom, thread: chat.thread };
 		const room = Object.entries(this.#state.rooms).find(([, id]) => id === Number(conversationId))?.[0];
 		if (!room) return undefined;
 		const [id, owed] = Object.entries(this.#state.pending).filter(([, p]) => p.room === room).at(-1) ?? [];
@@ -291,6 +336,7 @@ export class Bridge {
 		// Edits aren't new questions. Threads hold the agent's own call log, except in the Memory room, where a reply
 		// under a notice corrects that memory.
 		if (event.content.msgtype !== "m.text" || relation?.rel_type === "m.replace") return;
+		if (this.options.chat && room === this.#state.chatRoom) return this.#onChatMessage(event);
 		const text = String(event.content.body);
 		let thread: string | undefined;
 		let content: string;
@@ -324,17 +370,23 @@ export class Bridge {
 	// Auto-recall: memories relevant to the message go to the model with it, and a line in its thread shows which.
 	// Memory being slow or down never holds a message up.
 	async #withMemories(room: string, event: string, text: string): Promise<string> {
-		if (!this.options.memory) return text;
+		const recalled = await this.#recall(room, text);
+		if (recalled.notice) void this.#notice({ room, thread: event }, recalled.notice);
+		return recalled.content;
+	}
+
+	// `key` is what memory knows the conversation as: its room, or chat:<id> for a chat.
+	async #recall(key: string, text: string): Promise<{ content: string; notice?: string }> {
+		if (!this.options.memory) return { content: text };
 		try {
-			const args: Record<string, unknown> = { message: text, room };
-			if (this.#state.lastMessage[room] !== undefined) args.previous = this.#state.lastMessage[room];
+			const args: Record<string, unknown> = { message: text, room: key };
+			if (this.#state.lastMessage[key] !== undefined) args.previous = this.#state.lastMessage[key];
 			const { hits } = (await withTimeout(this.options.memory.call("auto_recall", args), AUTO_RECALL_TIMEOUT_MS)) as { hits: Hit[] };
-			if (hits.length === 0) return text;
-			void this.#notice({ room, thread: event }, recalledNotice(hits));
-			return `${text}\n\n${memoriesBlock(hits)}`;
+			if (hits.length === 0) return { content: text };
+			return { content: `${text}\n\n${memoriesBlock(hits)}`, notice: recalledNotice(hits) };
 		} catch (error) {
 			console.error(`memory: auto-recall skipped: ${String(error)}`);
-			return text;
+			return { content: text };
 		}
 	}
 
@@ -478,7 +530,7 @@ export class Bridge {
 			await this.#announce();
 			for (const [room, last] of Object.entries(this.#state.sessions)) {
 				if (Date.now() - last < memory.quietMs) continue;
-				if (this.#state.toIndex.some((x) => x.room === room) || Object.values(this.#state.pending).some((p) => p.room === room)) continue;
+				if (this.#state.toIndex.some((x) => x.room === room) || Object.values(this.#state.pending).some((p) => memoryKey(p) === room)) continue;
 				try {
 					const out = (await memory.call("consolidate", { room })) as { exchanges: number; topics: string[]; changes: number };
 					await this.#commit((s) => {
@@ -590,17 +642,49 @@ export class Bridge {
 				}
 				// The answered exchange is owed to memory in the same commit that settles the message.
 				const remember = answered && owed.text !== undefined && this.#indexed(owed.room);
-				const exchange: Exchange = { room: owed.room, event: owed.event, message: owed.text ?? "", answer: markdown };
+				const key = memoryKey(owed);
+				const exchange: Exchange = { room: key, event: owed.event, message: owed.text ?? "", answer: markdown };
 				if (owed.previous !== undefined) exchange.previous = owed.previous;
 				const at = Date.now(); // one value for the stored state and the copy in memory
-				await this.#commit((s) => {
-					delete s.pending[id];
-					if (remember) {
-						if (!s.toIndex.some((x) => x.event === exchange.event)) s.toIndex.push(exchange);
-						if (this.#consolidated(owed.room)) s.sessions[owed.room] = at;
-					}
-				});
+				// A chat whose answer came with a hand_off moves to workhorse in the commit that settles it, with a run
+				// that picks up the work, so a crash can't lose or repeat the switch.
+				const chat = owed.chat !== undefined ? this.#state.chats[owed.chat] : undefined;
+				const reason = answered && chat && owed.chat && chat.model === this.options.chat?.mainModel ? await this.#handOffReason(owed.chat) : undefined;
+				const next: Pending | undefined =
+					reason !== undefined ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
+				const continued = await this.#commitAdmitting(
+					async (tx) => {
+						if (reason === undefined || !next) return undefined;
+						const conversation = (await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx))!;
+						const work = this.options.chat!.workModel;
+						const admitted = await conversation.submit(tx, {
+							type: "input",
+							content: handOffPrompt(reason),
+							requestId: next.event,
+							entry: { kind: "cosmos.handoff", data: { reason, model: work } },
+						});
+						await configure(tx, conversation.id, this.#chatAgent(work));
+						return admitted;
+					},
+					(s, admitted) => {
+						delete s.pending[id];
+						if (remember) {
+							if (!s.toIndex.some((x) => x.event === exchange.event)) s.toIndex.push(exchange);
+							if (this.#consolidated(owed.room)) s.sessions[key] = at;
+						}
+						if (admitted !== undefined && next && s.chats[owed.chat!]) {
+							s.pending[String(admitted)] = next;
+							s.chats[owed.chat!]!.model = this.options.chat!.workModel;
+						}
+					},
+				);
 				if (remember) void this.#flushIndex();
+				if (continued !== undefined && next) {
+					console.error(`chat: ${owed.chat} handed to ${this.options.chat!.workModel}: ${reason}`);
+					await this.#notice({ room: owed.room, thread: next.thread! }, `🔀 Switched to ${this.options.chat!.workModel}: ${reason}`);
+					this.#deliver(String(continued));
+				}
+				if (answered && chat && owed.chat && !chat.titled && owed.text !== undefined) void this.#title(owed.chat, owed.text, markdown);
 				this.#buffers.delete(id);
 				if (!Object.values(this.#state.pending).some((p) => p.room === owed.room)) void this.options.matrix.typing(owed.room, this.#me, false);
 			} catch (error) {
@@ -613,6 +697,220 @@ export class Bridge {
 			}
 			this.#delivering.delete(id);
 		})();
+	}
+
+	// A commit that may admit one submission and changes the bridge document with what it admitted.
+	async #commitAdmitting(admit: (tx: Tx) => Promise<SubmissionId | undefined>, change: (state: BridgeState, admitted: SubmissionId | undefined) => void) {
+		const admitted = await this.#harness!.commit(async (tx) => {
+			const id = await admit(tx);
+			change((await tx.doc(BridgeDoc)) as BridgeState, id);
+			return id;
+		}, this.#ctx);
+		change(this.#state, admitted);
+		return admitted;
+	}
+
+	// ---- chats
+
+	// What a chat's conversation runs with: main with memory and hand_off, or workhorse with everything (the
+	// harness's default extensions, which leave hand_off out).
+	#chatAgent(model: string): AgentChange {
+		const c = this.options.chat!;
+		return model === c.mainModel
+			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: CHAT_MAIN }
+			: { model: { provider: "nabu", modelId: model }, extensions: null, instructions: CHAT_WORK };
+	}
+
+	// The Chat room: made on the first chat, with the owner invited.
+	async #chatRoom(): Promise<string> {
+		if (this.#state.chatRoom) return this.#state.chatRoom;
+		const room = await this.options.matrix.createRoom(this.options.chat!.roomName, [this.options.owner]);
+		await this.#commit((s) => {
+			s.chatRoom = room;
+		});
+		console.error(`chat: made the chat room ${room}`);
+		return room;
+	}
+
+	async #newChat(thread: string, firstMessage: string): Promise<string> {
+		const conversation = await this.#harness!.createConversation(
+			{ ownership: { kind: "ownerless" }, agent: { ...this.#chatAgent(this.options.chat!.mainModel), maxTurns: this.options.maxTurns } },
+			this.#ctx,
+		);
+		const id = String(conversation.id);
+		const now = Date.now();
+		const title = clip(firstMessage.replace(/\s+/g, " ").trim(), 60);
+		await this.#commit((s) => {
+			s.chats[id] = { title, model: this.options.chat!.mainModel, thread, created: now, updated: now };
+		});
+		console.error(`chat: started ${id}`);
+		return id;
+	}
+
+	// The Chat room: a top-level message starts a chat in its thread; a reply in a chat's thread continues it.
+	// "/work [why]" and "/chat" switch the chat's model.
+	async #onChatMessage(event: MatrixEvent) {
+		const relation = event.content["m.relates_to"];
+		const text = String(event.content.body);
+		let id: string | undefined;
+		if (relation?.rel_type === "m.thread") {
+			const root = relation.event_id;
+			id = Object.entries(this.#state.chats).find(([, c]) => c.thread === root)?.[0];
+			if (!id) return;
+		} else id = await this.#newChat(event.event_id, text);
+		if (await this.#command(id, text)) return;
+		await this.#chatSubmit(id, text, event.event_id, "matrix");
+	}
+
+	async #command(id: string, text: string): Promise<boolean> {
+		const command = /^\/(work|chat)\b\s*([\s\S]*)$/.exec(text.trim());
+		if (!command) return false;
+		const c = this.options.chat!;
+		await this.switchModel(id, command[1] === "work" ? c.workModel : c.mainModel, command[2]?.trim() || "the owner switched");
+		return true;
+	}
+
+	async #chatSubmit(id: string, text: string, requestId: string, from: "web" | "matrix") {
+		const chat = this.#state.chats[id];
+		if (!chat) throw new Error(`no chat ${id}`);
+		const room = await this.#chatRoom();
+		const key = `chat:${id}`;
+		const recalled = await this.#recall(key, text);
+		if (recalled.notice) void this.#notice({ room, thread: chat.thread }, recalled.notice);
+		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
+		if (!conversation) throw new Error(`chat ${id} has no conversation`);
+		const owed: Pending = { room, event: requestId, thread: chat.thread, text, chat: id };
+		const previous = this.#state.lastMessage[key];
+		if (previous !== undefined) owed.previous = previous;
+		const now = Date.now();
+		const submitted = await this.#commitAdmitting(
+			(tx) => conversation.submit(tx, { type: "input", content: recalled.content, requestId, entry: { kind: "cosmos.message", data: { text, from } } }),
+			(s, admitted) => {
+				s.pending[String(admitted)] = owed;
+				s.lastMessage[key] = text;
+				if (s.chats[id]) s.chats[id]!.updated = now;
+			},
+		);
+		void this.options.matrix.typing(room, this.#me, true);
+		this.#deliver(String(submitted));
+	}
+
+	// Did main call hand_off while answering? Read from the transcript, so it survives a restart.
+	async #handOffReason(id: string): Promise<string | undefined> {
+		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
+		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
+		for (const entry of page?.items ?? []) {
+			if (entry.kind === "cosmos.message" || entry.kind === "pi.user" || entry.kind === "cosmos.handoff") return undefined;
+			for (const message of entry.model ?? []) {
+				if (message.role !== "assistant") continue;
+				for (const part of message.content) {
+					if (part.type === "toolCall" && part.name === "hand_off") return String(part.arguments.reason ?? "the conversation turned to work");
+				}
+			}
+		}
+		return undefined;
+	}
+
+	// Names a chat after its first exchange, with the helper model; until then it's its first message.
+	async #title(id: string, message: string, answer: string) {
+		const c = this.options.chat!;
+		if (this.#titling.has(id)) return;
+		this.#titling.add(id);
+		try {
+			const response = await fetch(`${c.endpoint}/chat/completions`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				signal: AbortSignal.timeout(60_000),
+				body: JSON.stringify({
+					model: c.titleModel,
+					max_tokens: 24,
+					temperature: 0.3,
+					chat_template_kwargs: { enable_thinking: false },
+					messages: [
+						{ role: "system", content: "Name this chat in 2 to 6 words. Answer with the title only: no quotes, no full stop." },
+						{ role: "user", content: `${clip(message, 1500)}\n\n---\n\n${clip(answer, 1500)}` },
+					],
+				}),
+			});
+			const json = (await response.json()) as { choices?: { message?: { content?: string } }[] };
+			const title = (json.choices?.[0]?.message?.content ?? "").trim().replace(/^["'“]+|["'”.]+$/g, "");
+			if (!title) throw new Error("empty title");
+			await this.#commit((s) => {
+				if (s.chats[id]) Object.assign(s.chats[id]!, { title: clip(title, 80), titled: true });
+			});
+		} catch (error) {
+			console.error(`chat: naming ${id} failed: ${String(error)}`);
+		}
+	}
+
+	// ---- for the web app
+
+	chats() {
+		return Object.entries(this.#state.chats)
+			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))
+			.sort((a, b) => b.updated - a.updated);
+	}
+
+	chat(id: string) {
+		const c = this.#state.chats[id];
+		if (!c) return undefined;
+		const approvals = [...this.#approvals].filter(([, a]) => a.conversation === id).map(([event, a]) => ({ event, call: a.key }));
+		return { id, title: c.title, model: c.model, busy: Object.values(this.#state.pending).some((p) => p.chat === id), approvals };
+	}
+
+	// A chat begun on the web gets its Matrix thread at once, rooted at the owner's first message, so the phone has it.
+	async webNewChat(text: string): Promise<string> {
+		const room = await this.#chatRoom();
+		const root = await this.options.matrix.send(room, textContent(`🖥 ${text}`, html(`🖥 ${text}`)));
+		const id = await this.#newChat(root, text);
+		if (!(await this.#command(id, text))) await this.#chatSubmit(id, text, `web:${randomUUID()}`, "web");
+		return id;
+	}
+
+	async webSend(id: string, text: string) {
+		const chat = this.#state.chats[id];
+		if (!chat) throw new Error(`no chat ${id}`);
+		const room = await this.#chatRoom();
+		await this.options.matrix.send(room, { ...textContent(`🖥 ${text}`, html(`🖥 ${text}`)), ...inThread(chat.thread) });
+		if (await this.#command(id, text)) return;
+		await this.#chatSubmit(id, text, `web:${randomUUID()}`, "web");
+	}
+
+	async webApprove(id: string, event: string, allow: boolean) {
+		if (this.#approvals.get(event)?.conversation !== id) throw new Error("no such approval");
+		await this.#commit((s) => {
+			s.reactions[event] = allow;
+		});
+		await this.#resolve(event);
+	}
+
+	async watchChat(id: string, context: Context) {
+		const conversation = this.#state.chats[id] ? await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx) : undefined;
+		if (!conversation) throw new Error(`no chat ${id}`);
+		return conversation.watch(context, { min: 300, max: 600 });
+	}
+
+	// The owner's switch (/work, /chat, the web's button): the model and tools change before the next message; a
+	// notice in the transcript and the thread says so.
+	async switchModel(id: string, model: string, reason: string) {
+		const chat = this.#state.chats[id];
+		if (!chat) throw new Error(`no chat ${id}`);
+		if (model !== this.options.chat!.mainModel && model !== this.options.chat!.workModel) throw new Error(`a chat runs on main or workhorse, not ${model}`);
+		if (chat.model === model) return;
+		const conversation = (await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx))!;
+		const text = `🔀 Switched to ${model}: ${reason}`;
+		await this.#commitAdmitting(
+			async (tx) => {
+				const admitted = await conversation.submit(tx, { type: "write", entry: { kind: "cosmos.notice", data: { text } } });
+				await configure(tx, conversation.id, this.#chatAgent(model));
+				return admitted;
+			},
+			(s) => {
+				if (s.chats[id]) s.chats[id]!.model = model;
+			},
+		);
+		console.error(`chat: ${id} switched to ${model} by the owner`);
+		if (this.#state.chatRoom) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, text);
 	}
 
 	async #onReaction(room: string, event: MatrixEvent) {

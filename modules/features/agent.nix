@@ -28,6 +28,7 @@
             ./agent/package-lock.json
             ./agent/tsconfig.json
             ./agent/src
+            ./agent/web
           ];
         };
         inherit nodejs;
@@ -38,7 +39,7 @@
           runHook preInstall
           npm prune --omit=dev --ignore-scripts
           mkdir -p $out/lib/agent
-          cp -r dist node_modules package.json $out/lib/agent/
+          cp -r dist node_modules package.json web $out/lib/agent/
           runHook postInstall
         '';
       };
@@ -75,6 +76,19 @@
           alerts = { inherit (cfg.alerts) port roomName; };
           memory = if hasMemory then { inherit (cfg.memory) quietMinutes roomName; } else null;
           schedules = lib.mapAttrs (_: s: { inherit (s) roomName prompt quiet; }) cfg.schedules;
+          chat =
+            if cfg.chat.enable then
+              {
+                inherit (cfg.chat)
+                  roomName
+                  port
+                  mainModel
+                  workModel
+                  titleModel
+                  ;
+              }
+            else
+              null;
           state = "/var/lib/agent/agent.sqlite";
           models = {
             inherit (cfg.models) endpoint default;
@@ -152,6 +166,40 @@
             type = lib.types.str;
             default = "Memory";
             description = "The room the agent makes, with the owner invited, to announce every memory change.";
+          };
+        };
+
+        chat = {
+          enable = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = ''
+              Chats with the owner's models: a web app at chat.<domain> (mesh-only, behind the chat-password secret) and
+              a Chat room in Matrix, sharing the same conversations. A chat starts on mainModel, which hands it to
+              workModel (with the homelab tools) when the talk turns to work.
+            '';
+          };
+          roomName = lib.mkOption {
+            type = lib.types.str;
+            default = "Chat";
+          };
+          port = lib.mkOption {
+            type = lib.types.port;
+            default = 8092;
+            description = "The web app's port on 127.0.0.1.";
+          };
+          mainModel = lib.mkOption {
+            type = lib.types.str;
+            default = "main";
+          };
+          workModel = lib.mkOption {
+            type = lib.types.str;
+            default = "workhorse";
+          };
+          titleModel = lib.mkOption {
+            type = lib.types.str;
+            default = "helper";
+            description = "The llama-swap model that names chats.";
           };
         };
 
@@ -324,6 +372,20 @@
           };
 
           sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+          sops.secrets.chat-password = lib.mkIf cfg.chat.enable {
+            sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+          };
+
+          # The chat web app; streaming answers need nginx to pass events through as they come.
+          web.sites.chat = lib.mkIf cfg.chat.enable {
+            inherit (cfg.chat) port;
+            healthPath = "/healthz";
+            extraConfig = ''
+              proxy_buffering off;
+              proxy_cache off;
+              proxy_read_timeout 1h;
+            '';
+          };
 
           systemd.services.agent = {
             description = "Cosmos homelab agent";
@@ -347,7 +409,8 @@
                 "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
               ]
               # memory reads it from $CREDENTIALS_DIRECTORY.
-              ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}";
+              ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}"
+              ++ lib.optional cfg.chat.enable "chat-password:${config.sops.secrets.chat-password.path}";
               Restart = "always";
               RestartSec = 5;
               NoNewPrivileges = true;
