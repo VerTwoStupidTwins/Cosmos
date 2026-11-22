@@ -90,6 +90,41 @@ in
         };
       };
 
+      # Once a day, the whole running system too: watch-store only sees paths that appear while it runs, so this catches
+      # what it missed (built before it started, or while the cache was unreachable) before lugh's GC drops it. What the
+      # cache already has is skipped, so most days it uploads next to nothing. An unreachable cache skips the day.
+      systemd.services.attic-push-system = {
+        description = "Push the running system to the binary cache";
+        wants = [ "network-online.target" ];
+        after = [ "network-online.target" ];
+        environment.XDG_CONFIG_HOME = "%t/attic-push-system";
+        script = ''
+          if ! ${lib.getExe pkgs.curl} -sf --max-time 10 -o /dev/null ${url}/${cache}/nix-cache-info; then
+            echo "Can't reach the cache; skipping today."
+            exit 0
+          fi
+          ${lib.getExe pkgs.attic-client} login --set-default ${cache} ${url} "$(< "$CREDENTIALS_DIRECTORY/token")"
+          ${lib.getExe pkgs.attic-client} push ${cache}:${cache} /run/current-system
+        '';
+        serviceConfig = {
+          Type = "oneshot";
+          DynamicUser = true;
+          RuntimeDirectory = "attic-push-system";
+          LoadCredential = "token:${config.sops.secrets.attic-push-token.path}";
+        };
+      };
+
+      systemd.timers.attic-push-system = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = "daily";
+          RandomizedDelaySec = "1h";
+          # A laptop asleep at midnight pushes when it wakes, and a fresh boot pushes soon after.
+          Persistent = true;
+          OnBootSec = "15min";
+        };
+      };
+
       monitor.units = [ "attic-watch-store" ];
     };
 
