@@ -18,6 +18,7 @@ in
       nixos.claude-code
       nixos.krita
       nixos.monitor-station
+      nixos.netbird-api
       nixos.observed
     ];
 
