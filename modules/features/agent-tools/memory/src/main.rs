@@ -527,6 +527,12 @@ impl Memory {
         or_error(consolidate::run(&self.app, &req.room).await)
     }
 
+    /// (Agent) What memory holds, read-only, for the owner's status page.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn status(&self) -> CallToolResult {
+        or_error(async { self.app.store.lock().await.status(15) }.await)
+    }
+
     /// (Agent) Changes not announced yet, oldest first.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn unannounced(&self) -> CallToolResult {

@@ -866,6 +866,32 @@ export class Bridge {
 
 	// ---- for the web app
 
+	// What memory holds, read-only, with each conversation's name and when it is next consolidated (30 quiet minutes
+	// after its last answer), plus what the bridge still owes memory.
+	async memoryStatus() {
+		const memory = this.options.memory;
+		if (!memory) return { enabled: false };
+		const status = (await memory.call("status")) as { conversations: { room: string }[] } & Record<string, unknown>;
+		const name = (key: string) => {
+			if (key.startsWith("chat:")) return `Chat: ${this.#state.chats[key.slice(5)]?.title ?? key}`;
+			if (key === this.#state.alertsRoom) return "Alerts";
+			const job = Object.entries(this.#state.scheduleRooms).find(([, room]) => room === key)?.[0];
+			if (job) return `Schedule: ${job}`;
+			return Object.keys(this.#state.rooms).includes(key) ? `Room ${key}` : key;
+		};
+		const due = (key: string) => {
+			const last = this.#state.sessions[key];
+			return last === undefined ? null : new Date(last + memory.quietMs).toISOString();
+		};
+		return {
+			enabled: true,
+			...status,
+			conversations: status.conversations.map((c) => ({ ...c, name: name(c.room), consolidateAt: due(c.room) })),
+			waiting: Object.entries(this.#state.sessions).map(([key, last]) => ({ room: key, name: name(key), lastAnswer: new Date(last).toISOString(), consolidateAt: due(key) })),
+			owedToMemory: this.#state.toIndex.length,
+		};
+	}
+
 	chats() {
 		return Object.entries(this.#state.chats)
 			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))

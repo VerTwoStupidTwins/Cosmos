@@ -484,6 +484,49 @@ impl Store {
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// What's stored, read-only, for the owner's status page: per conversation (room or chat:<id>) its exchanges,
+    /// how many are consolidated and its topics; items by kind and status; points waiting to be indexed; and the
+    /// latest changes.
+    pub fn status(&self, recent: i64) -> Result<Value> {
+        let mut stmt = self.db.prepare(
+            "SELECT p.room, count(*), max(p.created), coalesce(c.upto, 0),
+                    sum(CASE WHEN p.id <= coalesce(c.upto, 0) THEN 1 ELSE 0 END),
+                    (SELECT count(*) FROM points t WHERE t.type = 'topic' AND t.room = p.room)
+             FROM points p LEFT JOIN consolidated c ON c.room = p.room
+             WHERE p.type = 'exchange' GROUP BY p.room ORDER BY max(p.created) DESC",
+        )?;
+        let conversations: Vec<Value> = stmt
+            .query_map([], |r| {
+                Ok(json!({
+                    "room": r.get::<_, Option<String>>(0)?,
+                    "exchanges": r.get::<_, i64>(1)?,
+                    "last": r.get::<_, String>(2)?,
+                    "consolidated": r.get::<_, i64>(4)?,
+                    "topics": r.get::<_, i64>(5)?,
+                }))
+            })?
+            .collect::<rusqlite::Result<_>>()?;
+        let mut stmt = self.db.prepare(
+            "SELECT kind, coalesce(status, ''), count(*) FROM points WHERE type = 'item' AND retracted = 0
+             GROUP BY kind, status ORDER BY kind, status",
+        )?;
+        let items: Vec<Value> = stmt
+            .query_map([], |r| Ok(json!({ "kind": r.get::<_, Option<String>>(0)?, "status": r.get::<_, String>(1)?, "count": r.get::<_, i64>(2)? })))?
+            .collect::<rusqlite::Result<_>>()?;
+        let count = |sql: &str| -> Result<i64> { Ok(self.db.query_row(sql, [], |r| r.get(0))?) };
+        let mut stmt = self.db.prepare(&format!("SELECT {} FROM changes c ORDER BY c.id DESC LIMIT ?1", Self::CHANGE_FIELDS))?;
+        let changes: Vec<Change> = stmt.query_map([recent], |r| self.change_row(r))?.collect::<rusqlite::Result<_>>()?;
+        Ok(json!({
+            "conversations": conversations,
+            "items": items,
+            "core": count("SELECT count(*) FROM points WHERE type = 'item' AND retracted = 0 AND core = 1")?,
+            "retracted": count("SELECT count(*) FROM points WHERE type = 'item' AND retracted = 1")?,
+            "unindexed": count("SELECT count(*) FROM points WHERE indexed IS NULL")?,
+            "unannounced": count("SELECT count(*) FROM changes WHERE notice IS NULL")?,
+            "changes": changes,
+        }))
+    }
+
     pub fn announced(&self, change: i64, event: &str) -> Result<()> {
         self.db.execute("UPDATE changes SET notice = ?1 WHERE id = ?2", params![event, change])?;
         Ok(())
@@ -568,6 +611,23 @@ mod tests {
         s.undo(c1).unwrap();
         assert!(s.get(item).unwrap().unwrap().retracted);
         assert!(s.get_many(&[item]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn status_counts_per_conversation() {
+        let mut s = store();
+        s.add_exchange("chat:322", "$a", "Owner: hi\nAgent: hello", None).unwrap();
+        s.add_exchange("chat:322", "$b", "Owner: ducts?\nAgent: parked", None).unwrap();
+        s.add_exchange("!agent", "$c", "Owner: x\nAgent: y", None).unwrap();
+        let tx = s.transaction().unwrap();
+        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], None, "t").unwrap();
+        tx.commit().unwrap();
+        s.db.execute("INSERT INTO consolidated (room, upto) VALUES ('chat:322', 1)", []).unwrap();
+        let status = s.status(5).unwrap();
+        let chat = status["conversations"].as_array().unwrap().iter().find(|c| c["room"] == "chat:322").unwrap();
+        assert_eq!((chat["exchanges"].as_i64(), chat["consolidated"].as_i64()), (Some(2), Some(1)));
+        assert_eq!(status["items"][0]["status"], "parked");
+        assert_eq!(status["changes"].as_array().unwrap().len(), 1);
     }
 
     #[test]

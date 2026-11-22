@@ -178,6 +178,7 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 		if (!signedIn(request)) return json(response, 401, { error: "sign in" });
 
 		if (request.method === "GET" && path === "/api/chats") return json(response, 200, { chats: bridge.chats() });
+		if (request.method === "GET" && path === "/api/memory/status") return json(response, 200, await bridge.memoryStatus());
 		if (request.method === "POST" && path === "/api/chats") {
 			const { text } = await body(request);
 			if (typeof text !== "string" || !text.trim()) return json(response, 400, { error: "empty message" });
