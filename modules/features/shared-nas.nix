@@ -19,5 +19,11 @@ in
         client_max_body_size 20M;
       '';
     };
+
+    # Seerr: media requests, signed in with Jellyfin accounts.
+    web.sites.seerr = {
+      upstream = "http://${hestia}:5055";
+      healthPath = "/api/v1/status";
+    };
   };
 }
