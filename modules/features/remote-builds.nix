@@ -31,13 +31,7 @@ in
     {
       sops.secrets.builder-key = { };
 
-      programs.ssh.knownHosts = {
-        lugh = {
-          hostNames = [ "lugh.netbird.cloud" ];
-          publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIF3DM9wpr41MlWUe1+C05lht9vg1a9h1XNqFGBbw5oAU";
-        };
-      };
-
+      # The builders' host keys come from modules/base/known-hosts.nix.
       nix.settings.trusted-public-keys = signingKeys;
 
       nix.distributedBuilds = true;
