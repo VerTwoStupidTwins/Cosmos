@@ -52,6 +52,18 @@
         meta.mainProgram = "observe";
       };
 
+      # Long-term memory (memory-store.nix runs its Qdrant): items, session topics and past exchanges.
+      memory = pkgs.rustPlatform.buildRustPackage {
+        pname = "memory";
+        version = "0.1.0";
+        src = ./agent-tools/memory;
+        cargoLock.lockFile = ./agent-tools/memory/Cargo.lock;
+        # Under Nix, libsqlite3-sys links the system SQLite rather than its bundled copy.
+        buildInputs = [ pkgs.sqlite ];
+        meta.mainProgram = "memory";
+      };
+      hasMemory = cfg.tools ? memory;
+
       configFile = pkgs.writeText "agent-config.json" (
         builtins.toJSON {
           inherit (cfg)
@@ -61,6 +73,7 @@
             testTools
             ;
           alerts = { inherit (cfg.alerts) port roomName; };
+          memory = if hasMemory then { inherit (cfg.memory) quietMinutes roomName; } else null;
           state = "/var/lib/agent/agent.sqlite";
           models = {
             inherit (cfg.models) endpoint default;
@@ -86,6 +99,11 @@
             type = lib.types.bool;
             default = false;
             description = "Wait for the owner's ✅ in Matrix before each call.";
+          };
+          expose = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Offer the tool to the model; false keeps it for the agent's own code.";
           };
         };
       };
@@ -123,6 +141,19 @@
           };
         };
 
+        memory = {
+          quietMinutes = lib.mkOption {
+            type = lib.types.ints.positive;
+            default = 30;
+            description = "How long a room stays quiet before its session is consolidated into topics and items.";
+          };
+          roomName = lib.mkOption {
+            type = lib.types.str;
+            default = "Memory";
+            description = "The room the agent makes, with the owner invited, to announce every memory change.";
+          };
+        };
+
         testTools = lib.mkOption {
           type = lib.types.bool;
           default = false;
@@ -154,6 +185,15 @@
                     type = lib.types.bool;
                     default = false;
                   };
+                  midConvoSystem = lib.mkOption {
+                    type = lib.types.bool;
+                    default = false;
+                    description = ''
+                      The model's chat template accepts a system message later in a conversation, so a changed prompt
+                      section (such as memory's core items) goes in there instead of rewriting the start, which keeps
+                      llama.cpp's cache. Verified for workhorse (with its patched template) and helper/main (Gemma 4).
+                    '';
+                  };
                 };
               }
             );
@@ -162,8 +202,12 @@
               workhorse = {
                 contextWindow = 131072;
                 reasoning = true;
+                midConvoSystem = true;
               };
-              main.contextWindow = 32768;
+              main = {
+                contextWindow = 32768;
+                midConvoSystem = true;
+              };
             };
           };
         };
@@ -205,6 +249,33 @@
         agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
         # Metrics, alerts and logs from every host, where the observability stack runs.
         agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
+        # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
+        # consolidation, announcements and undo are for the bridge.
+        agent.tools.memory = lib.mkIf config.services.qdrant.enable {
+          command = [
+            (lib.getExe memory)
+            "--data"
+            "/var/lib/agent/memory.sqlite"
+            "--qdrant"
+            "http://127.0.0.1:${toString config.services.qdrant.settings.service.http_port}"
+            "--models"
+            (lib.removeSuffix "/v1" cfg.models.endpoint)
+          ];
+          tools =
+            lib.genAttrs [ "remember" "update" "retract" ] (_: {
+              replay = "unsafe";
+            })
+            // lib.genAttrs [
+              "auto_recall"
+              "core_block"
+              "index_exchange"
+              "consolidate"
+              "unannounced"
+              "announced"
+              "notice"
+              "undo"
+            ] (_: { expose = false; });
+        };
 
         sops.secrets.agent-matrix-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
 
@@ -215,7 +286,8 @@
             "network-online.target"
             "netbird-wt0.service"
           ]
-          ++ lib.optional config.services.matrix-tuwunel.enable "tuwunel.service";
+          ++ lib.optional config.services.matrix-tuwunel.enable "tuwunel.service"
+          ++ lib.optional hasMemory "qdrant.service";
           wants = [ "network-online.target" ];
           restartTriggers = [ configFile ];
           serviceConfig = {
@@ -225,7 +297,11 @@
             WorkingDirectory = "/var/lib/agent";
             # host-monitor's log tool reads the journal.
             SupplementaryGroups = [ "systemd-journal" ];
-            LoadCredential = [ "matrix-token:${config.sops.secrets.agent-matrix-token.path}" ];
+            LoadCredential = [
+              "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
+            ]
+            # memory reads it from $CREDENTIALS_DIRECTORY.
+            ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}";
             Restart = "always";
             RestartSec = 5;
             NoNewPrivileges = true;

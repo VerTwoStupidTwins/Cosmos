@@ -2,7 +2,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type ToolPolicy = { replay?: "safe" | "unsafe"; approval?: boolean };
+// expose: false keeps a tool off the model's list; only the agent's own code calls it.
+export type ToolPolicy = { replay?: "safe" | "unsafe"; approval?: boolean; expose?: boolean };
 
 export type Config = {
 	owner: string;
@@ -11,10 +12,12 @@ export type Config = {
 	maxTurns: number;
 	testTools: boolean;
 	alerts: { port: number; roomName: string };
+	// Present when the memory tool server is configured.
+	memory: { quietMinutes: number; roomName: string } | null;
 	models: {
 		endpoint: string;
 		default: string;
-		catalog: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean }>;
+		catalog: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean; midConvoSystem: boolean }>;
 	};
 	tools: Record<string, { command: string[]; replay: "safe" | "unsafe"; tools: Record<string, ToolPolicy> }>;
 };

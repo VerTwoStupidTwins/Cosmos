@@ -38,13 +38,24 @@ class Connection {
 	}
 }
 
-export type McpTools = { extension: ReturnType<typeof defineExtension>; approval: Set<string> };
+/** Calls one of a server's tools from the agent's own code: its structured result, or an Error for {error}. */
+export type ServerCall = (tool: string, args?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+export type McpTools = { extension: ReturnType<typeof defineExtension>; approval: Set<string>; call: ServerCall };
 
 export async function mcpExtension(name: string, server: Server): Promise<McpTools> {
 	const connection = new Connection(name, server);
 	const { tools } = await (await connection.client()).listTools();
 	const approval = new Set<string>();
-	const registered = tools.map((tool) => {
+	const call: ServerCall = async (tool, args = {}) => {
+		const result = await (await connection.client()).callTool({ name: tool, arguments: args });
+		const text = (result.content as { type: string; text?: string }[]).find((c) => c.type === "text")?.text ?? "{}";
+		const value = (result.structuredContent ?? JSON.parse(text)) as Record<string, unknown>;
+		if (typeof value.error === "string") throw new Error(`${name}__${tool}: ${value.error}`);
+		return value;
+	};
+	const exposed = tools.filter((tool) => server.tools[tool.name]?.expose !== false);
+	const registered = exposed.map((tool) => {
 		const policy = server.tools[tool.name] ?? {};
 		const fullName = `${name}__${tool.name}`;
 		if (policy.approval) approval.add(fullName);
@@ -63,6 +74,7 @@ export async function mcpExtension(name: string, server: Server): Promise<McpToo
 			},
 		});
 	});
-	console.error(`mcp ${name}: ${tools.length} tools (${tools.map((t) => t.name).join(", ")})`);
-	return { extension: defineExtension({ name: `mcp-${name}`, tools: registered }), approval };
+	const hidden = tools.length - exposed.length;
+	console.error(`mcp ${name}: ${exposed.length} tools (${exposed.map((t) => t.name).join(", ")})${hidden ? `, ${hidden} for the agent only` : ""}`);
+	return { extension: defineExtension({ name: `mcp-${name}`, tools: registered }), approval, call };
 }

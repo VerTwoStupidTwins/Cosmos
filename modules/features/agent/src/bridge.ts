@@ -22,6 +22,8 @@ import {
 import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
+import type { ServerCall } from "./mcp.js";
+import { type Change, type Exchange, type Hit, memoriesBlock, recalledNotice } from "./memory.js";
 
 const emptyState = (): BridgeState => ({
 	since: null,
@@ -30,21 +32,35 @@ const emptyState = (): BridgeState => ({
 	reactions: {},
 	alertsRoom: null,
 	explained: {},
+	memoryRoom: null,
+	lastMessage: {},
+	toIndex: [],
+	sessions: {},
 });
+
+// A message still owed its answer. `text` and `previous` are what memory stores of it once answered; `thread` is set
+// when the answer belongs in a thread (a reply under a Memory room notice).
+type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string };
 
 type BridgeState = {
 	since: string | null;
 	rooms: Record<string, number>;
-	pending: Record<string, { room: string; event: string }>;
+	pending: Record<string, Pending>;
 	reactions: Record<string, boolean>;
 	// The room the agent made for alerts, and the firing alerts it has explained there (fingerprint → since when).
 	alertsRoom: string | null;
 	explained: Record<string, string>;
+	// Memory: the room for its announcements, each room's previous owner message, answered exchanges not yet stored,
+	// and rooms with exchanges not yet consolidated (room → when the last one was answered).
+	memoryRoom: string | null;
+	lastMessage: Record<string, string>;
+	toIndex: Exchange[];
+	sessions: Record<string, number>;
 };
 
 export const BridgeDoc = defineDoc<BridgeState>({
 	kind: "cosmos.bridge",
-	version: 2,
+	version: 3,
 	scope: "session",
 	initial: emptyState,
 	migrate: (value) => ({ ...emptyState(), ...(value as Partial<BridgeState>) }),
@@ -81,8 +97,18 @@ export type BridgeOptions = {
 	maxTurns: number;
 	needsApproval: (tool: string) => boolean;
 	alertsRoomName: string;
+	// The memory server's agent-only tools, how long a room stays quiet before its session is consolidated, and the
+	// name of the room memory changes are announced in.
+	memory?: { call: ServerCall; quietMs: number; roomName: string };
 	context: Context;
 };
+
+const MEMORY_TOOLS_THAT_WRITE = new Set(["memory__remember", "memory__update", "memory__retract"]);
+const AUTO_RECALL_TIMEOUT_MS = 5000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+	return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms))]);
+}
 
 export class Bridge {
 	#harness: Harness | undefined;
@@ -91,6 +117,8 @@ export class Bridge {
 	#delivering = new Set<string>();
 	#approvals = new Map<string, { taskId: TaskId; key: string }>(); // approval message → parked call
 	#stopped = new AbortController();
+	#indexing = false;
+	#announcing: Promise<void> | undefined;
 
 	constructor(readonly options: BridgeOptions) {}
 
@@ -137,6 +165,7 @@ export class Bridge {
 					return state.value.allow ? undefined : { block: "The owner denied this." };
 				},
 				afterTool: async (call, result, api) => {
+					if (MEMORY_TOOLS_THAT_WRITE.has(call.name)) void this.#announce();
 					const where = this.#where(api.conversationId);
 					if (!where) return undefined;
 					const text = (result.output ?? []).map((c) => ("text" in c ? c.text : `[${c.type}]`)).join(" ");
@@ -154,6 +183,7 @@ export class Bridge {
 		for (const id of Object.keys(this.#state.pending)) this.#deliver(id);
 		void this.#syncLoop();
 		void this.#typingLoop();
+		if (this.options.memory) void this.#memoryLoop();
 		console.error(`bridge: ${this.#me}, ${Object.keys(this.#state.rooms).length} rooms, ${Object.keys(this.#state.pending).length} answers owed`);
 	}
 
@@ -170,8 +200,8 @@ export class Bridge {
 	#where(conversationId: ConversationId): { room: string; thread?: string } | undefined {
 		const room = Object.entries(this.#state.rooms).find(([, id]) => id === Number(conversationId))?.[0];
 		if (!room) return undefined;
-		const owed = Object.values(this.#state.pending).filter((p) => p.room === room);
-		return { room, thread: owed.at(-1)?.event };
+		const owed = Object.values(this.#state.pending).filter((p) => p.room === room).at(-1);
+		return { room, thread: owed?.thread ?? owed?.event };
 	}
 
 	#notice(where: { room: string; thread?: string }, text: string) {
@@ -212,7 +242,7 @@ export class Bridge {
 		for (const [room, joined] of Object.entries(rooms.join ?? {})) {
 			for (const event of joined.timeline?.events ?? []) {
 				if (event.sender !== this.options.owner) continue;
-				if (event.type === "m.reaction") await this.#onReaction(event);
+				if (event.type === "m.reaction") await this.#onReaction(room, event);
 				else if (event.type === "m.room.message") await this.#onMessage(room, event);
 			}
 		}
@@ -239,18 +269,165 @@ export class Bridge {
 
 	async #onMessage(room: string, event: MatrixEvent) {
 		const relation = event.content["m.relates_to"];
-		// Threads hold the agent's own call log; edits aren't new questions.
-		if (event.content.msgtype !== "m.text" || relation?.rel_type === "m.thread" || relation?.rel_type === "m.replace") return;
+		// Edits aren't new questions. Threads hold the agent's own call log, except in the Memory room, where a reply
+		// under a notice corrects that memory.
+		if (event.content.msgtype !== "m.text" || relation?.rel_type === "m.replace") return;
+		const text = String(event.content.body);
+		let thread: string | undefined;
+		let content: string;
+		if (relation?.rel_type === "m.thread") {
+			if (!this.options.memory || room !== this.#state.memoryRoom || typeof relation.event_id !== "string") return;
+			const root: string = relation.event_id;
+			thread = root;
+			content = await this.#correction(root, text);
+		} else content = await this.#withMemories(room, event.event_id, text);
 		const conversation = await this.#conversation(room);
+		const owed: Pending = { room, event: event.event_id, text, ...(thread && { thread }) };
+		const previous = this.#state.lastMessage[room];
+		if (previous !== undefined) owed.previous = previous;
 		// The Matrix event ID makes a message delivered twice the same submission.
 		const id = await this.#harness!.commit(async (tx) => {
-			const submissionId = await conversation.submit(tx, { type: "input", content: String(event.content.body), requestId: event.event_id });
-			(await tx.doc(BridgeDoc)).pending[String(submissionId)] = { room, event: event.event_id };
+			const submissionId = await conversation.submit(tx, { type: "input", content, requestId: event.event_id });
+			const state = (await tx.doc(BridgeDoc)) as BridgeState;
+			state.pending[String(submissionId)] = owed;
+			if (!thread) state.lastMessage[room] = text;
 			return submissionId;
 		}, this.#ctx);
-		this.#state.pending[String(id)] = { room, event: event.event_id };
+		this.#state.pending[String(id)] = owed;
+		if (!thread) this.#state.lastMessage[room] = text;
 		void this.options.matrix.typing(room, this.#me, true);
 		this.#deliver(String(id));
+	}
+
+	// Auto-recall: memories relevant to the message go to the model with it, and a line in its thread shows which.
+	// Memory being slow or down never holds a message up.
+	async #withMemories(room: string, event: string, text: string): Promise<string> {
+		if (!this.options.memory) return text;
+		try {
+			const args: Record<string, unknown> = { message: text, room };
+			if (this.#state.lastMessage[room] !== undefined) args.previous = this.#state.lastMessage[room];
+			const { hits } = (await withTimeout(this.options.memory.call("auto_recall", args), AUTO_RECALL_TIMEOUT_MS)) as { hits: Hit[] };
+			if (hits.length === 0) return text;
+			void this.#notice({ room, thread: event }, recalledNotice(hits));
+			return `${text}\n\n${memoriesBlock(hits)}`;
+		} catch (error) {
+			console.error(`memory: auto-recall skipped: ${String(error)}`);
+			return text;
+		}
+	}
+
+	// A reply under a Memory room notice, with the change it answers, for the Memory room's conversation.
+	async #correction(root: string, text: string): Promise<string> {
+		let about = "a message in the Memory room";
+		try {
+			const found = (await this.options.memory!.call("notice", { event: root })) as { change: Change | null; item: unknown };
+			if (found.change) {
+				about = `the notice "${found.change.notice_text}" (change ${found.change.change}; item #${found.change.item} is now ${JSON.stringify(found.item)})`;
+			}
+		} catch (error) {
+			console.error(`memory: looking up a notice failed: ${String(error)}`);
+		}
+		return [
+			`The owner replied in the Memory room under ${about}.`,
+			`Their reply: ${text}`,
+			"",
+			"If they are correcting the memory, make the change with memory__update, memory__retract or memory__remember (each change is announced on its own), then confirm in one short line. Otherwise just answer.",
+		].join("\n");
+	}
+
+	// Rooms memory stores exchanges from (all but its own), and rooms whose sessions become topics and items (not Alerts).
+	#indexed(room: string) {
+		return this.options.memory !== undefined && room !== this.#state.memoryRoom;
+	}
+	#consolidated(room: string) {
+		return this.#indexed(room) && room !== this.#state.alertsRoom;
+	}
+
+	// Stores answered exchanges in order, dropping each from the owed list once the server has it.
+	async #flushIndex() {
+		if (!this.options.memory || this.#indexing) return;
+		this.#indexing = true;
+		try {
+			while (this.#state.toIndex.length > 0) {
+				const exchange = this.#state.toIndex[0]!;
+				await this.options.memory.call("index_exchange", exchange as unknown as Record<string, unknown>);
+				await this.#commit((s) => {
+					s.toIndex = s.toIndex.filter((x) => x.event !== exchange.event);
+				});
+			}
+		} catch (error) {
+			console.error(`memory: storing an exchange failed, retrying within a minute: ${String(error)}`);
+		} finally {
+			this.#indexing = false;
+		}
+	}
+
+	// The Memory room: made on the first change to announce, with the owner invited.
+	async #memoryRoom(): Promise<string> {
+		if (this.#state.memoryRoom) return this.#state.memoryRoom;
+		const room = await this.options.matrix.createRoom(this.options.memory!.roomName, [this.options.owner]);
+		await this.#commit((s) => {
+			s.memoryRoom = room;
+		});
+		console.error(`bridge: made the memory room ${room}`);
+		return room;
+	}
+
+	// Posts every change not announced yet as its own notice (an undo in the thread of what it undid), and records
+	// each notice with the server so a ❌ on it can be undone. One run at a time; a call during a run joins it.
+	#announce(): Promise<void> {
+		if (!this.options.memory) return Promise.resolve();
+		this.#announcing ??= (async () => {
+			try {
+				for (let round = 0; round < 5; round++) {
+					const { changes } = (await this.options.memory!.call("unannounced")) as { changes: Change[] };
+					if (changes.length === 0) return;
+					const room = await this.#memoryRoom();
+					for (const c of changes) {
+						const event = await this.options.matrix.send(room, {
+							...textContent(c.notice_text, html(c.notice_text), "m.notice"),
+							...(c.thread_of && inThread(c.thread_of)),
+						});
+						await this.options.memory!.call("announced", { change: c.change, event });
+					}
+				}
+			} catch (error) {
+				console.error(`memory: announcing failed, retrying within a minute: ${String(error)}`);
+			}
+		})().finally(() => {
+			this.#announcing = undefined;
+		});
+		return this.#announcing;
+	}
+
+	// Every minute: store owed exchanges, announce changes, and consolidate rooms that have gone quiet.
+	async #memoryLoop() {
+		const memory = this.options.memory!;
+		await this.#flushIndex();
+		await this.#announce();
+		while (!this.#stopped.signal.aborted) {
+			await sleep(60_000);
+			await this.#flushIndex();
+			await this.#announce();
+			for (const [room, last] of Object.entries(this.#state.sessions)) {
+				if (Date.now() - last < memory.quietMs) continue;
+				if (this.#state.toIndex.some((x) => x.room === room) || Object.values(this.#state.pending).some((p) => p.room === room)) continue;
+				try {
+					const out = (await memory.call("consolidate", { room })) as { exchanges: number; topics: string[]; changes: number };
+					await this.#commit((s) => {
+						if (s.sessions[room] === last) delete s.sessions[room];
+					});
+					console.error(`memory: consolidated ${out.exchanges} exchanges in ${room}: ${out.topics.length} topics, ${out.changes} changes`);
+					if (out.topics.length > 0) {
+						const notes = `📝 Session notes:\n${out.topics.map((t) => `- ${t}`).join("\n")}`;
+						await this.options.matrix.send(await this.#memoryRoom(), textContent(notes, html(notes), "m.notice"));
+					}
+					await this.#announce();
+				} catch (error) {
+					console.error(`memory: consolidating ${room} failed, retrying within a minute: ${String(error)}`);
+				}
+			}
+		}
 	}
 
 	// The Alerts room: made on the first alert, with the owner invited.
@@ -286,17 +463,20 @@ export class Bridge {
 		const notice = await this.options.matrix.send(room, textContent(`🚨 Firing:\n${list}`, html(`🚨 Firing:\n\n${list}`)));
 		const conversation = await this.#conversation(room);
 		const requestId = `alert:${fresh.map((a) => `${a.fingerprint}@${a.startsAt}`).sort().join(",")}`;
-		const content = `Alertmanager reports newly firing alerts:\n${fresh
+		const report = `Alertmanager reports newly firing alerts:\n${fresh
 			.map((a) => `- ${JSON.stringify({ labels: a.labels, annotations: a.annotations, since: a.startsAt })}`)
-			.join("\n")}\n\n${ALERT_INSTRUCTIONS}`;
+			.join("\n")}`;
+		// Memory can say whether this happened before; the alert list is what it stores of the exchange.
+		const content = `${await this.#withMemories(room, notice, report)}\n\n${ALERT_INSTRUCTIONS}`;
+		const owed: Pending = { room, event: notice, text: `🚨 Firing:\n${list}` };
 		const id = await this.#harness!.commit(async (tx) => {
 			const submissionId = await conversation.submit(tx, { type: "input", content, requestId });
 			const state = (await tx.doc(BridgeDoc)) as BridgeState;
-			state.pending[String(submissionId)] = { room, event: notice };
+			state.pending[String(submissionId)] = owed;
 			for (const a of fresh) state.explained[a.fingerprint] = a.startsAt;
 			return submissionId;
 		}, this.#ctx);
-		this.#state.pending[String(id)] = { room, event: notice };
+		this.#state.pending[String(id)] = owed;
 		for (const a of fresh) this.#state.explained[a.fingerprint] = a.startsAt;
 		void this.options.matrix.typing(room, this.#me, true);
 		this.#deliver(String(id));
@@ -310,6 +490,7 @@ export class Bridge {
 			try {
 				const submission = await this.#harness!.submission(Number(id) as SubmissionId, this.#ctx);
 				let markdown: string;
+				let answered = false;
 				if (!submission) markdown = "⚠ I lost track of this message.";
 				else {
 					const settled = await submission.wait(this.#ctx);
@@ -318,12 +499,24 @@ export class Bridge {
 						const entry = await conversation?.commit((tx) => tx.entry(AssistantEntry, settled.answer), this.#ctx);
 						const message = entry?.model?.[0] as { content: { type: string; text?: string }[] } | undefined;
 						markdown = message?.content.filter((c) => c.type === "text").map((c) => c.text).join("").trim() || "(no answer text)";
+						answered = true;
 					} else markdown = `⚠ No answer: ${"reason" in settled ? settled.reason : settled.status}${"detail" in settled && settled.detail ? ` (${settled.detail})` : ""}`;
 				}
-				await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...replyTo(owed.event) });
+				const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
+				await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...where });
+				// The answered exchange is owed to memory in the same commit that settles the message.
+				const remember = answered && owed.text !== undefined && this.#indexed(owed.room);
+				const exchange: Exchange = { room: owed.room, event: owed.event, message: owed.text ?? "", answer: markdown };
+				if (owed.previous !== undefined) exchange.previous = owed.previous;
+				const at = Date.now(); // one value for the stored state and the copy in memory
 				await this.#commit((s) => {
 					delete s.pending[id];
+					if (remember) {
+						if (!s.toIndex.some((x) => x.event === exchange.event)) s.toIndex.push(exchange);
+						if (this.#consolidated(owed.room)) s.sessions[owed.room] = at;
+					}
 				});
+				if (remember) void this.#flushIndex();
 				if (!Object.values(this.#state.pending).some((p) => p.room === owed.room)) void this.options.matrix.typing(owed.room, this.#me, false);
 			} catch (error) {
 				console.error(`bridge: delivering ${id} failed: ${String(error)}; retrying in 30 s`);
@@ -337,12 +530,23 @@ export class Bridge {
 		})();
 	}
 
-	async #onReaction(event: MatrixEvent) {
+	async #onReaction(room: string, event: MatrixEvent) {
 		const relation = event.content["m.relates_to"];
 		if (relation?.rel_type !== "m.annotation" || typeof relation.key !== "string") return;
 		const allow = /^(✅|👍)/.test(relation.key);
 		const deny = /^(❌|👎)/.test(relation.key);
 		if (!allow && !deny) return;
+		// ❌ on a Memory room notice undoes that change; the undo is announced in the notice's thread.
+		if (this.options.memory && room === this.#state.memoryRoom && !this.#approvals.has(relation.event_id)) {
+			if (!deny) return;
+			try {
+				await this.options.memory.call("undo", { event: relation.event_id });
+				await this.#announce();
+			} catch (error) {
+				await this.#notice({ room, thread: relation.event_id }, `⚠ Couldn't undo: ${String(error)}`);
+			}
+			return;
+		}
 		await this.#commit((s) => {
 			s.reactions[relation.event_id] = allow;
 		});

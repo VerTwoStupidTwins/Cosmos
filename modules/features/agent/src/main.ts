@@ -8,7 +8,8 @@ import { obj, str } from "@earendil-works/pi-schema";
 import { type AlertPayload, Bridge } from "./bridge.js";
 import { credential, loadConfig } from "./config.js";
 import { Matrix } from "./matrix.js";
-import { mcpExtension } from "./mcp.js";
+import { mcpExtension, type ServerCall } from "./mcp.js";
+import { memoryExtension } from "./memory.js";
 import { nabuModels } from "./models.js";
 
 const config = loadConfig(process.argv[2] ?? "/etc/agent/config.json");
@@ -51,11 +52,16 @@ const TestTools = defineExtension({
 const approval = new Set<string>(config.testTools ? ["restart_service"] : []);
 const registry = createRegistry();
 registry.install(Persona);
+const calls: Record<string, ServerCall> = {};
 for (const [name, server] of Object.entries(config.tools)) {
 	const tools = await mcpExtension(name, server);
 	for (const tool of tools.approval) approval.add(tool);
 	registry.install(tools.extension);
+	calls[name] = tools.call;
 }
+// Long-term memory: the core block in every conversation, and the bridge's recall, storing and announcing.
+const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
+if (memory) registry.install(memoryExtension(memory.call));
 if (config.testTools) registry.install(TestTools);
 
 const bridge = new Bridge({
@@ -65,6 +71,7 @@ const bridge = new Bridge({
 	maxTurns: config.maxTurns,
 	needsApproval: (tool) => approval.has(tool),
 	alertsRoomName: config.alerts.roomName,
+	...(memory && { memory }),
 	context,
 });
 registry.install(bridge.extension);

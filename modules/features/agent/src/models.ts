@@ -15,6 +15,9 @@ export function nabuModels(cfg: Config["models"]) {
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: m.contextWindow,
 		maxTokens: m.maxTokens,
+		// A changed prompt section goes in at its place in the conversation instead of rewriting the start, which keeps
+		// llama.cpp's cache; only for models whose chat template accepts a later system message.
+		compat: { supportsMidConvoSystemMessages: m.midConvoSystem },
 	}));
 	const models = createModels();
 	models.setProvider(
