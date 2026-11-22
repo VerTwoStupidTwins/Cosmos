@@ -17,8 +17,19 @@
           lib.types.submodule {
             options = {
               port = lib.mkOption {
-                type = lib.types.port;
-                description = "The local port the service listens on, on 127.0.0.1.";
+                type = lib.types.nullOr lib.types.port;
+                default = null;
+                description = "The local port the service listens on, on 127.0.0.1. Either this or upstream.";
+              };
+              upstream = lib.mkOption {
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = "https://100.94.10.20:5001";
+                description = ''
+                  A service on another machine, by its NetBird address (scheme, address, port), for things lugh only
+                  fronts, like the shared NAS. Its own certificate isn't checked: the hop runs inside NetBird's
+                  encrypted tunnel. Either this or port.
+                '';
               };
               healthPath = lib.mkOption {
                 type = lib.types.str;
@@ -78,13 +89,18 @@
               useACMEHost = domain;
               forceSSL = true;
               locations."/" = {
-                proxyPass = "http://127.0.0.1:${toString site.port}";
+                proxyPass = if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
                 proxyWebsockets = site.websockets;
                 inherit (site) extraConfig;
               };
             }
           ) cfg.sites;
         };
+
+        assertions = lib.mapAttrsToList (name: site: {
+          assertion = (site.port == null) != (site.upstream == null);
+          message = "web.sites.${name}: set exactly one of port or upstream.";
+        }) cfg.sites;
 
         networking.firewall.interfaces."nb-wt0".allowedTCPPorts = [
           80
