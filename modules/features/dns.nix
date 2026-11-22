@@ -35,6 +35,8 @@ in
           strategy = "parallel_best";
           timeout = "2s";
         };
+        # Neither host has an IPv6 route out; without this every upstream tries IPv6 first and waits for it to fail.
+        connectIPVersion = "v4";
         # Resolves the upstreams' own names, before there is anyone else to ask.
         bootstrapDns = [
           {
@@ -58,9 +60,11 @@ in
         customDNS.mapping."gatica.one" = lugh;
 
         blocking = {
+          # Wildcard lists (*.example.com): Blocky matches a bare domain only exactly, so a plain list would let every
+          # subdomain of a listed tracker through.
           denylists.ads = [
-            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/domains/pro.txt"
-            "https://big.oisd.nl/domainswild2"
+            "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt"
+            "https://big.oisd.nl/domainswild"
           ];
           clientGroupsBlock.default = [ "ads" ];
           blockType = "zeroIp";
