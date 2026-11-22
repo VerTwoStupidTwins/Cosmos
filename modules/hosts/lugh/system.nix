@@ -18,6 +18,7 @@ in
       nixos.matrix
       nixos.agent
       nixos.memory-store
+      nixos.shared-nas
       nixos.observability
       nixos.observed
     ];
