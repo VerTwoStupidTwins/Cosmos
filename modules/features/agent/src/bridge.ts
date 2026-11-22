@@ -27,6 +27,7 @@ import { randomUUID } from "node:crypto";
 import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
+import type { ChatDetail, ChatSummary, MemoryStatus, TrashEntry } from "./api.js";
 import type { Config } from "./config.js";
 import type { ServerCall } from "./mcp.js";
 import { type Change, type Exchange, type Hit, memoriesBlock, recalledNotice } from "./memory.js";
@@ -874,10 +875,14 @@ export class Bridge {
 
 	// What memory holds, read-only, with each conversation's name and when it is next consolidated (30 quiet minutes
 	// after its last answer), plus what the bridge still owes memory.
-	async memoryStatus() {
+	async memoryStatus(): Promise<MemoryStatus> {
 		const memory = this.options.memory;
 		if (!memory) return { enabled: false };
-		const status = (await memory.call("status")) as { conversations: { room: string }[] } & Record<string, unknown>;
+		// The memory server's answer, as its status tool shapes it (agent-tools/memory/src/store.rs).
+		type Stored = Omit<Extract<MemoryStatus, { enabled: true }>, "enabled" | "waiting" | "owedToMemory" | "conversations"> & {
+			conversations: Omit<Extract<MemoryStatus, { enabled: true }>["conversations"][number], "name" | "consolidateAt">[];
+		};
+		const status = (await memory.call("status")) as Stored;
 		// Rooms by their Matrix names, looked up once.
 		for (const c of status.conversations) {
 			if (c.room.startsWith("!") && !this.#roomNames.has(c.room)) this.#roomNames.set(c.room, (await this.options.matrix.roomName(c.room)) ?? c.room);
@@ -897,7 +902,7 @@ export class Bridge {
 			return last === undefined ? null : new Date(last + memory.quietMs).toISOString();
 		};
 		return {
-			enabled: true,
+			enabled: true as const,
 			...status,
 			conversations: status.conversations.map((c) => ({ ...c, name: name(c.room), consolidateAt: due(c.room) })),
 			waiting: Object.entries(this.#state.sessions).map(([key, last]) => ({ room: key, name: name(key), lastAnswer: new Date(last).toISOString(), consolidateAt: due(key) })),
@@ -906,7 +911,7 @@ export class Bridge {
 	}
 
 	// Pinned first, then the latest.
-	chats() {
+	chats(): ChatSummary[] {
 		return Object.entries(this.#state.chats)
 			.filter(([, c]) => !c.deleted)
 			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, pinned: c.pinned === true, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))
@@ -914,7 +919,7 @@ export class Bridge {
 	}
 
 	// The Trash: deleted chats, whether their consolidation is done, and when they leave for good.
-	trash() {
+	trash(): TrashEntry[] {
 		return Object.entries(this.#state.chats)
 			.filter(([, c]) => c.deleted !== undefined)
 			.map(([id, c]) => ({ id, title: c.title, deleted: c.deleted!, gone: c.deleted! + TRASH_MS, consolidated: this.#state.sessions[`chat:${id}`] === undefined }))
@@ -1007,7 +1012,7 @@ export class Bridge {
 		}
 	}
 
-	chat(id: string) {
+	chat(id: string): ChatDetail | undefined {
 		const c = this.#state.chats[id];
 		if (!c) return undefined;
 		const approvals = [...this.#approvals].filter(([, a]) => a.conversation === id).map(([event, a]) => ({ event, call: a.key }));

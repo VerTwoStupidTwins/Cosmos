@@ -18,6 +18,40 @@
       cfg = config.agent;
       nodejs = pkgs.nodejs_22;
 
+      # The chat web app (agent/web, Svelte): type-checked (templates included) before it is built, so a type error or a
+      # warning fails the build. It imports the API's types from the agent (agent/src/api.ts).
+      chatWeb = pkgs.buildNpmPackage {
+        pname = "cosmos-chat-web";
+        version = "0.1.0";
+        src = lib.fileset.toSource {
+          root = ./agent;
+          fileset = lib.fileset.unions [
+            ./agent/src/api.ts
+            (lib.fileset.difference ./agent/web (
+              lib.fileset.unions [
+                (lib.fileset.maybeMissing ./agent/web/node_modules)
+                (lib.fileset.maybeMissing ./agent/web/dist)
+              ]
+            ))
+          ];
+        };
+        sourceRoot = "source/web";
+        inherit nodejs;
+        npmDepsHash = "sha256-fjD9GpV1HpapaOyRz4CYuF0I0UASPyMtY9cxPzOYWSQ=";
+        npmFlags = [ "--ignore-scripts" ];
+        buildPhase = ''
+          runHook preBuild
+          npm run check
+          npm run build
+          runHook postBuild
+        '';
+        installPhase = ''
+          runHook preInstall
+          cp -r dist $out
+          runHook postInstall
+        '';
+      };
+
       package = pkgs.buildNpmPackage {
         pname = "cosmos-agent";
         version = "0.1.0";
@@ -28,7 +62,6 @@
             ./agent/package-lock.json
             ./agent/tsconfig.json
             ./agent/src
-            ./agent/web
           ];
         };
         inherit nodejs;
@@ -39,7 +72,8 @@
           runHook preInstall
           npm prune --omit=dev --ignore-scripts
           mkdir -p $out/lib/agent
-          cp -r dist node_modules package.json web $out/lib/agent/
+          cp -r dist node_modules package.json $out/lib/agent/
+          cp -r ${chatWeb} $out/lib/agent/web
           runHook postInstall
         '';
       };
@@ -362,7 +396,7 @@
                     "index_exchange"
                     "consolidate"
                     "status"
-                  "unannounced"
+                    "unannounced"
                     "announced"
                     "notice"
                     "undo"

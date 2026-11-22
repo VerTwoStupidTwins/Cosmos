@@ -3,12 +3,13 @@
 // A chat's page follows its conversation with a Pi Durable watch, sent as server-sent events: the transcript as chat
 // items when it changes, and the answer being written while a run is busy.
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, join } from "node:path";
+import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type Context, withAbortSignal } from "@earendil-works/chord/context";
 import type { EntryRecord } from "@earendil-works/pi-durable";
+import type { ChatEvent, ChatItem, ToolCall } from "./api.js";
 import type { Bridge } from "./bridge.js";
 
 const COOKIE = "cosmos_chat";
@@ -16,16 +17,38 @@ const SESSION_DAYS = 30;
 const MAX_BODY = 256 * 1024;
 const here = dirname(fileURLToPath(import.meta.url));
 
-// The page and the one library it uses, read once at start.
-const assets: Record<string, { type: string; body: Buffer }> = {
-	"/": { type: "text/html; charset=utf-8", body: readFileSync(join(here, "../web/index.html")) },
-	"/marked.js": { type: "text/javascript; charset=utf-8", body: readFileSync(join(here, "../node_modules/marked/lib/marked.esm.js")) },
+// The built app (web/, made by Vite), read once at start: index.html at /, the rest at its own path. Files under
+// /assets/ have their content's hash in their name, so browsers may keep them; the page itself is always revalidated.
+const TYPES: Record<string, string> = {
+	".html": "text/html; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".ico": "image/x-icon",
+	".woff2": "font/woff2",
+	".json": "application/json",
 };
-
-export type ChatItem =
-	| { kind: "user"; text: string; from: string }
-	| { kind: "answer"; text: string; tools: { name: string; args: string; result?: string; error?: boolean }[] }
-	| { kind: "notice"; text: string };
+function loadAssets(dir: string) {
+	const assets: Record<string, { type: string; body: Buffer; immutable: boolean }> = {};
+	const walk = (at: string) => {
+		for (const name of readdirSync(at)) {
+			const path = join(at, name);
+			if (statSync(path).isDirectory()) walk(path);
+			else {
+				const url = `/${relative(dir, path).split("\\").join("/")}`;
+				assets[url === "/index.html" ? "/" : url] = {
+					type: TYPES[extname(name)] ?? "application/octet-stream",
+					body: readFileSync(path),
+					immutable: url.startsWith("/assets/"),
+				};
+			}
+		}
+	};
+	walk(dir);
+	return assets;
+}
+const assets = loadAssets(join(here, "../web"));
 
 type Message = { role: string; content: unknown; toolCallId?: string; isError?: boolean };
 const textOf = (content: unknown): string =>
@@ -69,10 +92,14 @@ export function chatItems(entries: readonly EntryRecord[]): ChatItem[] {
 				if (!answer) items.push((answer = { kind: "answer", text: "", tools: [] }));
 				for (const part of (message.content ?? []) as { type: string; text?: string; name?: string; id?: string; arguments?: unknown }[]) {
 					if (part.type === "text" && part.text) answer.text += (answer.text ? "\n\n" : "") + part.text;
-					if (part.type === "toolCall") answer.tools.push({ name: String(part.name), args: clip(JSON.stringify(part.arguments ?? {}), 400), id: part.id } as never);
+					if (part.type === "toolCall") {
+						const call: ToolCall = { name: String(part.name), args: clip(JSON.stringify(part.arguments ?? {}), 400) };
+						if (part.id !== undefined) call.id = part.id;
+						answer.tools.push(call);
+					}
 				}
 			} else if (message.role === "toolResult" && answer) {
-				const tool = (answer.tools as { id?: string; result?: string; error?: boolean }[]).find((t) => t.id === message.toolCallId);
+				const tool = answer.tools.find((t) => t.id === message.toolCallId);
 				if (tool) Object.assign(tool, { result: clip(textOf(message.content), 1500), error: message.isError === true });
 			}
 		}
@@ -134,7 +161,7 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 		const send = (view: (typeof watch)["value"]) => {
 			const last = view.entries.at(-1)?.id;
 			const signature = `${view.entries.length}:${String(last)}`;
-			const payload: Record<string, unknown> = { chat: bridge.chat(id), ...live(view.docs) };
+			const payload: ChatEvent = { chat: bridge.chat(id), ...live(view.docs) };
 			if (signature !== shown) {
 				payload.items = chatItems(view.entries);
 				payload.truncated = view.before !== undefined;
@@ -161,7 +188,12 @@ export function startWeb(bridge: Bridge, options: { port: number; password: stri
 		const asset = assets[path === "/index.html" ? "/" : path];
 		if (request.method === "GET" && asset) {
 			return response
-				.writeHead(200, { "content-type": asset.type, "cache-control": "no-cache", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer" })
+				.writeHead(200, {
+					"content-type": asset.type,
+					"cache-control": asset.immutable ? "public, max-age=31536000, immutable" : "no-cache",
+					"x-content-type-options": "nosniff",
+					"referrer-policy": "no-referrer",
+				})
 				.end(asset.body);
 		}
 		if (request.method === "POST" && path === "/api/login") {

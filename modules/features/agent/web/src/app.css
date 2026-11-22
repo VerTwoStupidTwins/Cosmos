@@ -1,0 +1,36 @@
+/* Colours for light and dark (the system's setting), used by every component. */
+:root {
+	--bg: #f6f5f2; --panel: #ffffff; --line: #e3e1db; --text: #1d1c1a; --muted: #6d6a63;
+	--accent: #3d6b5a; --accent-text: #ffffff; --user: #e7efe9; --code: #f0eee9; --warn: #9a5b13; --danger: #a33a2f;
+	--main: #3d6b5a; --work: #7a4fa0;
+}
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #161615; --panel: #1f1f1d; --line: #33322f; --text: #e9e7e2; --muted: #9b978e;
+		--accent: #6fa58f; --accent-text: #0d1310; --user: #26332c; --code: #2a2926; --warn: #e0a35a; --danger: #e07a6e;
+		--main: #6fa58f; --work: #b48ad6;
+	}
+}
+:root[data-theme="dark"] {
+	--bg: #161615; --panel: #1f1f1d; --line: #33322f; --text: #e9e7e2; --muted: #9b978e;
+	--accent: #6fa58f; --accent-text: #0d1310; --user: #26332c; --code: #2a2926; --warn: #e0a35a; --danger: #e07a6e;
+	--main: #6fa58f; --work: #b48ad6;
+}
+* { box-sizing: border-box; }
+/* The page never scrolls: the window holds the bar, the chat list and the composer, and only the content scrolls. */
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px; padding: 6px 12px; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.danger { color: var(--danger); }
+button:disabled { opacity: .5; cursor: default; }
+button:focus-visible, input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+pre { background: var(--code); padding: 10px 12px; border-radius: 8px; overflow-x: auto; font-size: 13px; }
+code { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: .92em; }
+:not(pre) > code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+table { border-collapse: collapse; }
+td, th { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.muted { color: var(--muted); }
+.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
+.dots::after { content: "…"; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .2; } }
