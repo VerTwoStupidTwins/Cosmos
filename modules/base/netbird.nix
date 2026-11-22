@@ -13,11 +13,13 @@
   #   CosmosWatched → CosmosInfra    TCP 3100              Alloy pushing journals to Loki
   #   CosmosInfra   → CosmosServers  TCP 8080              the agent on lugh using nabu's models (CosmosModels)
   #
-  #   The NAS shared with the owner's brother (group SharedNAS, no Cosmos prefix: it is both of theirs), on the LAN but
-  #   always reached over NetBird. Its web services are fronted by lugh's nginx (web.sites.<name>.upstream):
-  #   CosmosInfra   → SharedNAS      all TCP               lugh's nginx to the NAS's services (CosmosNASProxy)
-  #   CosmosAdmin   → SharedNAS      all TCP               the owner's devices to the NAS directly: shares, admin (CosmosNASDirect)
-  #   Both are deliberately broad for now (2026-11-22), to be narrowed to the mapped ports once those are settled.
+  #   The NAS shared with the owner's brother (group SharedNas), on the LAN but always reached over NetBird; the
+  #   brother's devices are the group Olympus. The NAS's web services are fronted by lugh's nginx (web.sites.<name>.upstream),
+  #   so a request from Olympus is two hops: Olympus → lugh on 443, then lugh → the NAS.
+  #   CosmosInfra   → SharedNas      all TCP               lugh's nginx to the NAS's services (CosmosNasProxy)
+  #   Olympus       → CosmosInfra    TCP 443               the brother's devices to the *.gatica.one sites (CosmosSitesShared)
+  #   CosmosAdmin   → SharedNas      all TCP               the owner's devices to the NAS directly: NFS (2049), admin (CosmosNASDirect, not yet made)
+  #   The all-TCP ones are deliberately broad for now (2026-11-22), to be narrowed to the used ports once those are settled.
   #
   # A service that another host or the phone must reach needs a policy here as well as its own config.
   flake.modules.nixos.base =
