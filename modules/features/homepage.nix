@@ -277,6 +277,10 @@ in
         '';
       };
 
+      # lugh has no working IPv6 route out, and Node sometimes tries a site's IPv6 address first: Open-Meteo's
+      # answer then fails, and Homepage caches the failure for the widget's whole cache period.
+      systemd.services.homepage-dashboard.environment.NODE_OPTIONS = "--dns-result-order=ipv4first";
+
       web.sites.home = {
         inherit port;
         healthPath = "/api/healthcheck";
