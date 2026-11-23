@@ -14,7 +14,8 @@ in
     let
       domain = "gatica.one";
       cfg = config.web;
-      target = site: if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
+      target =
+        site: if site.upstream != null then site.upstream else "http://127.0.0.1:${toString site.port}";
     in
     {
       options.web.sites = lib.mkOption {

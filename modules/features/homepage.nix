@@ -55,9 +55,17 @@ in
             url = prometheus;
             refreshInterval = 30000;
             metrics = [
-              (metric "CPU" ''100 * (1 - avg(rate(node_cpu_seconds_total{host="${host}", mode="idle"}[5m])))'' percent)
-              (metric "Memory" ''100 * (1 - node_memory_MemAvailable_bytes{host="${host}"} / node_memory_MemTotal_bytes{host="${host}"})'' percent)
-              (metric "Disk" ''100 * (1 - node_filesystem_avail_bytes{host="${host}", mountpoint="/"} / node_filesystem_size_bytes{host="${host}", mountpoint="/"})'' percent)
+              (metric "CPU" ''100 * (1 - avg(rate(node_cpu_seconds_total{host="${host}", mode="idle"}[5m])))''
+                percent
+              )
+              (metric "Memory"
+                ''100 * (1 - node_memory_MemAvailable_bytes{host="${host}"} / node_memory_MemTotal_bytes{host="${host}"})''
+                percent
+              )
+              (metric "Disk"
+                ''100 * (1 - node_filesystem_avail_bytes{host="${host}", mountpoint="/"} / node_filesystem_size_bytes{host="${host}", mountpoint="/"})''
+                percent
+              )
               (metric "Up" ''(time() - node_boot_time_seconds{host="${host}"}) / 86400'' {
                 type = "number";
                 options.maximumFractionDigits = 1;
@@ -81,8 +89,14 @@ in
                 type = "number";
                 options.maximumFractionDigits = 0;
               })
-              (metric "Blocked" ''100 * sum(increase(blocky_response_total{response_type="BLOCKED"}[24h])) / sum(increase(blocky_response_total[24h]))'' percent)
-              (metric "Cached" "100 * sum(rate(blocky_cache_hits_total[24h])) / (sum(rate(blocky_cache_hits_total[24h])) + sum(rate(blocky_cache_misses_total[24h])))" percent)
+              (metric "Blocked"
+                ''100 * sum(increase(blocky_response_total{response_type="BLOCKED"}[24h])) / sum(increase(blocky_response_total[24h]))''
+                percent
+              )
+              (metric "Cached"
+                "100 * sum(rate(blocky_cache_hits_total[24h])) / (sum(rate(blocky_cache_hits_total[24h])) + sum(rate(blocky_cache_misses_total[24h])))"
+                percent
+              )
               (metric "Servers up" ''sum(up{job="blocky"})'' { type = "number"; })
             ];
           };
@@ -200,7 +214,12 @@ in
             provider = "duckduckgo";
           };
           layout = lib.concatMap (
-            tab: map (group: { ${group.name} = group.layout // { tab = tab.name; }; }) tab.groups
+            tab:
+            map (group: {
+              ${group.name} = group.layout // {
+                tab = tab.name;
+              };
+            }) tab.groups
           ) tabs;
         };
         services =
@@ -218,17 +237,66 @@ in
         bookmarks = [
           {
             Cosmos = [
-              { "Cosmos repo" = [ { icon = "si-github"; href = "https://github.com/VerTwoStupidTwins/Cosmos"; } ]; }
-              { NetBird = [ { icon = "netbird.png"; href = "https://app.netbird.io"; } ]; }
-              { Spaceship = [ { icon = "mdi-dns"; href = "https://www.spaceship.com/application/advanced-dns-application/manage/gatica.one"; } ]; }
+              {
+                "Cosmos repo" = [
+                  {
+                    icon = "si-github";
+                    href = "https://github.com/VerTwoStupidTwins/Cosmos";
+                  }
+                ];
+              }
+              {
+                NetBird = [
+                  {
+                    icon = "netbird.png";
+                    href = "https://app.netbird.io";
+                  }
+                ];
+              }
+              {
+                Spaceship = [
+                  {
+                    icon = "mdi-dns";
+                    href = "https://www.spaceship.com/application/advanced-dns-application/manage/gatica.one";
+                  }
+                ];
+              }
             ];
           }
           {
             Nix = [
-              { Packages = [ { icon = "nixos.png"; href = "https://search.nixos.org/packages?channel=unstable"; } ]; }
-              { Options = [ { icon = "nixos.png"; href = "https://search.nixos.org/options?channel=unstable"; } ]; }
-              { "Home Manager" = [ { icon = "mdi-home-outline"; href = "https://home-manager-options.extranix.com"; } ]; }
-              { Noogle = [ { icon = "mdi-function-variant"; href = "https://noogle.dev"; } ]; }
+              {
+                Packages = [
+                  {
+                    icon = "nixos.png";
+                    href = "https://search.nixos.org/packages?channel=unstable";
+                  }
+                ];
+              }
+              {
+                Options = [
+                  {
+                    icon = "nixos.png";
+                    href = "https://search.nixos.org/options?channel=unstable";
+                  }
+                ];
+              }
+              {
+                "Home Manager" = [
+                  {
+                    icon = "mdi-home-outline";
+                    href = "https://home-manager-options.extranix.com";
+                  }
+                ];
+              }
+              {
+                Noogle = [
+                  {
+                    icon = "mdi-function-variant";
+                    href = "https://noogle.dev";
+                  }
+                ];
+              }
             ];
           }
         ];
@@ -268,11 +336,11 @@ in
           @import url("https://chat.gatica.one/theme.css");
 
           html.theme-slate, .theme-slate {
-          ${lib.concatStrings (
-            lib.mapAttrsToList (
-              step: key: "  --color-${step}: var(--${key}-rgb, ${slate.${step}});\n"
-            ) scale
-          )}}
+          ${
+            lib.concatStrings (
+              lib.mapAttrsToList (step: key: "  --color-${step}: var(--${key}-rgb, ${slate.${step}});\n") scale
+            )
+          }}
 
           ${builtins.readFile ./homepage.css}
         '';

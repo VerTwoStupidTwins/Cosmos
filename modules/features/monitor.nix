@@ -138,7 +138,9 @@ in
         extraGroups = [ "systemd-journal" ];
         # sshd runs the forced command through the user's shell.
         shell = pkgs.bashInteractive;
-        openssh.authorizedKeys.keys = [ ''restrict,command="${lib.escapeShellArgs config.monitor.command}" ${stationKey}'' ];
+        openssh.authorizedKeys.keys = [
+          ''restrict,command="${lib.escapeShellArgs config.monitor.command}" ${stationKey}''
+        ];
       };
       users.groups.monitor = lib.mkIf m.allowStation { };
     };

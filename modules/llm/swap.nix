@@ -180,7 +180,7 @@ in
           name = "llama-swap";
           icon = "services.ollama";
           info = "OpenAI-compatible API on port ${toString cfg.port}";
-          details = lib.mapAttrs (name: model: {
+          details = lib.mapAttrs (_: model: {
             text = if model.backend != null then "llama.cpp on ${model.backend}" else "own server";
           }) cfg.models;
         };

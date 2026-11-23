@@ -5,7 +5,7 @@
 # Prometheus.
 #
 # Port 5300, not 53: NetBird's own forwarder already sits on each peer's NetBird address and handles :53 there.
-{ config, lib, ... }:
+{ config, ... }:
 let
   dnsHosts = [
     "lugh"
@@ -112,7 +112,7 @@ in
 
   # lugh watches both: Blocky's metrics, and a probe that asks each for grafana.gatica.one (ProbeFailed if one stops).
   flake.modules.nixos.observability =
-    { config, pkgs, ... }:
+    { pkgs, ... }:
     {
       services.prometheus.scrapeConfigs = [
         {

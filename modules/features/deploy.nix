@@ -24,7 +24,9 @@ in
       home-manager.users.twins.programs.fish.functions = lib.genAttrs' hosts (host: {
         name = "rebuild-${host}";
         value = {
-          description = "Rebuild ${host}${lib.optionalString (host != self) " on ${builder}"}: [switch|boot|test|build] [nh flags]";
+          description = "Rebuild ${host}${
+            lib.optionalString (host != self) " on ${builder}"
+          }: [switch|boot|test|build] [nh flags]";
           body = ''
             set -l verb switch
             if set -q argv[1]; and contains -- $argv[1] switch boot test build

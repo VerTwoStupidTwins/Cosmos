@@ -46,10 +46,12 @@ in
       };
 
       # Temperatures by the chip that reports them, from node_hwmon_chip_names.
-      hwmonTemp = chips: ''node_hwmon_temp_celsius * on(instance, chip) group_left(chip_name) node_hwmon_chip_names{chip_name=~"${chips}"}'';
+      hwmonTemp =
+        chips:
+        ''node_hwmon_temp_celsius * on(instance, chip) group_left(chip_name) node_hwmon_chip_names{chip_name=~"${chips}"}'';
       realFilesystems = ''fstype!~"tmpfs|devtmpfs|ramfs|squashfs|overlay|fuse.*|nsfs|efivarfs"'';
       # bcachefs mounts each subvolume of one filesystem separately; one alert per device is enough.
-      diskUsed = ''max by (host, device) (100 * (1 - node_filesystem_avail_bytes{${realFilesystems}} / node_filesystem_size_bytes{${realFilesystems}}))'';
+      diskUsed = "max by (host, device) (100 * (1 - node_filesystem_avail_bytes{${realFilesystems}} / node_filesystem_size_bytes{${realFilesystems}}))";
 
       rules = pkgs.writeText "homelab-rules.yml" (
         builtins.toJSON {
@@ -66,7 +68,8 @@ in
                 (rule "SystemdUnitFailed" ''node_systemd_unit_state{state="failed"} == 1'' "2m" "warning"
                   "{{ $labels.name }} failed on {{ $labels.host }}"
                 )
-                (rule "MemoryLow" "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10" "10m" "warning"
+                (rule "MemoryLow" "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10" "10m"
+                  "warning"
                   "{{ $labels.host }} has under 10% of its RAM available"
                 )
                 (rule "DiskFilling" "${diskUsed} > 85" "15m" "warning"
@@ -175,20 +178,20 @@ in
       dashboards = pkgs.linkFarm "grafana-dashboards" (
         config.observability.dashboards
         ++ [
-        {
-          name = "node-exporter-full.json";
-          path = pkgs.fetchurl {
-            url = "https://grafana.com/api/dashboards/1860/revisions/46/download";
-            hash = "sha256-5Y3cXcU11MkB+U2pZIvD49Wue2946Y4YW86LKJlhzqM=";
-          };
-        }
-        {
-          name = "nvidia-gpu.json";
-          path = pkgs.fetchurl {
-            url = "https://grafana.com/api/dashboards/14574/revisions/19/download";
-            hash = "sha256-N0GyDIMaG1NW9K4gMZvQaHUqjDnEosUMaYo0mCqSGxc=";
-          };
-        }
+          {
+            name = "node-exporter-full.json";
+            path = pkgs.fetchurl {
+              url = "https://grafana.com/api/dashboards/1860/revisions/46/download";
+              hash = "sha256-5Y3cXcU11MkB+U2pZIvD49Wue2946Y4YW86LKJlhzqM=";
+            };
+          }
+          {
+            name = "nvidia-gpu.json";
+            path = pkgs.fetchurl {
+              url = "https://grafana.com/api/dashboards/14574/revisions/19/download";
+              hash = "sha256-N0GyDIMaG1NW9K4gMZvQaHUqjDnEosUMaYo0mCqSGxc=";
+            };
+          }
         ]
       );
 
@@ -223,7 +226,9 @@ in
         retentionTime = "90d";
         globalConfig.scrape_interval = "30s";
         ruleFiles = [ rules ];
-        alertmanagers = [ { static_configs = [ { targets = [ "127.0.0.1:${toString ports.alertmanager}" ]; } ]; } ];
+        alertmanagers = [
+          { static_configs = [ { targets = [ "127.0.0.1:${toString ports.alertmanager}" ]; } ]; }
+        ];
         scrapeConfigs = [
           {
             job_name = "node";
@@ -280,7 +285,9 @@ in
                   { url = "http://127.0.0.1:${toString ports.alertmanagerNtfy}/hook"; }
                 ]
                 # The agent explains each new alert in its Alerts room (agent.nix); ntfy doesn't depend on it.
-                ++ lib.optional (config ? agent) { url = "http://127.0.0.1:${toString config.agent.alerts.port}/alertmanager"; };
+                ++ lib.optional (config ? agent) {
+                  url = "http://127.0.0.1:${toString config.agent.alerts.port}/alertmanager";
+                };
               }
             ];
           };

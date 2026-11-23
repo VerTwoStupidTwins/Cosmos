@@ -181,7 +181,9 @@
                   readonly property string cliphist: "${config.services.cliphist.package}/bin/cliphist"
                   readonly property string stationInfo: "${stationInfo}"
                   // Empty where the bar can't reach the homelab (Homelab.qml).
-                  readonly property string homelab: "${lib.optionalString (osConfig.monitor.labCommand != null) "${osConfig.monitor.labCommand}"}"
+                  readonly property string homelab: "${
+                    lib.optionalString (osConfig.monitor.labCommand != null) "${osConfig.monitor.labCommand}"
+                  }"
                   readonly property string wallpaperCommand: "${config.cosmos.wallpaper}/bin/wallpaper"
                   readonly property string wallpaperCurrent: "${theme}/current"
                   readonly property string wallpaperDir: "${config.cosmos.wallpaperDir}"
