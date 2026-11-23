@@ -33,7 +33,8 @@
         programs.ssh = {
           enable = true;
           enableDefaultConfig = false;
-          settings."github.com" = {
+          # The Git key, for GitHub and the homelab's Forgejo (modules/features/forgejo.nix) alike.
+          settings."github.com git.gatica.one" = {
             IdentityFile = "~/.ssh/github.pub";
             IdentitiesOnly = true;
           };
