@@ -392,6 +392,11 @@
           agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
           # Metrics, alerts and logs from every host, where the observability stack runs.
           agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
+          # The owner's Obsidian vault, where it syncs (notes.nix): list, read and search, read-only for now.
+          agent.tools.notes.command = lib.mkIf (config ? notes) [
+            (lib.getExe config.notes.package)
+            "serve"
+          ];
           # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
           # consolidation, announcements and undo are for the bridge.
           agent.tools.memory = lib.mkIf config.services.qdrant.enable {
@@ -500,8 +505,8 @@
               DynamicUser = true;
               StateDirectory = "agent";
               WorkingDirectory = "/var/lib/agent";
-              # host-monitor's log tool reads the journal.
-              SupplementaryGroups = [ "systemd-journal" ];
+              # host-monitor's log tool reads the journal; the notes tool, the vault.
+              SupplementaryGroups = [ "systemd-journal" ] ++ lib.optional (config ? notes) "notes";
               LoadCredential = [
                 "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
               ]

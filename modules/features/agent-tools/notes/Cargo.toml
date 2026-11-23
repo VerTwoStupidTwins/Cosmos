@@ -1,0 +1,29 @@
+[package]
+name = "notes"
+version = "0.1.0"
+edition = "2024"
+description = "The owner's Obsidian vault on lugh: the agent's note tools (an MCP server over stdio), and the transcriber that turns handwritten drawings into inbox notes"
+publish = false
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive", "env"] }
+notify-debouncer-mini = "0.7"
+regex = "1"
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# Plain HTTP to llama-swap, so no TLS.
+ureq = { version = "2", default-features = false, features = ["json"] }
+yaml-rust2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
