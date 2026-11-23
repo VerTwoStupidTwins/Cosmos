@@ -2,3 +2,7 @@ result
 result-*
 *.tar.gz
 __pycache__/
+
+# The dev shell (direnv, nix-direnv) and the Git hooks it installs.
+.direnv/
+.pre-commit-config.yaml

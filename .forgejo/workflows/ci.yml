@@ -10,10 +10,9 @@ jobs:
     runs-on: native
     steps:
       - uses: actions/checkout@v4
-      - name: Formatting (nix fmt)
-        run: nix fmt -- --ci
-      - name: Dead code (deadnix)
-        run: nix run nixpkgs#deadnix -- --fail .
+      # The same hooks as before each commit (modules/git-hooks.nix): formatting and dead code, over the whole repo.
+      - name: Formatting and dead code
+        run: nix build --no-link --print-build-logs .#checks.x86_64-linux.pre-commit
 
   build:
     runs-on: native
