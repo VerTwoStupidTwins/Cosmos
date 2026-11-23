@@ -33,8 +33,18 @@ declare -A before after
 for host in $hosts; do before[$host]=$(toplevel "$host"); done
 echo "::endgroup::"
 
-nix flake update 2>"$work/inputs"
+# Without a token GitHub allows 60 API requests an hour per address, and Nix then quietly keeps the old revisions.
+github_token=/run/credentials/forgejo-runner-lugh.service/github-token
+if [ -r "$github_token" ]; then
+	NIX_CONFIG="access-tokens = github.com=$(<"$github_token")${NIX_CONFIG:+$'\n'$NIX_CONFIG}" nix flake update 2>"$work/inputs"
+else
+	nix flake update 2>"$work/inputs"
+fi
 cat "$work/inputs"
+if grep -q "using cached version" "$work/inputs"; then
+	echo "Some inputs couldn't be checked (see above), so this update would be incomplete; stopping." >&2
+	false
+fi
 if git diff --quiet flake.lock; then
 	echo "No input has moved; nothing to do."
 	exit 0

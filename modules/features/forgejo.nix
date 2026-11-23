@@ -43,6 +43,9 @@
         forgejo-runner-secret.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
         # The ci account's ntfy token (publish to homelab only), for the weekly update's report.
         ci-ntfy-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+        # A GitHub token with no permissions, only so the weekly update's `nix flake update` isn't held to GitHub's
+        # 60 requests an hour for unauthenticated clients (shared by the whole house's address).
+        github-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       };
       # The runner's whole 40-character secret, which is also its token.
       sops.templates.forgejo-runner-token = {
@@ -198,9 +201,12 @@
       systemd.services."forgejo-runner-lugh" = {
         after = [ "forgejo-setup.service" ];
         wants = [ "forgejo-setup.service" ];
-        # Jobs run as the runner, so they can read this: the weekly update reports through ntfy with it
-        # (/run/credentials/forgejo-runner-lugh.service/ntfy-token).
-        serviceConfig.LoadCredential = [ "ntfy-token:${config.sops.secrets.ci-ntfy-token.path}" ];
+        # Jobs run as the runner, so they can read these (/run/credentials/forgejo-runner-lugh.service/…): the weekly
+        # update reports through ntfy with one and asks GitHub for new revisions with the other.
+        serviceConfig.LoadCredential = [
+          "ntfy-token:${config.sops.secrets.ci-ntfy-token.path}"
+          "github-token:${config.sops.secrets.github-token.path}"
+        ];
       };
 
       # For the homelab map (modules/topology.nix).
