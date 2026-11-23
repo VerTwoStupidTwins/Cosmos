@@ -381,6 +381,10 @@ in
           sopsFile = hostSecrets;
           owner = "grafana";
         };
+        grafana-admin-email = {
+          sopsFile = hostSecrets;
+          owner = "grafana";
+        };
       };
 
       services.grafana = {
@@ -395,8 +399,9 @@ in
           security = {
             admin_user = "twins";
             # Pocket ID's address for twins, so its sign-in finds this account instead of trying to make another
-            # "twins". Only used when the admin is first created; the live one was changed to it on 2026-11-22.
-            admin_email = "$__file{/run/secrets/grafana-admin-email}";
+            # "twins". Only used when the admin is first created; the live one was changed to it on 2026-11-22. The
+            # address stays out of this public repo (grafana-admin-email).
+            admin_email = secretFile "grafana-admin-email";
             admin_password = secretFile "grafana-admin-password";
             secret_key = secretFile "grafana-secret-key";
           };
