@@ -29,6 +29,7 @@ in
       nixos.memory-store
       nixos.shared-nas
       nixos.observability
+      nixos.internet-monitor
       nixos.observed
     ];
 
