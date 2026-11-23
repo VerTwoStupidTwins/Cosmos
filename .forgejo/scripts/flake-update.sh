@@ -5,14 +5,16 @@
 # refreshes a pull request with the full lists, and sends a summary through ntfy. Everything it builds is in the
 # binary cache by then, so merging and rebuilding mostly downloads. A failed build is reported through ntfy too.
 #
-# Needs: TOKEN (the job's Forgejo token) and the GITHUB_* variables Forgejo Actions sets; lugh's runner provides the
-# ntfy token as a credential (modules/features/forgejo.nix).
+# Needs the GITHUB_* variables Forgejo Actions sets, and lugh's runner's credentials (modules/features/forgejo.nix): the
+# ntfy, GitHub and Forgejo tokens. The branch is pushed with the job's own token (checkout's); the pull request is
+# opened with the owner's, since Forgejo won't let a job token open one on a private repo.
 set -euo pipefail
 
 branch=update/flake-lock
 api="$GITHUB_SERVER_URL/api/v1/repos/$GITHUB_REPOSITORY"
 run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_NUMBER"
-ntfy_token=/run/credentials/forgejo-runner-lugh.service/ntfy-token
+credentials=/run/credentials/forgejo-runner-lugh.service
+ntfy_token=$credentials/ntfy-token
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
@@ -26,16 +28,16 @@ trap 'notify "Weekly update failed" "The update job stopped; see the log." "$run
 # Forgejo's API, printing what went wrong (URL, status, its message) when a call fails.
 forgejo() {
 	local status
-	status=$(curl -sS -o "$work/response" -w '%{http_code}' -H "authorization: token $TOKEN" -H 'content-type: application/json' "$@") || status=000
+	status=$(curl -sS -o "$work/response" -w '%{http_code}' -H "authorization: token $(<"$credentials/forgejo-token")" -H 'content-type: application/json' "$@") || status=000
 	if [ "$status" -ge 400 ] || [ "$status" = 000 ]; then
 		echo "Forgejo API: ${*: -1} -> HTTP $status: $(head -c 500 "$work/response")" >&2
 		return 1
 	fi
 	cat "$work/response"
 }
-# Before any building: the pull request step needs the token, and an empty one only shows as a 404 at the end.
-if [ -z "${TOKEN:-}" ] || ! forgejo "$api" >/dev/null; then
-	echo "The job's Forgejo token is missing or can't read $GITHUB_REPOSITORY; stopping before building." >&2
+# Before any building: the pull request step needs the token, and a problem with it would only show at the end.
+if [ ! -r "$credentials/forgejo-token" ] || ! forgejo "$api" >/dev/null; then
+	echo "The Forgejo token is missing or can't read $GITHUB_REPOSITORY; stopping before building." >&2
 	false
 fi
 toplevel() { nix build --no-link --print-out-paths ".#nixosConfigurations.$1.config.system.build.toplevel"; }
@@ -48,7 +50,7 @@ for host in $hosts; do before[$host]=$(toplevel "$host"); done
 echo "::endgroup::"
 
 # Without a token GitHub allows 60 API requests an hour per address, and Nix then quietly keeps the old revisions.
-github_token=/run/credentials/forgejo-runner-lugh.service/github-token
+github_token=$credentials/github-token
 if [ -r "$github_token" ]; then
 	NIX_CONFIG="access-tokens = github.com=$(<"$github_token")${NIX_CONFIG:+$'\n'$NIX_CONFIG}" nix flake update 2>"$work/inputs"
 else

@@ -11,17 +11,9 @@ jobs:
   update:
     runs-on: native
     timeout-minutes: 600
-    # By default the job token can't use pull requests at all ("Can't read pulls" on the private repo); it needs to
-    # push the update branch and open the pull request.
-    permissions:
-      contents: write
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
       - name: Update, build and report
-        env:
-          # The job's own token (the one checkout pushes with); secrets.GITHUB_TOKEN comes through empty here.
-          TOKEN: ${{ github.token }}
         run: bash .forgejo/scripts/flake-update.sh

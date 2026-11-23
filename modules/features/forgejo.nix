@@ -46,6 +46,9 @@
         # A GitHub token with no permissions, only so the weekly update's `nix flake update` isn't held to GitHub's
         # 60 requests an hour for unauthenticated clients (shared by the whole house's address).
         github-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+        # The owner's Forgejo token (repository read and write) for the weekly update's pull request: Forgejo 15 won't
+        # let a job's own token open one on a private repo, even with pull-requests: write.
+        forgejo-ci-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       };
       # The runner's whole 40-character secret, which is also its token.
       sops.templates.forgejo-runner-token = {
@@ -202,10 +205,11 @@
         after = [ "forgejo-setup.service" ];
         wants = [ "forgejo-setup.service" ];
         # Jobs run as the runner, so they can read these (/run/credentials/forgejo-runner-lugh.service/…): the weekly
-        # update reports through ntfy with one and asks GitHub for new revisions with the other.
+        # update reports through ntfy, asks GitHub for new revisions, and opens its pull request with them.
         serviceConfig.LoadCredential = [
           "ntfy-token:${config.sops.secrets.ci-ntfy-token.path}"
           "github-token:${config.sops.secrets.github-token.path}"
+          "forgejo-token:${config.sops.secrets.forgejo-ci-token.path}"
         ];
       };
 
