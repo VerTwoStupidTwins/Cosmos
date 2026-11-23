@@ -16,7 +16,6 @@ import type { Bridge } from "./bridge.js";
 const COOKIE = "cosmos_chat";
 const SESSION_DAYS = 30;
 const MAX_BODY = 256 * 1024;
-const MAX_WALLPAPER = 4 * 1024 * 1024;
 const here = dirname(fileURLToPath(import.meta.url));
 
 // The built app (web/, made by Vite), read once at start: index.html at /, the rest at its own path. Files under
@@ -170,24 +169,11 @@ export function startWeb(bridge: Bridge, options: { port: number; password?: str
 		return timingSafeEqual(a, b);
 	};
 
-	const wallpaperFile = join(dirname(options.themeFile), "wallpaper.jpg");
 	const themeTokenOk = (request: IncomingMessage) => {
 		const token = options.themeToken;
 		const given = Buffer.from(/^Bearer (.+)$/.exec(request.headers.authorization ?? "")?.[1] ?? "");
 		return !!token && given.length === token.length && timingSafeEqual(given, Buffer.from(token));
 	};
-	const raw = (request: IncomingMessage, limit: number) =>
-		new Promise<Buffer>((resolve, reject) => {
-			const chunks: Buffer[] = [];
-			let size = 0;
-			request.on("data", (chunk: Buffer) => {
-				size += chunk.length;
-				if (size > limit) request.destroy(new Error("too large"));
-				else chunks.push(chunk);
-			});
-			request.on("end", () => resolve(Buffer.concat(chunks)));
-			request.on("error", reject);
-		});
 
 	const json = (response: ServerResponse, status: number, body: unknown) =>
 		response.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify(body));
@@ -259,32 +245,7 @@ export function startWeb(bridge: Bridge, options: { port: number; password?: str
 		if (request.method === "GET" && path === "/theme.css") {
 			return response.writeHead(200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-cache" }).end(paletteCss(options.themeFile));
 		}
-		// The desktop's wallpaper, small (tenjin resizes it), for the start page's background. Revalidated on every load,
-		// so a new wallpaper shows on the next one.
-		if (request.method === "GET" && path === "/wallpaper.jpg") {
-			let stat;
-			try {
-				stat = statSync(wallpaperFile);
-			} catch {
-				return json(response, 404, { error: "no wallpaper yet" });
-			}
-			const etag = `"${stat.mtimeMs.toString(36)}-${stat.size.toString(36)}"`;
-			if (request.headers["if-none-match"] === etag) return response.writeHead(304, { etag }).end();
-			return response
-				.writeHead(200, { "content-type": "image/jpeg", "cache-control": "no-cache", etag, "x-content-type-options": "nosniff" })
-				.end(readFileSync(wallpaperFile));
-		}
-		// tenjin's palette and wallpaper pushes: a bearer token (sops chat-theme-token), not the owner's session.
-		if (request.method === "POST" && path === "/api/wallpaper") {
-			if (!themeTokenOk(request)) return json(response, 401, { error: "bad token" });
-			if (request.headers["content-type"] !== "image/jpeg") return json(response, 415, { error: "JPEG only" });
-			const image = await raw(request, MAX_WALLPAPER);
-			if (image.length < 3 || image[0] !== 0xff || image[1] !== 0xd8 || image[2] !== 0xff) return json(response, 400, { error: "not a JPEG" });
-			writeFileSync(`${wallpaperFile}.new`, image);
-			renameSync(`${wallpaperFile}.new`, wallpaperFile);
-			console.error(`web: desktop wallpaper updated (${Math.round(image.length / 1024)} KiB)`);
-			return json(response, 200, { ok: true });
-		}
+		// tenjin's palette push: a bearer token (sops chat-theme-token), not the owner's session.
 		if (request.method === "POST" && path === "/api/theme") {
 			if (!themeTokenOk(request)) return json(response, 401, { error: "bad token" });
 			const palette = await body(request);

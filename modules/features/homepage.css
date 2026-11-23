@@ -1,0 +1,188 @@
+/* modules/features/homepage.css
+ * The start page's look, on top of Homepage's own styles. Colours come from the desktop's palette (the --baseXX-rgb
+ * variables theme.css brings, see homepage.nix), so everything here follows the wallpaper. Fallbacks are slate. */
+
+:root {
+  --hp-ink: var(--base07-rgb, 241 245 249);
+  --hp-dark: var(--base00-rgb, 15 23 42);
+  --hp-accent: var(--accent-rgb, 148 163 184);
+  --hp-radius: 14px;
+  /* Surfaces are the ink laid thinly over the background, so they lift off it in the palette's own hue. */
+  --hp-glass: rgb(var(--hp-ink) / 0.045);
+  --hp-line: rgb(var(--hp-ink) / 0.08);
+}
+
+/* Background: one colour, the palette's darkest. */
+html,
+body,
+#page_wrapper {
+  background: rgb(var(--hp-dark)) !important;
+}
+
+/* A readable width on big screens. */
+#inner_wrapper > .container {
+  max-width: 1240px;
+}
+
+/* Cards (services and bookmarks): dark glass, a hairline edge, the accent on hover. */
+.service-card,
+.bookmark > a {
+  background: var(--hp-glass) !important;
+  border: 1px solid var(--hp-line);
+  border-radius: var(--hp-radius) !important;
+  box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.5) !important;
+  transition:
+    border-color 0.2s,
+    transform 0.2s,
+    background 0.2s;
+}
+.service-card:hover,
+.bookmark > a:hover {
+  border-color: rgb(var(--hp-accent) / 0.55);
+  background: rgb(var(--hp-ink) / 0.075) !important;
+  transform: translateY(-1px);
+}
+.service-card {
+  padding: 0.5rem !important;
+  margin-bottom: 0.75rem !important;
+}
+.services-list {
+  column-gap: 0.75rem !important;
+}
+
+.service-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: rgb(var(--hp-ink) / 0.95);
+}
+.service-description {
+  color: rgb(var(--hp-ink) / 0.55) !important;
+  font-weight: 400 !important;
+  margin-top: 0.1rem;
+}
+
+/* The stat tiles (CPU, memory, ...): the number first, the label small and quiet under it. */
+.service-block {
+  background: rgb(var(--hp-ink) / 0.045) !important;
+  border-radius: 10px !important;
+  padding: 0.5rem 0.25rem !important;
+}
+.service-block-value {
+  font-size: 1.05rem !important;
+  font-weight: 600 !important;
+  font-variant-numeric: tabular-nums;
+  color: rgb(var(--hp-ink) / 0.95);
+}
+.service-block-label {
+  font-size: 0.62rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.08em;
+  color: rgb(var(--hp-ink) / 0.5);
+}
+/* The alert list's lines. */
+.service-container .rounded-sm {
+  background: rgb(var(--hp-ink) / 0.045) !important;
+  border-radius: 8px !important;
+}
+
+/* Group names: small spaced capitals with a rule running off to the right, labels rather than headings. */
+.service-group-name,
+.bookmark-group-name {
+  flex: 1;
+  align-items: center;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgb(var(--hp-ink) / 0.6) !important;
+}
+.service-group-name::after,
+.bookmark-group-name::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  margin-left: 0.9rem;
+  background: linear-gradient(90deg, var(--hp-line), transparent);
+}
+.bookmark-group-name {
+  display: flex;
+}
+.services-group,
+.bookmark-group {
+  margin-top: 0.75rem;
+}
+
+/* Tabs: compact pills on the left, the current one in the accent. */
+#myTab {
+  display: inline-flex !important;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  background: var(--hp-glass) !important;
+  border: 1px solid var(--hp-line);
+  border-radius: 999px !important;
+}
+#myTab li {
+  width: auto !important;
+  height: auto !important;
+}
+#myTab button {
+  margin: 0 !important;
+  padding: 0.4rem 1.1rem;
+  border-radius: 999px !important;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: rgb(var(--hp-ink) / 0.65);
+}
+#myTab button[aria-selected="true"] {
+  background: rgb(var(--hp-accent) / 0.28) !important;
+  color: rgb(var(--hp-ink));
+}
+
+/* Header: the search box as glass too. */
+#information-widgets input {
+  background: var(--hp-glass) !important;
+  border: 1px solid var(--hp-line) !important;
+  border-radius: 999px !important;
+}
+#information-widgets input:focus {
+  border-color: rgb(var(--hp-accent) / 0.6) !important;
+}
+
+::selection {
+  background: rgb(var(--hp-accent) / 0.5);
+}
+
+/* Bookmarks as icon tiles, each with its name under it (Homepage's icon style shows the icon alone). */
+.bookmark-list.grid {
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)) !important;
+  gap: 0.75rem !important;
+}
+.bookmark.grid {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.bookmark.grid > a {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1.35;
+  margin: 0 !important;
+}
+.bookmark.grid > a .bookmark-icon {
+  width: auto !important;
+  background: none !important;
+}
+.bookmark.grid > a img,
+.bookmark.grid > a .bookmark-icon > div {
+  width: 1.9rem !important;
+  height: 1.9rem !important;
+}
+.bookmark.grid::after {
+  content: attr(data-name);
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  text-align: center;
+  color: rgb(var(--hp-ink) / 0.65);
+}

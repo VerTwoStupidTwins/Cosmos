@@ -40,10 +40,16 @@ in
         in
         lib.optional (members != { }) { ${group} = lib.mapAttrsToList card members; };
 
+      # What each host is for, on its card (instead of its address).
+      roles = {
+        lugh = "Infrastructure server";
+        nabu = "LLM server";
+        tenjin = "Workstation";
+      };
       hostCard = host: {
         ${host} = {
           icon = "nixos.png";
-          description = "${host}.netbird.cloud";
+          description = roles.${host} or "";
           widget = {
             type = "prometheusmetric";
             url = prometheus;
@@ -88,7 +94,7 @@ in
         "Firing alerts" = {
           icon = "alertmanager.png";
           href = "https://alertmanager.gatica.one";
-          description = "Firing now, not silenced";
+          description = "Firing, not silenced";
           widget = {
             type = "customapi";
             url = "http://127.0.0.1:${toString config.services.prometheus.alertmanager.port}/api/v2/alerts?active=true&silenced=false&inhibited=false";
@@ -103,33 +109,43 @@ in
         };
       };
 
-      # The tabs, in order, and the groups on each, in order (services and bookmark groups alike). Homepage keeps a
-      # list's order; an attrset would come out alphabetical. A group on no tab would show on every tab.
+      # The tabs, in order, and the groups on each, in order (services and bookmark groups alike), each with its
+      # layout. Homepage keeps a list's order; an attrset would come out alphabetical. A group on no tab would show
+      # on every tab. A row spans the page in that many columns; the bookmark groups sit side by side, as icons.
+      row = name: columns: {
+        inherit name;
+        layout = {
+          style = "row";
+          inherit columns;
+        };
+      };
+      side = name: {
+        inherit name;
+        layout.iconsOnly = true;
+      };
       tabs = [
         {
           name = "Home";
           groups = [
-            "Alerts"
-            "Hosts"
-            "Apps"
-            "Media"
-            "Cosmos"
-            "Nix"
+            (row "Systems" (builtins.length hosts + 1))
+            (row "Apps" 3)
+            (side "Cosmos")
+            (side "Nix")
           ];
         }
         {
           name = "Monitoring";
           groups = [
-            "Monitoring"
-            "Network"
+            (row "Monitoring" 4)
+            (row "Network" 4)
           ];
         }
         {
           name = "Infrastructure";
-          groups = [ "Infrastructure" ];
+          groups = [ (row "Infrastructure" 4) ];
         }
       ];
-      tabGroups = lib.concatMap (tab: tab.groups) tabs;
+      tabGroups = lib.concatMap (tab: map (group: group.name) tab.groups) tabs;
 
       # The desktop's palette (tenjin pushes it to the chat site, chat-theme.nix) mapped onto Homepage's ten-step
       # scale, so the page recolours with the wallpaper. Before any palette arrives, Homepage's slate applies.
@@ -145,7 +161,7 @@ in
         "800" = "base01";
         "900" = "base00";
         logo-start = "accent";
-        logo-stop = "base01";
+        logo-stop = "base03";
       };
       slate = {
         "50" = "248 250 252";
@@ -178,55 +194,41 @@ in
           headerStyle = "clean";
           hideVersion = true;
           statusStyle = "dot";
-          # The wallpaper, blurred and dimmed, behind frosted cards. tenjin pushes it with the palette; it's
-          # revalidated on every load, so a new wallpaper shows on the next one.
-          background = {
-            image = "https://chat.gatica.one/wallpaper.jpg";
-            blur = "md";
-            saturate = 100;
-            brightness = 50;
-          };
-          cardBlur = "md";
           quicklaunch = {
             searchDescriptions = true;
             showSearchSuggestions = true;
             provider = "duckduckgo";
           };
           layout = lib.concatMap (
-            tab:
-            map (name: {
-              ${name} = {
-                tab = tab.name;
-                style = "row";
-                columns = if name == "Hosts" then builtins.length hosts else 4;
-              };
-            }) tab.groups
+            tab: map (group: { ${group.name} = group.layout // { tab = tab.name; }; }) tab.groups
           ) tabs;
         };
         services =
           let
-            all = {
-              Alerts = [ alerts ];
-              Hosts = map hostCard hosts;
+            sited = lib.mergeAttrsList (lib.concatMap siteGroup groups);
+            all = sited // {
+              # The hosts, and alongside them anything firing.
+              Systems = map hostCard hosts ++ [ alerts ];
+              # Media joins the apps on Home: one row, not two half-empty ones.
+              Apps = (sited.Apps or [ ]) ++ (sited.Media or [ ]);
               Network = [ blocky ];
-            }
-            // lib.mergeAttrsList (lib.concatMap siteGroup groups);
+            };
           in
           lib.concatMap (name: lib.optional (all ? ${name}) { ${name} = all.${name}; }) tabGroups;
         bookmarks = [
           {
             Cosmos = [
-              { "Cosmos repo" = [ { icon = "github.png"; href = "https://github.com/VerTwoStupidTwins/Cosmos"; } ]; }
+              { "Cosmos repo" = [ { icon = "si-github"; href = "https://github.com/VerTwoStupidTwins/Cosmos"; } ]; }
               { NetBird = [ { icon = "netbird.png"; href = "https://app.netbird.io"; } ]; }
-              { Spaceship = [ { abbr = "SP"; href = "https://www.spaceship.com/application/advanced-dns-application/manage/gatica.one"; } ]; }
+              { Spaceship = [ { icon = "mdi-dns"; href = "https://www.spaceship.com/application/advanced-dns-application/manage/gatica.one"; } ]; }
             ];
           }
           {
             Nix = [
-              { "NixOS packages" = [ { icon = "nixos.png"; href = "https://search.nixos.org/packages?channel=unstable"; } ]; }
-              { "NixOS options" = [ { icon = "nixos.png"; href = "https://search.nixos.org/options?channel=unstable"; } ]; }
-              { "Home Manager options" = [ { abbr = "HM"; href = "https://home-manager-options.extranix.com"; } ]; }
-              { Noogle = [ { abbr = "NG"; href = "https://noogle.dev"; } ]; }
+              { Packages = [ { icon = "nixos.png"; href = "https://search.nixos.org/packages?channel=unstable"; } ]; }
+              { Options = [ { icon = "nixos.png"; href = "https://search.nixos.org/options?channel=unstable"; } ]; }
+              { "Home Manager" = [ { icon = "mdi-home-outline"; href = "https://home-manager-options.extranix.com"; } ]; }
+              { Noogle = [ { icon = "mdi-function-variant"; href = "https://noogle.dev"; } ]; }
             ];
           }
         ];
@@ -271,9 +273,7 @@ in
             ) scale
           )}}
 
-          ::selection {
-            background: rgb(var(--accent-rgb, 148 163 184) / 0.5);
-          }
+          ${builtins.readFile ./homepage.css}
         '';
       };
 
