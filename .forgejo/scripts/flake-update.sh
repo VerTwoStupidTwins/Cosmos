@@ -23,9 +23,18 @@ notify() { # title, message, click URL, tags
 }
 trap 'notify "Weekly update failed" "The update job stopped; see the log." "$run_url" "warning"' ERR
 
-forgejo() { curl -fsS -H "authorization: token $TOKEN" -H 'content-type: application/json' "$@"; }
+# Forgejo's API, printing what went wrong (URL, status, its message) when a call fails.
+forgejo() {
+	local status
+	status=$(curl -sS -o "$work/response" -w '%{http_code}' -H "authorization: token $TOKEN" -H 'content-type: application/json' "$@") || status=000
+	if [ "$status" -ge 400 ] || [ "$status" = 000 ]; then
+		echo "Forgejo API: ${*: -1} -> HTTP $status: $(head -c 500 "$work/response")" >&2
+		return 1
+	fi
+	cat "$work/response"
+}
 # Before any building: the pull request step needs the token, and an empty one only shows as a 404 at the end.
-if [ -z "${TOKEN:-}" ] || ! forgejo -o /dev/null "$api"; then
+if [ -z "${TOKEN:-}" ] || ! forgejo "$api" >/dev/null; then
 	echo "The job's Forgejo token is missing or can't read $GITHUB_REPOSITORY; stopping before building." >&2
 	false
 fi
@@ -117,9 +126,9 @@ $details"
 existing=$(forgejo "$api/pulls?state=open&limit=50" | jq -r --arg b "$branch" '.[] | select(.head.ref == $b) | .number' | head -1)
 payload=$(jq -n --arg t "$title" --arg b "$body" --arg h "$branch" '{title: $t, body: $b, head: $h, base: "main"}')
 if [ -n "$existing" ]; then
-	pr=$(forgejo -X PATCH "$api/pulls/$existing" -d "$payload" | jq -r .html_url)
+	pr=$(forgejo -X PATCH -d "$payload" "$api/pulls/$existing" | jq -r .html_url)
 else
-	pr=$(forgejo -X POST "$api/pulls" -d "$payload" | jq -r .html_url)
+	pr=$(forgejo -X POST -d "$payload" "$api/pulls" | jq -r .html_url)
 fi
 echo "Pull request: $pr"
 
