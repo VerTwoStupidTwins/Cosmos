@@ -19,6 +19,7 @@ in
       nixos.homepage
       nixos.forgejo
       nixos.foundry
+      nixos.notes
       nixos.cache-push
       # Its own cache too: a build nh's cleanup collected comes back as a download, not a rebuild.
       nixos.cache-pull
