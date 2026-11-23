@@ -103,20 +103,33 @@ in
         };
       };
 
-      # Which tab each group sits on, in order.
-      tabs = {
-        Home = [
-          "Alerts"
-          "Hosts"
-          "Apps"
-          "Media"
-        ];
-        Monitoring = [
-          "Monitoring"
-          "Network"
-        ];
-        Infrastructure = [ "Infrastructure" ];
-      };
+      # The tabs, in order, and the groups on each, in order (services and bookmark groups alike). Homepage keeps a
+      # list's order; an attrset would come out alphabetical. A group on no tab would show on every tab.
+      tabs = [
+        {
+          name = "Home";
+          groups = [
+            "Alerts"
+            "Hosts"
+            "Apps"
+            "Media"
+            "Cosmos"
+            "Nix"
+          ];
+        }
+        {
+          name = "Monitoring";
+          groups = [
+            "Monitoring"
+            "Network"
+          ];
+        }
+        {
+          name = "Infrastructure";
+          groups = [ "Infrastructure" ];
+        }
+      ];
+      tabGroups = lib.concatMap (tab: tab.groups) tabs;
 
       # The desktop's palette (tenjin pushes it to the chat site, chat-theme.nix) mapped onto Homepage's ten-step
       # scale, so the page recolours with the wallpaper. Before any palette arrives, Homepage's slate applies.
@@ -179,13 +192,15 @@ in
             showSearchSuggestions = true;
             provider = "duckduckgo";
           };
-          layout = lib.concatMapAttrs (
-            tab: names:
-            lib.genAttrs names (name: {
-              inherit tab;
-              style = "row";
-              columns = if name == "Hosts" then builtins.length hosts else 4;
-            })
+          layout = lib.concatMap (
+            tab:
+            map (name: {
+              ${name} = {
+                tab = tab.name;
+                style = "row";
+                columns = if name == "Hosts" then builtins.length hosts else 4;
+              };
+            }) tab.groups
           ) tabs;
         };
         services =
@@ -197,9 +212,7 @@ in
             }
             // lib.mergeAttrsList (lib.concatMap siteGroup groups);
           in
-          lib.concatMap (name: lib.optional (all ? ${name}) { ${name} = all.${name}; }) (
-            lib.concatLists (builtins.attrValues tabs)
-          );
+          lib.concatMap (name: lib.optional (all ? ${name}) { ${name} = all.${name}; }) tabGroups;
         bookmarks = [
           {
             Cosmos = [
