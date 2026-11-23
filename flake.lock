@@ -179,6 +179,26 @@
         "type": "github"
       }
     },
+    "foundryvtt": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1794172055,
+        "narHash": "sha256-B3jjBr6nPjyiiQpVjQN0opU9XH8HMEG39obNFlsuFG0=",
+        "owner": "reckenrode",
+        "repo": "nix-foundryvtt",
+        "rev": "f20f57bb17e9b98e54cffa1f63f1dacc018d5eda",
+        "type": "github"
+      },
+      "original": {
+        "owner": "reckenrode",
+        "repo": "nix-foundryvtt",
+        "type": "github"
+      }
+    },
     "fromYaml": {
       "flake": false,
       "locked": {
@@ -392,6 +412,7 @@
         "claude-code": "claude-code",
         "disko": "disko",
         "flake-parts": "flake-parts",
+        "foundryvtt": "foundryvtt",
         "git-hooks": "git-hooks",
         "home-manager": "home-manager",
         "import-tree": "import-tree",

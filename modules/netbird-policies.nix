@@ -145,6 +145,9 @@ in
         members = [ "hestia" ];
         description = "the NAS shared with the brother (hestia), on the LAN but always reached over NetBird";
       };
+      Players = {
+        description = "the owner's tabletop players' devices, joined with the Players setup key (it puts them here); not checked, since they come and go";
+      };
       Olympus = {
         owner = "brother";
         known = [ "hestia" ];
@@ -228,6 +231,13 @@ in
         protocol = "tcp";
         ports = [ "443" ];
         why = "the brother's devices reach the *.gatica.one sites on lugh, but nginx only lets them into the shared ones (the NAS's services; web.sites.<name>.shared): the others answer 403 to anyone but the owner's devices";
+      };
+      CosmosPlayers = {
+        from = [ "Players" ];
+        to = [ "CosmosInfra" ];
+        protocol = "tcp";
+        ports = [ "443" ];
+        why = "players reach Foundry VTT (foundry.gatica.one, a shared site, modules/features/foundry.nix); nginx answers them 403 everywhere else";
       };
       "Homelab Access" = {
         from = [ "Olympus" ];
