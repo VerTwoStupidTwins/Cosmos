@@ -10,7 +10,11 @@
       port = 2586;
     in
     {
-      sops.secrets.ntfy-env.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+      # ntfy reads its accounts only at startup, so a changed secret restarts it.
+      sops.secrets.ntfy-env = {
+        sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+        restartUnits = [ "ntfy-sh.service" ];
+      };
 
       services.ntfy-sh = {
         enable = true;
