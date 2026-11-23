@@ -218,6 +218,8 @@ in
         enable = true;
         listenAddress = "127.0.0.1";
         port = ports.prometheus;
+        # Its own links, and the source link on each alert, point here (prometheus.gatica.one, behind Pocket ID).
+        webExternalUrl = "https://prometheus.gatica.one";
         retentionTime = "90d";
         globalConfig.scrape_interval = "30s";
         ruleFiles = [ rules ];
@@ -259,6 +261,7 @@ in
           enable = true;
           listenAddress = "127.0.0.1";
           port = ports.alertmanager;
+          webExternalUrl = "https://alertmanager.gatica.one";
           configuration = {
             route = {
               receiver = "homelab";
@@ -452,6 +455,36 @@ in
         healthPath = "/api/health";
         port = ports.grafana;
         websockets = true;
+        homepage = {
+          name = "Grafana";
+          group = "Monitoring";
+          icon = "grafana.png";
+          description = "Dashboards: hosts, GPUs, DNS, logs";
+        };
+      };
+
+      # Their own pages, for queries and for silencing alerts from tenjin; neither has a sign-in of its own.
+      web.sites.prometheus = {
+        port = ports.prometheus;
+        healthPath = "/-/healthy";
+        sso = true;
+        homepage = {
+          name = "Prometheus";
+          group = "Monitoring";
+          icon = "prometheus.png";
+          description = "Metrics, targets and alert rules";
+        };
+      };
+      web.sites.alertmanager = {
+        port = ports.alertmanager;
+        healthPath = "/-/healthy";
+        sso = true;
+        homepage = {
+          name = "Alertmanager";
+          group = "Monitoring";
+          icon = "alertmanager.png";
+          description = "Firing alerts and silences";
+        };
       };
 
       monitor = {

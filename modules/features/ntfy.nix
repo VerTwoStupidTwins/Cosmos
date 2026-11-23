@@ -36,6 +36,12 @@
         healthPath = "/v1/health";
         inherit port;
         websockets = true;
+        homepage = {
+          name = "ntfy";
+          group = "Monitoring";
+          icon = "ntfy.png";
+          description = "Alerts to the phone";
+        };
       };
 
       monitor = {

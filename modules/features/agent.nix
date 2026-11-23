@@ -471,6 +471,12 @@
             inherit (cfg.chat) sso;
             # tenjin's palette push brings its own token (chat-theme-token).
             ssoBypass = [ "/api/theme" ];
+            homepage = {
+              name = "Chat";
+              group = "Apps";
+              icon = "mdi-chat-processing";
+              description = "The homelab agent and the models on nabu";
+            };
             extraConfig = ''
               proxy_buffering off;
               proxy_cache off;

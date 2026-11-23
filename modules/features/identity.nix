@@ -40,6 +40,12 @@
       web.sites.id = {
         inherit port;
         healthPath = "/healthz";
+        homepage = {
+          name = "Pocket ID";
+          group = "Infrastructure";
+          icon = "pocket-id.png";
+          description = "Passkeys and sign-in";
+        };
       };
 
       # Sign-in for sites without their own (web.sites.<name>.sso): nginx asks oauth2-proxy about every request, and

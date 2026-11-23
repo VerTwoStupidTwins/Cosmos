@@ -59,6 +59,13 @@
       web.sites.memory = {
         inherit port;
         healthPath = "/healthz";
+        homepage = {
+          name = "Agent memory";
+          group = "Infrastructure";
+          icon = "qdrant.png";
+          description = "Qdrant, the agent's long-term memory";
+          path = "/dashboard";
+        };
       };
 
       # promtool can't check a credentials file that only exists at runtime (sops), so only the syntax is checked.

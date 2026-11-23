@@ -38,6 +38,13 @@ in
 
       web.sites.cache = {
         inherit port;
+        homepage = {
+          name = "Binary cache";
+          group = "Infrastructure";
+          icon = "nixos.png";
+          description = "Attic: what lugh and tenjin build";
+          path = "/${cache}/nix-cache-info";
+        };
         # nabu pulls too (NetBird policy CosmosCache).
         peers = [ "nabu" ];
         extraConfig = ''

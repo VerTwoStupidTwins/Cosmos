@@ -18,12 +18,24 @@ in
         proxy_buffering off;
         client_max_body_size 20M;
       '';
+      homepage = {
+        name = "Jellyfin";
+        group = "Media";
+        icon = "jellyfin.png";
+        description = "Movies and shows on hestia";
+      };
     };
 
     # Seerr: media requests, signed in with Jellyfin accounts.
     web.sites.seerr = {
       upstream = "http://${hestia}:5055";
       healthPath = "/api/v1/status";
+      homepage = {
+        name = "Seerr";
+        group = "Media";
+        icon = "jellyseerr.png";
+        description = "Request movies and shows";
+      };
     };
   };
 }

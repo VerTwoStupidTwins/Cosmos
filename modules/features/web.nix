@@ -32,6 +32,35 @@ in
                   type = lib.types.bool;
                   description = "Whether others on the NetBird account (the brother's devices) may use it; by default only NAS-fronted sites.";
                 };
+                homepage = lib.mkOption {
+                  description = "Its card on the start page (home.gatica.one, homepage.nix); null leaves it off.";
+                  default = null;
+                  type = lib.types.nullOr (
+                    lib.types.submodule {
+                      options = {
+                        name = lib.mkOption { type = lib.types.str; };
+                        group = lib.mkOption {
+                          type = lib.types.enum [
+                            "Apps"
+                            "Media"
+                            "Monitoring"
+                            "Infrastructure"
+                          ];
+                        };
+                        icon = lib.mkOption {
+                          type = lib.types.str;
+                          description = "A dashboard-icons name (grafana.png), mdi-…, or si-….";
+                        };
+                        description = lib.mkOption { type = lib.types.str; };
+                        path = lib.mkOption {
+                          type = lib.types.str;
+                          default = "/";
+                          description = "Where the card links to on the site.";
+                        };
+                      };
+                    }
+                  );
+                };
                 sso = lib.mkOption {
                   type = lib.types.bool;
                   default = false;
