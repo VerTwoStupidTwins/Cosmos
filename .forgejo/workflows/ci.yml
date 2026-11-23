@@ -1,0 +1,27 @@
+# .forgejo/workflows/ci.yml
+# Runs on lugh's runner, straight on the host (modules/features/forgejo.nix): builds use lugh's Nix store, so whatever
+# is built here is in the binary cache by the time a host rebuilds.
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: native
+    steps:
+      - uses: actions/checkout@v4
+      - name: Formatting (nix fmt)
+        run: nix fmt -- --ci
+      - name: Dead code (deadnix)
+        run: nix run nixpkgs#deadnix -- --fail .
+
+  build:
+    runs-on: native
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build every host
+        run: |
+          hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames | jq -r '.[]')
+          echo "Hosts: $(echo $hosts)"
+          nix build --no-link --print-build-logs --keep-going \
+            $(for host in $hosts; do echo ".#nixosConfigurations.$host.config.system.build.toplevel"; done)

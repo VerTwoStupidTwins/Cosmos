@@ -17,6 +17,7 @@ in
       nixos.dns
       nixos.identity
       nixos.homepage
+      nixos.forgejo
       nixos.cache-push
       nixos.monitor
       nixos.web
