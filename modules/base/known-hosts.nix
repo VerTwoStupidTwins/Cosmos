@@ -6,6 +6,8 @@
 let
   hostKeys = config.cosmos.hostKeys;
   peers = config.cosmos.netbird.peers;
+  # Other names a host answers SSH under: Forgejo's Git over SSH is lugh's sshd (modules/features/forgejo.nix).
+  aliases.lugh = [ "git.gatica.one" ];
 in
 {
   options.cosmos.hostKeys = lib.mkOption {
@@ -19,13 +21,14 @@ in
     tenjin = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOJF/cycor9+kykf4SVYNLraIPJ68HOsawS7ctmoB+eY";
   };
 
-  # Under its short name, its NetBird name and its NetBird address.
+  # Under its short name, its NetBird name, its NetBird address and any aliases.
   config.flake.modules.nixos.base.programs.ssh.knownHosts = lib.mapAttrs (host: key: {
     hostNames = [
       host
       "${host}.netbird.cloud"
     ]
-    ++ lib.optional (peers ? ${host}) peers.${host}.ip;
+    ++ lib.optional (peers ? ${host}) peers.${host}.ip
+    ++ aliases.${host} or [ ];
     publicKey = key;
   }) hostKeys;
 }
