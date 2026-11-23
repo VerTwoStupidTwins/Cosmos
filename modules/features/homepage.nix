@@ -252,7 +252,8 @@ in
               longitude = "{{HOMEPAGE_VAR_WEATHER_LONGITUDE}}";
               timezone = "America/Los_Angeles";
               units = "imperial";
-              cache = 15;
+              # Minutes. Homepage caches a failed answer as long as a good one, so keep it short.
+              cache = 5;
             };
           }
           {
@@ -276,10 +277,6 @@ in
           ${builtins.readFile ./homepage.css}
         '';
       };
-
-      # lugh has no working IPv6 route out, and Node sometimes tries a site's IPv6 address first: Open-Meteo's
-      # answer then fails, and Homepage caches the failure for the widget's whole cache period.
-      systemd.services.homepage-dashboard.environment.NODE_OPTIONS = "--dns-result-order=ipv4first";
 
       web.sites.home = {
         inherit port;
