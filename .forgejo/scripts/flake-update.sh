@@ -24,6 +24,11 @@ notify() { # title, message, click URL, tags
 trap 'notify "Weekly update failed" "The update job stopped; see the log." "$run_url" "warning"' ERR
 
 forgejo() { curl -fsS -H "authorization: token $TOKEN" -H 'content-type: application/json' "$@"; }
+# Before any building: the pull request step needs the token, and an empty one only shows as a 404 at the end.
+if [ -z "${TOKEN:-}" ] || ! forgejo -o /dev/null "$api"; then
+	echo "The job's Forgejo token is missing or can't read $GITHUB_REPOSITORY; stopping before building." >&2
+	false
+fi
 toplevel() { nix build --no-link --print-out-paths ".#nixosConfigurations.$1.config.system.build.toplevel"; }
 
 hosts=$(nix eval --json .#nixosConfigurations --apply builtins.attrNames | jq -r '.[]')

@@ -17,5 +17,6 @@ jobs:
           ref: main
       - name: Update, build and report
         env:
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The job's own token (the one checkout pushes with); secrets.GITHUB_TOKEN comes through empty here.
+          TOKEN: ${{ github.token }}
         run: bash .forgejo/scripts/flake-update.sh
