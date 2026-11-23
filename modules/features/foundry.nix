@@ -2,7 +2,7 @@
 { inputs, ... }:
 {
   # Foundry VTT at foundry.gatica.one on lugh, for the owner's tabletop group. Players reach it over NetBird: their
-  # devices join with the Players setup key, and policy CosmosPlayers lets them reach lugh's HTTPS only; it's a shared
+  # devices join with the players setup key (NetBird group players), and policy CosmosPlayers lets them reach lugh's HTTPS only; it's a shared
   # site, so nginx lets them in here while lugh's other sites answer them 403. Foundry's own accounts (per player, with
   # the admin password for the setup screen) are the sign-in.
   #
