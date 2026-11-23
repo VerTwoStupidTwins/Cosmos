@@ -1,0 +1,21 @@
+# .forgejo/workflows/update.yml
+# Every Sunday at midnight (Pacific): update flake.lock, build every host, and open a pull request listing what
+# changes on each, with a summary to the phone (ntfy). Sunday is for reviewing and merging. Also runnable by hand
+# from the Actions tab. The script is .forgejo/scripts/flake-update.sh.
+on:
+  schedule:
+    - cron: "CRON_TZ=America/Los_Angeles 0 0 * * 0"
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: native
+    timeout-minutes: 600
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Update, build and report
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash .forgejo/scripts/flake-update.sh

@@ -41,6 +41,8 @@
       sops.secrets = {
         forgejo-oidc-secret.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
         forgejo-runner-secret.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+        # The ci account's ntfy token (publish to homelab only), for the weekly update's report.
+        ci-ntfy-token.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
       };
       # The runner's whole 40-character secret, which is also its token.
       sops.templates.forgejo-runner-token = {
@@ -167,6 +169,8 @@
           runner = {
             labels = [ "native:host" ];
             capacity = 1;
+            # A nixpkgs bump can mean long local builds (nabu's CUDA llama.cpp), and the weekly update builds twice.
+            timeout = "10h";
           };
           server.connections.lugh = {
             url = "https://${domain}/";
@@ -194,6 +198,9 @@
       systemd.services."forgejo-runner-lugh" = {
         after = [ "forgejo-setup.service" ];
         wants = [ "forgejo-setup.service" ];
+        # Jobs run as the runner, so they can read this: the weekly update reports through ntfy with it
+        # (/run/credentials/forgejo-runner-lugh.service/ntfy-token).
+        serviceConfig.LoadCredential = [ "ntfy-token:${config.sops.secrets.ci-ntfy-token.path}" ];
       };
 
       # For the homelab map (modules/topology.nix).
