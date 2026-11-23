@@ -82,6 +82,72 @@ in
           };
         };
       };
+
+      # Alerts firing now and not silenced, from Alertmanager: one line each, its summary and severity.
+      alerts = {
+        "Firing alerts" = {
+          icon = "alertmanager.png";
+          href = "https://alertmanager.gatica.one";
+          description = "Firing now, not silenced";
+          widget = {
+            type = "customapi";
+            url = "http://127.0.0.1:${toString config.services.prometheus.alertmanager.port}/api/v2/alerts?active=true&silenced=false&inhibited=false";
+            refreshInterval = 30000;
+            display = "dynamic-list";
+            mappings = {
+              name = "annotations.summary";
+              label = "labels.severity";
+              target = "https://alertmanager.gatica.one/#/alerts";
+            };
+          };
+        };
+      };
+
+      # Which tab each group sits on, in order.
+      tabs = {
+        Home = [
+          "Alerts"
+          "Hosts"
+          "Apps"
+          "Media"
+        ];
+        Monitoring = [
+          "Monitoring"
+          "Network"
+        ];
+        Infrastructure = [ "Infrastructure" ];
+      };
+
+      # The desktop's palette (tenjin pushes it to the chat site, chat-theme.nix) mapped onto Homepage's ten-step
+      # scale, so the page recolours with the wallpaper. Before any palette arrives, Homepage's slate applies.
+      scale = {
+        "50" = "base07";
+        "100" = "base07";
+        "200" = "base06";
+        "300" = "base05";
+        "400" = "base04";
+        "500" = "base04";
+        "600" = "base03";
+        "700" = "base02";
+        "800" = "base01";
+        "900" = "base00";
+        logo-start = "accent";
+        logo-stop = "base01";
+      };
+      slate = {
+        "50" = "248 250 252";
+        "100" = "241 245 249";
+        "200" = "226 232 240";
+        "300" = "203 213 225";
+        "400" = "148 163 184";
+        "500" = "100 116 139";
+        "600" = "71 85 105";
+        "700" = "51 65 85";
+        "800" = "30 41 59";
+        "900" = "15 23 42";
+        logo-start = "148 163 184";
+        logo-stop = "51 65 85";
+      };
     in
     {
       services.homepage-dashboard = {
@@ -95,22 +161,58 @@ in
           headerStyle = "clean";
           hideVersion = true;
           statusStyle = "dot";
-          layout = {
-            Hosts = {
+          # The wallpaper, blurred and dimmed, behind frosted cards. tenjin pushes it with the palette; it's
+          # revalidated on every load, so a new wallpaper shows on the next one.
+          background = {
+            image = "https://chat.gatica.one/wallpaper.jpg";
+            blur = "md";
+            saturate = 100;
+            brightness = 50;
+          };
+          cardBlur = "md";
+          quicklaunch = {
+            searchDescriptions = true;
+            showSearchSuggestions = true;
+            provider = "duckduckgo";
+          };
+          layout = lib.concatMapAttrs (
+            tab: names:
+            lib.genAttrs names (name: {
+              inherit tab;
               style = "row";
-              columns = builtins.length hosts;
-            };
-          }
-          // lib.genAttrs groups (_: {
-            style = "row";
-            columns = 4;
-          });
+              columns = if name == "Hosts" then builtins.length hosts else 4;
+            })
+          ) tabs;
         };
-        services = [
-          { Hosts = map hostCard hosts; }
-        ]
-        ++ lib.concatMap siteGroup groups
-        ++ [ { Network = [ blocky ]; } ];
+        services =
+          let
+            all = {
+              Alerts = [ alerts ];
+              Hosts = map hostCard hosts;
+              Network = [ blocky ];
+            }
+            // lib.mergeAttrsList (lib.concatMap siteGroup groups);
+          in
+          lib.concatMap (name: lib.optional (all ? ${name}) { ${name} = all.${name}; }) (
+            lib.concatLists (builtins.attrValues tabs)
+          );
+        bookmarks = [
+          {
+            Cosmos = [
+              { "Cosmos repo" = [ { icon = "github.png"; href = "https://github.com/VerTwoStupidTwins/Cosmos"; } ]; }
+              { NetBird = [ { icon = "netbird.png"; href = "https://app.netbird.io"; } ]; }
+              { Spaceship = [ { abbr = "SP"; href = "https://www.spaceship.com/application/advanced-dns-application/manage/gatica.one"; } ]; }
+            ];
+          }
+          {
+            Nix = [
+              { "NixOS packages" = [ { icon = "nixos.png"; href = "https://search.nixos.org/packages?channel=unstable"; } ]; }
+              { "NixOS options" = [ { icon = "nixos.png"; href = "https://search.nixos.org/options?channel=unstable"; } ]; }
+              { "Home Manager options" = [ { abbr = "HM"; href = "https://home-manager-options.extranix.com"; } ]; }
+              { Noogle = [ { abbr = "NG"; href = "https://noogle.dev"; } ]; }
+            ];
+          }
+        ];
         widgets = [
           {
             datetime = {
@@ -122,7 +224,28 @@ in
               };
             };
           }
+          {
+            search = {
+              provider = "duckduckgo";
+              target = "_blank";
+              showSearchSuggestions = true;
+            };
+          }
         ];
+        customCSS = ''
+          @import url("https://chat.gatica.one/theme.css");
+
+          html.theme-slate, .theme-slate {
+          ${lib.concatStrings (
+            lib.mapAttrsToList (
+              step: key: "  --color-${step}: var(--${key}-rgb, ${slate.${step}});\n"
+            ) scale
+          )}}
+
+          ::selection {
+            background: rgb(var(--accent-rgb, 148 163 184) / 0.5);
+          }
+        '';
       };
 
       web.sites.home = {

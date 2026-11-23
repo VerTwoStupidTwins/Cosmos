@@ -469,8 +469,11 @@
             inherit (cfg.chat) port;
             healthPath = "/healthz";
             inherit (cfg.chat) sso;
-            # tenjin's palette push brings its own token (chat-theme-token).
-            ssoBypass = [ "/api/theme" ];
+            # tenjin's palette and wallpaper pushes bring their own token (chat-theme-token).
+            ssoBypass = [
+              "/api/theme"
+              "/api/wallpaper"
+            ];
             homepage = {
               name = "Chat";
               group = "Apps";
@@ -481,6 +484,8 @@
               proxy_buffering off;
               proxy_cache off;
               proxy_read_timeout 1h;
+              # The wallpaper push (the start page's background), resized on tenjin.
+              client_max_body_size 5M;
             '';
           };
 
