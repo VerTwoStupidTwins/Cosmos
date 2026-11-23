@@ -150,9 +150,13 @@ in
       };
     in
     {
+      # HOMEPAGE_VAR_WEATHER_{LABEL,LATITUDE,LONGITUDE}: the weather's place, kept out of the repo.
+      sops.secrets.homepage-env.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+
       services.homepage-dashboard = {
         enable = true;
         listenPort = port;
+        environmentFiles = [ config.sops.secrets.homepage-env.path ];
         allowedHosts = "home.gatica.one";
         settings = {
           title = "Cosmos";
@@ -222,6 +226,18 @@ in
                 timeStyle = "short";
                 hour12 = false;
               };
+            };
+          }
+          # Where the owner lives stays out of this public repo: the place and its coordinates come from the
+          # homepage-env secret, which Homepage substitutes for these placeholders. Open-Meteo, no key.
+          {
+            openmeteo = {
+              label = "{{HOMEPAGE_VAR_WEATHER_LABEL}}";
+              latitude = "{{HOMEPAGE_VAR_WEATHER_LATITUDE}}";
+              longitude = "{{HOMEPAGE_VAR_WEATHER_LONGITUDE}}";
+              timezone = "America/Los_Angeles";
+              units = "imperial";
+              cache = 15;
             };
           }
           {
