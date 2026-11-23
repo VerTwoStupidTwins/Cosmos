@@ -17,10 +17,11 @@ Singleton {
     // 0–100, or -1 while the pen isn't reporting.
     property int battery: -1
     readonly property string device: "/dev/input/pen-garage"
-    // NOTE draws in this Obsidian vault, in the Excalidraw plugin's folder; Obsidian knows the
+    // NOTE draws in this Obsidian vault, in the Excalidraw plugin's folder (the vault keeps attachments in
+    // _attachments; see its Reference/How this vault works); Obsidian knows the
     // vault by the folder's name.
     readonly property string vault: Quickshell.env("HOME") + "/Documents/Notes"
-    readonly property string drawings: "Excalidraw"
+    readonly property string drawings: "_attachments/Excalidraw"
     // Screenshots and mark-ups land with niri's own screenshots.
     readonly property string pictures: Quickshell.env("HOME") + "/Pictures/Screenshots"
 
