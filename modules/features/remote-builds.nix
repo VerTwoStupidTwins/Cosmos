@@ -24,6 +24,21 @@ in
           "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKzNYKxXW4zC6fUZHoN31tyx43Jxar8iGKqBtx/Azf4e nix-builder"
         ];
       };
+
+      # Bounded, so a big rebuild can't take the machine: unbounded, Nix ran up to 24 builds of 24 threads each,
+      # the daemon peaked at 56 GB and the CPU sat at its 90 °C limit (2026-11-22). Four builds of six threads fill
+      # the CPU without piling on; past 40 GB builds are squeezed and past 48 GB one is killed, leaving the host's
+      # services room; and builds yield to everything else.
+      nix.settings = {
+        max-jobs = 4;
+        cores = 6;
+      };
+      nix.daemonCPUSchedPolicy = "batch";
+      nix.daemonIOSchedClass = "idle";
+      systemd.services.nix-daemon.serviceConfig = {
+        MemoryHigh = "40G";
+        MemoryMax = "48G";
+      };
     };
 
   # A host built on a builder (rebuild-<host>, modules/features/deploy.nix) takes the builder's signed results, and
@@ -70,7 +85,8 @@ in
           [
             {
               hostName = "lugh.netbird.cloud";
-              maxJobs = 12;
+              # As many as the builder itself runs at once (max-jobs, above).
+              maxJobs = 4;
               speedFactor = 1;
             }
           ];

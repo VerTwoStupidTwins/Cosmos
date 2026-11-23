@@ -83,7 +83,7 @@ in
         # during a switch fails the activation, and nh then skips the boot entry.
         script = ''
           ${lib.getExe pkgs.attic-client} login --set-default ${cache} ${url} "$(< "$CREDENTIALS_DIRECTORY/token")"
-          until ${lib.getExe pkgs.attic-client} watch-store ${cache}:${cache}; do
+          until ${lib.getExe pkgs.attic-client} watch-store --jobs 2 ${cache}:${cache}; do
             echo "Can't reach the cache; trying again in a minute."
             sleep 60
           done
@@ -94,6 +94,11 @@ in
           LoadCredential = "token:${config.sops.secrets.attic-push-token.path}";
           Restart = "always";
           RestartSec = 30;
+          # It holds what it uploads in memory and doesn't give it back: on lugh it reached 25 GB after a day of
+          # big builds (2026-11-22). Squeezed past 3 GB and restarted past 6; the daily push catches what a restart
+          # misses.
+          MemoryHigh = "3G";
+          MemoryMax = "6G";
         };
       };
 
