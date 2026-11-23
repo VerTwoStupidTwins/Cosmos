@@ -24,3 +24,13 @@ jobs:
           echo "Hosts: $(echo $hosts)"
           nix build --no-link --print-build-logs --keep-going \
             $(for host in $hosts; do echo ".#nixosConfigurations.$host.config.system.build.toplevel"; done)
+      # Main's builds are kept from lugh's garbage collection (nh clean) by a link each in the runner's home, replaced
+      # every run, so the weekly update's "before" builds and the next rebuild never have to start over.
+      - name: Keep main's builds
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          mkdir -p "$HOME/gcroots"
+          for host in $(nix eval --json .#nixosConfigurations --apply builtins.attrNames | jq -r '.[]'); do
+            nix build --out-link "$HOME/gcroots/main-$host" ".#nixosConfigurations.$host.config.system.build.toplevel"
+          done
+          ls -l "$HOME/gcroots"

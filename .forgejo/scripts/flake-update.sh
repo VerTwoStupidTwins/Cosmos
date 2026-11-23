@@ -44,6 +44,11 @@ echo "::group::Building the updated lock"
 for host in $hosts; do after[$host]=$(toplevel "$host"); done
 echo "::endgroup::"
 
+# Keep the updated builds from lugh's garbage collection until the pull request is merged (main's CI run keeps them
+# after that), replacing last week's.
+mkdir -p "$HOME/gcroots"
+for host in $hosts; do nix-store --add-root "$HOME/gcroots/update-$host" --realise "${after[$host]}" >/dev/null; done
+
 # Per host: the nvd report, and a count of version changes.
 summary=()
 details=""
