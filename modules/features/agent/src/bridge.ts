@@ -26,8 +26,9 @@ import {
 import { randomUUID } from "node:crypto";
 import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
+import { approvalText } from "./approval.js";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
-import type { ChatDetail, ChatSummary, MemoryStatus, TrashEntry } from "./api.js";
+import { CAMPAIGN_MODE, type ChatDetail, type ChatSummary, type MemoryStatus, type TrashEntry } from "./api.js";
 import type { Config } from "./config.js";
 import type { ServerCall } from "./mcp.js";
 import { type Change, type Exchange, type Hit, memoriesBlock, recalledNotice } from "./memory.js";
@@ -68,6 +69,9 @@ export type ChatOptions = {
 	homelab: Extension[]; // what main doesn't get: the homelab tools
 	handOff: Extension; // what only main gets: hand_off
 	handBack: Extension; // what only workhorse gets in a chat: hand_back
+	// Campaign mode (CAMPAIGN_MODE), where the campaigns vault is set up: its tools, and the notes vault's, which a
+	// campaign chat keeps while the other homelab tools go.
+	campaign?: { tools: Extension; notes?: Extension };
 };
 
 const CHAT_MAIN = [
@@ -102,8 +106,27 @@ const CHAT_WORK = [
 	"hand_back with a short reason and tell the owner in one line that main takes it from here. Not while work is",
 	"still going on. Saying it does nothing by itself: always call hand_back.",
 ].join(" ");
-const handOffPrompt = (reason: string) =>
-	`[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
+// Told to main when campaign mode exists: when to hand off there instead.
+const CHAT_MAIN_CAMPAIGN = [
+	"The owner also runs D&D campaigns (5e 2024, homebrew worlds) kept in their campaigns vault. When the conversation",
+	'turns to a campaign, a world, NPCs, places, sessions or other worldbuilding, call hand_off with to: "campaign":',
+	"workhorse takes over as their co-writer, with the vault. You don't have the campaigns vault yourself.",
+].join(" ");
+const CHAT_CAMPAIGN = [
+	"This chat is in campaign mode: you are workhorse, the owner's co-writer for their D&D campaigns (5e 2024 rules,",
+	"homebrew worlds). The campaign__ tools are their campaigns vault. Before writing anything, read its rules note,",
+	"AGENTS.md, and follow it: know which campaign you're working on (ask if it isn't clear), read that campaign's note",
+	"and its world's note, fill templates from _templates/ in rather than copying them, and keep secrets out of",
+	"anything players see. New material goes in as drafts with campaign__create (it lands in the inbox); changing or",
+	"moving an existing note (campaign__edit, campaign__move) waits for the owner's approval, so propose it and say",
+	"why. You also have their personal notes (notes__) and memory: an idea from either may fit the other, and you may",
+	"say so. Be a creative partner: offer options, ask what they want, build on their ideas rather than replacing them.",
+	"When the talk leaves the campaign, call hand_back with a short reason and tell the owner in one line.",
+].join(" ");
+const handOffPrompt = (reason: string, to: string) =>
+	to === CAMPAIGN_MODE
+		? `[main handed this conversation to you, workhorse, in campaign mode, because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
+		: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
 
 type BridgeState = {
 	since: string | null;
@@ -191,7 +214,7 @@ export class Bridge {
 	#state: BridgeState = emptyState();
 	#me = "";
 	#delivering = new Set<string>();
-	#approvals = new Map<string, { taskId: TaskId; key: string; conversation: string }>(); // approval message → parked call
+	#approvals = new Map<string, { taskId: TaskId; key: string; conversation: string; preview: string }>(); // approval message → parked call
 	#titling = new Set<string>(); // chats being named
 	#roomNames = new Map<string, string>(); // room ID → its Matrix name, for the memory status
 	#stopped = new AbortController();
@@ -217,6 +240,7 @@ export class Bridge {
 						return undefined;
 					}
 					const key = `${call.name}:${JSON.stringify(call.arguments)}`;
+					const preview = approvalText(call.name, call.arguments as Record<string, unknown>);
 					const state = await api.readSignal(Approval, key, context);
 					if (state === undefined) {
 						// The hook runs again on every wake and after every restart: ask once, remember the question.
@@ -224,15 +248,12 @@ export class Bridge {
 						if (eventId === undefined && where) {
 							eventId = await this.options.matrix.send(
 								where.room,
-								textContent(
-									`🔐 Approve \`${call.name}\` ${JSON.stringify(call.arguments)}? React ✅ or ❌.`,
-									html(`🔐 Approve \`${call.name}\` \`${JSON.stringify(call.arguments)}\`? React ✅ or ❌.`),
-								),
+								textContent(`🔐 ${preview}\n\nReact ✅ or ❌.`, html(`🔐 ${preview}\n\nReact ✅ or ❌.`)),
 							);
 							await api.memo(`approval.event.${key}`, eventId, context);
 						}
 						if (eventId !== undefined) {
-							this.#approvals.set(eventId, { taskId: api.taskId, key, conversation: String(api.conversationId) });
+							this.#approvals.set(eventId, { taskId: api.taskId, key, conversation: String(api.conversationId), preview });
 							// A reaction may already be waiting (sent while the agent was down).
 							setTimeout(() => void this.#resolve(eventId!), 0);
 						}
@@ -680,8 +701,10 @@ export class Bridge {
 				const c = this.options.chat;
 				const chat = owed.chat !== undefined ? this.#state.chats[owed.chat] : undefined;
 				const onMain = chat?.model === c?.mainModel;
-				const reason = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back", markdown) : undefined;
-				const target = onMain ? c?.workModel : c?.mainModel;
+				const request = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back", markdown) : undefined;
+				const reason = request?.reason;
+				// main goes to campaign mode when it asks for it (and there is one), else to workhorse; the others go back to main.
+				const target = onMain ? (request?.to === CAMPAIGN_MODE && c?.campaign ? CAMPAIGN_MODE : c?.workModel) : c?.mainModel;
 				const next: Pending | undefined =
 					reason !== undefined && onMain ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
 				// Looked up before the commit: a Harness read inside a commit waits for that commit, for ever.
@@ -691,7 +714,7 @@ export class Bridge {
 						if (reason === undefined || !conversation || !target) return undefined;
 						const entry = { kind: "cosmos.handoff", data: { reason, model: target } };
 						const admitted = next
-							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason), requestId: next.event, entry })
+							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason, target), requestId: next.event, entry })
 							: await conversation.submit(tx, { type: "write", entry });
 						await configure(tx, conversation.id, this.#chatAgent(target));
 						return admitted;
@@ -746,8 +769,17 @@ export class Bridge {
 	// harness's default extensions, which leave hand_off out).
 	#chatAgent(model: string): AgentChange {
 		const c = this.options.chat!;
+		if (model === CAMPAIGN_MODE && c.campaign) {
+			const { tools, notes } = c.campaign;
+			return {
+				model: { provider: "nabu", modelId: c.workModel },
+				extensions: { add: [c.handBack, tools], remove: c.homelab.filter((e) => e !== notes) },
+				instructions: `${CHAT_CAMPAIGN} ${CHAT_DIAGRAMS}`,
+			};
+		}
+		const main = c.campaign ? `${CHAT_MAIN} ${CHAT_MAIN_CAMPAIGN}` : CHAT_MAIN;
 		return model === c.mainModel
-			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: `${CHAT_MAIN} ${CHAT_DIAGRAMS}` }
+			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: `${main} ${CHAT_DIAGRAMS}` }
 			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack] }, instructions: `${CHAT_WORK} ${CHAT_DIAGRAMS}` };
 	}
 
@@ -792,13 +824,14 @@ export class Bridge {
 		if (rest) await this.#chatSubmit(id, rest, event.event_id, "matrix");
 	}
 
-	// "/work" or "/chat" switches the chat; text after it is then sent as a message to the model switched to.
+	// "/work", "/campaign" or "/chat" switches the chat; text after it is then sent as a message to the model switched to.
 	// Returns what is left to send.
 	async #command(id: string, text: string): Promise<string> {
-		const command = /^\/(work|chat)\b\s*([\s\S]*)$/.exec(text.trim());
+		const command = /^\/(work|campaign|chat)\b\s*([\s\S]*)$/.exec(text.trim());
 		if (!command) return text;
 		const c = this.options.chat!;
-		await this.switchModel(id, command[1] === "work" ? c.workModel : c.mainModel, "the owner switched");
+		const to = command[1] === "work" ? c.workModel : command[1] === "campaign" ? CAMPAIGN_MODE : c.mainModel;
+		await this.switchModel(id, to, "the owner switched");
 		return command[2]?.trim() ?? "";
 	}
 
@@ -830,12 +863,13 @@ export class Bridge {
 
 	// Did the model call `tool` (hand_off, hand_back) while answering? Read from the transcript, so it survives a restart.
 	// An answer that says it hands over without the call counts too: a promised switch must not leave the chat stranded.
-	async #switchRequest(id: string, tool: string, answer: string): Promise<string | undefined> {
+	// `to`: where a hand_off asked to go (CAMPAIGN_MODE, or workhorse when not given).
+	async #switchRequest(id: string, tool: string, answer: string): Promise<{ reason: string; to?: string } | undefined> {
 		const called = await this.#calledWhileAnswering(id, tool);
 		if (called !== undefined) return called;
 		// Only an announcement of a switch happening now ("I'm handing this over to workhorse", "let me hand you off to
 		// workhorse", "switching to workhorse"), not a description of how chats work ("unless I hand off to workhorse").
-		const target = tool === "hand_off" ? "workhorse" : "main";
+		const target = tool === "hand_off" ? "(?:workhorse|campaign mode)" : "main";
 		const move = tool === "hand_off" ? "(?:over|off)" : "back";
 		const said = new RegExp(
 			[
@@ -848,10 +882,11 @@ export class Bridge {
 		const line = answer.split(/\n/).find((l) => said.test(l));
 		if (line === undefined || /\b(?:unless|if|when|whenever)\b[^.]*\bhand/i.test(line)) return undefined;
 		console.error(`chat: ${id} said it hands over without calling ${tool}; switching anyway`);
-		return tool === "hand_off" ? "main said it's handing over" : "workhorse said main takes it from here";
+		if (tool !== "hand_off") return { reason: "workhorse said main takes it from here" };
+		return { reason: "main said it's handing over", ...(/campaign mode/i.test(line) && { to: CAMPAIGN_MODE }) };
 	}
 
-	async #calledWhileAnswering(id: string, tool: string): Promise<string | undefined> {
+	async #calledWhileAnswering(id: string, tool: string): Promise<{ reason: string; to?: string } | undefined> {
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
 		for (const entry of page?.items ?? []) {
@@ -859,7 +894,10 @@ export class Bridge {
 			for (const message of entry.model ?? []) {
 				if (message.role !== "assistant") continue;
 				for (const part of message.content) {
-					if (part.type === "toolCall" && part.name === tool) return String(part.arguments.reason ?? "the conversation moved on");
+					if (part.type === "toolCall" && part.name === tool) {
+						const to = part.arguments.to;
+						return { reason: String(part.arguments.reason ?? "the conversation moved on"), ...(typeof to === "string" && { to }) };
+					}
 				}
 			}
 		}
@@ -1042,7 +1080,7 @@ export class Bridge {
 	chat(id: string): ChatDetail | undefined {
 		const c = this.#state.chats[id];
 		if (!c) return undefined;
-		const approvals = [...this.#approvals].filter(([, a]) => a.conversation === id).map(([event, a]) => ({ event, call: a.key }));
+		const approvals = [...this.#approvals].filter(([, a]) => a.conversation === id).map(([event, a]) => ({ event, call: a.key, preview: a.preview }));
 		return {
 			id,
 			title: c.title,
@@ -1051,7 +1089,15 @@ export class Bridge {
 			deleted: c.deleted ?? null,
 			busy: Object.values(this.#state.pending).some((p) => p.chat === id),
 			approvals,
+			modes: this.#modes(),
 		};
+	}
+
+	// What a chat can run in: main, workhorse and, where the campaigns vault is set up, campaign mode.
+	#modes(): string[] {
+		const c = this.options.chat;
+		if (!c) return [];
+		return c.campaign ? [c.mainModel, c.workModel, CAMPAIGN_MODE] : [c.mainModel, c.workModel];
 	}
 
 	// A chat begun on the web gets its Matrix thread at once, rooted at the owner's first message, so the phone has it.
@@ -1092,7 +1138,7 @@ export class Bridge {
 	async switchModel(id: string, model: string, reason: string) {
 		const chat = this.#state.chats[id];
 		if (!chat) throw new Error(`no chat ${id}`);
-		if (model !== this.options.chat!.mainModel && model !== this.options.chat!.workModel) throw new Error(`a chat runs on main or workhorse, not ${model}`);
+		if (!this.#modes().includes(model)) throw new Error(`a chat runs in ${this.#modes().join(", ")}, not ${model}`);
 		if (chat.model === model) return;
 		const conversation = (await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx))!;
 		const text = `🔀 Switched to ${model}: ${reason}`;

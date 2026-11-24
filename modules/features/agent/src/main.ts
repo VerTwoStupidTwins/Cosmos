@@ -6,7 +6,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { obj, str } from "@earendil-works/pi-schema";
+import { obj, oneOf, opt, str } from "@earendil-works/pi-schema";
 import { type AlertPayload, Bridge } from "./bridge.js";
 import { credential, loadConfig, optionalCredential } from "./config.js";
 import { Matrix } from "./matrix.js";
@@ -53,16 +53,19 @@ const TestTools = defineExtension({
 	],
 });
 
-// Only in chats on main: the way it passes a conversation to workhorse. The bridge sees the call in the transcript and
-// switches the chat once main's answer is out.
+// Only in chats on main: the way it passes a conversation to workhorse, for homelab work or (where the campaigns vault
+// is set up) for D&D campaign work. The bridge sees the call in the transcript and switches the chat once main's answer
+// is out.
+const campaignMode = "campaign" in config.tools;
 const HandOff = defineExtension({
 	name: "hand-off",
 	tools: [
 		defineTool({
 			name: "hand_off",
-			description:
-				"Hand this chat to workhorse, the bigger model with the homelab tools, when the conversation turns to work on the homelab or needs heavier reasoning. It takes over right after your answer.",
-			parameters: obj({ reason: str() }),
+			description: campaignMode
+				? 'Hand this chat to workhorse, the bigger model, which takes over right after your answer. to: "workhorse" (the default) when the conversation turns to work on the homelab or needs heavier reasoning; "campaign" when it turns to the owner\'s D&D campaigns or worldbuilding (workhorse with the campaigns vault).'
+				: "Hand this chat to workhorse, the bigger model with the homelab tools, when the conversation turns to work on the homelab or needs heavier reasoning. It takes over right after your answer.",
+			parameters: campaignMode ? obj({ reason: str(), to: opt(oneOf(["workhorse", "campaign"])) }) : obj({ reason: str() }),
 			replay: "safe",
 			execute: async () => ({
 				output: [{ type: "text", text: "Noted: workhorse takes over after your answer. Tell the owner in one short line that you're handing over and why; don't start the work yourself." }],
@@ -118,10 +121,17 @@ const install = (extension: Extension, isHomelab = false) => {
 };
 install(Persona);
 const calls: Record<string, ServerCall> = {};
+// The campaigns vault's tools are for campaign chats only: registered, but in no conversation by default.
+let campaignTools: Extension | undefined;
+let notesTools: Extension | undefined; // the notes vault's, which campaign chats get too
 for (const [name, server] of Object.entries(config.tools)) {
 	const tools = await mcpExtension(name, server);
 	for (const tool of tools.approval) approval.add(tool);
-	install(tools.extension, name !== "memory");
+	if (name === "campaign") {
+		registry.install(tools.extension);
+		campaignTools = tools.extension;
+	} else install(tools.extension, name !== "memory");
+	if (name === "notes") notesTools = tools.extension;
 	calls[name] = tools.call;
 }
 // Long-term memory: the core block in every conversation, and the bridge's recall, storing and announcing.
@@ -157,6 +167,7 @@ const bridge = new Bridge({
 			homelab,
 			handOff: HandOff,
 			handBack: HandBack,
+			...(campaignTools && { campaign: { tools: campaignTools, ...(notesTools && { notes: notesTools }) } }),
 		},
 	}),
 	context,

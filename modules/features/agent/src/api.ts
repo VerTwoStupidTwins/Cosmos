@@ -21,7 +21,9 @@ export type ChatDetail = {
 	pinned: boolean;
 	deleted: number | null;
 	busy: boolean;
-	approvals: { event: string; call: string }[];
+	approvals: { event: string; call: string; preview: string }[]; // preview: Markdown (approval.ts)
+	// What the chat can switch to: MAIN_MODEL, WORK_MODEL and, where the campaigns vault is set up, CAMPAIGN_MODE.
+	modes: string[];
 };
 
 // One server-sent event of a chat: its state, the answer being written, and its items when they changed.
@@ -59,3 +61,5 @@ export type MemoryStatus =
 // The models a chat can be on, as the switch button names them.
 export const MAIN_MODEL = "main";
 export const WORK_MODEL = "workhorse";
+// Not a model of its own: workhorse with the campaigns vault's tools and the D&D campaign instructions.
+export const CAMPAIGN_MODE = "campaign";

@@ -130,7 +130,14 @@
             inherit (cfg.models) endpoint default;
             catalog = cfg.models.catalog;
           };
-          tools = lib.mapAttrs (_: server: { inherit (server) command replay tools; }) cfg.tools;
+          tools = lib.mapAttrs (_: server: {
+            inherit (server)
+              command
+              replay
+              about
+              tools
+              ;
+          }) cfg.tools;
         }
       );
 
@@ -158,6 +165,31 @@
           };
         };
       };
+
+      # The notes tool for one vault: reading is safe to repeat after a crash; a write might have happened, so it
+      # isn't, and changing or moving an existing note waits for the owner.
+      vaultTools =
+        { vault, about }:
+        {
+          command = [
+            (lib.getExe config.notes.package)
+            "--vault"
+            vault
+            "serve"
+          ];
+          inherit about;
+          tools = {
+            create.replay = "unsafe";
+            edit = {
+              replay = "unsafe";
+              approval = true;
+            };
+            move = {
+              replay = "unsafe";
+              approval = true;
+            };
+          };
+        };
     in
     {
       options.agent = {
@@ -375,6 +407,12 @@
                     "interrupted" to the model instead.
                   '';
                 };
+                about = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                  example = "[The campaigns vault]";
+                  description = "Put before each of its tools' descriptions, to tell servers of the same program apart.";
+                };
                 tools = lib.mkOption {
                   type = lib.types.attrsOf toolPolicy;
                   default = { };
@@ -392,13 +430,19 @@
           agent.tools.monitor.command = lib.mkIf (config.monitor ? command) config.monitor.command;
           # Metrics, alerts and logs from every host, where the observability stack runs.
           agent.tools.observe.command = lib.mkIf config.services.prometheus.enable [ (lib.getExe observe) ];
-          # The owner's Obsidian vault, where it syncs (notes.nix): list, read and search, read-only for now.
-          agent.tools.notes.command = lib.mkIf (config ? notes) [
-            (lib.getExe config.notes.package)
-            "serve"
-            # Write tools come with their approvals (next change).
-            "--read-only"
-          ];
+          # The owner's Obsidian vaults, where they sync (notes.nix): the notes vault, and the campaigns vault (D&D)
+          # when it's one of the extras. New notes go straight into a vault's inbox; edits and moves wait for the
+          # owner's ✅ (shown as a diff). Nothing is deleted.
+          agent.tools.notes = lib.mkIf (config ? notes) (vaultTools {
+            vault = config.notes.vault;
+            about = "[Notes vault: the owner's personal notes; its rules: Reference/How this vault works]";
+          });
+          agent.tools.campaign =
+            lib.mkIf (config ? notes && config.notes.extraVaultPaths ? campaigns)
+              (vaultTools {
+                vault = config.notes.extraVaultPaths.campaigns;
+                about = "[Campaigns vault: the owner's D&D campaigns and worlds; its rules: AGENTS.md]";
+              });
           # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
           # consolidation, announcements and undo are for the bridge.
           agent.tools.memory = lib.mkIf config.services.qdrant.enable {
@@ -509,6 +553,12 @@
               WorkingDirectory = "/var/lib/agent";
               # host-monitor's log tool reads the journal; the notes tool, the vault.
               SupplementaryGroups = [ "systemd-journal" ] ++ lib.optional (config ? notes) "notes";
+              # The notes tools write into the vaults; folders they make stay writable by the group (and keep the
+              # vault's setgid, so files in them stay the notes group's), for the sync service.
+              ReadWritePaths = lib.optionals (config ? notes) (
+                [ config.notes.vault ] ++ lib.attrValues config.notes.extraVaultPaths
+              );
+              UMask = "0007";
               LoadCredential = [
                 "matrix-token:${config.sops.secrets.agent-matrix-token.path}"
               ]

@@ -1,7 +1,7 @@
 <!-- A chat: its bar, its log (following the server's event stream), and the message box. No `id`: a new chat. -->
 <script lang="ts">
 	import type { ChatDetail, ChatEvent, ChatItem } from "../../../src/api.ts";
-	import { MAIN_MODEL, WORK_MODEL } from "../../../src/api.ts";
+	import { MAIN_MODEL } from "../../../src/api.ts";
 	import { api, report } from "../lib/api";
 	import { when } from "../lib/format";
 	import { codeBlocks, markdown } from "../lib/markdown";
@@ -80,8 +80,8 @@
 	}
 
 	const actions = {
-		switchModel: () => {
-			if (id && chat) api.model(id, chat.model === MAIN_MODEL ? WORK_MODEL : MAIN_MODEL).catch(report);
+		switchModel: (to: string) => {
+			if (id && chat) api.model(id, to).catch(report);
 		},
 		rename: () => {
 			if (!id) return;
@@ -120,7 +120,7 @@
 		{#if id === null}
 			<div class="start">
 				<span class="tag">New</span>
-				<p>Start a chat with main. It hands over to workhorse when the talk turns to work, and says so.</p>
+				<p>Start a chat with main. It hands over to workhorse when the talk turns to work, or to campaign mode for your D&amp;D campaigns, and says so. /work, /campaign and /chat switch it yourself.</p>
 			</div>
 		{/if}
 		{#each items as item, i (i)}
@@ -132,7 +132,7 @@
 				<span class="grow">Approval needed</span>
 				<button class="primary" onclick={() => id && api.approve(id, approval.event, true).catch(report)}>Approve</button>
 				<button onclick={() => id && api.approve(id, approval.event, false).catch(report)}>Deny</button>
-				<code class="call">{approval.call}</code>
+				<div class="call prose" use:codeBlocks={""}>{@html markdown(approval.preview, { diagrams: false })}</div>
 			</div>
 		{/each}
 		{#if busy}
@@ -160,7 +160,7 @@
 	.start p { margin: 0; max-width: 420px; font-size: 12.5px; }
 	.banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 18px; --frame-solid: color-mix(in srgb, var(--warn) 60%, var(--bg)); }
 	.grow { flex: 1; min-width: 160px; }
-	.call { flex: 1 1 100%; color: var(--dim); font-size: 11.5px; overflow-wrap: anywhere; }
+	.call { flex: 1 1 100%; font-size: 13px; overflow-wrap: anywhere; }
 	.pending { margin: 0 0 18px; }
 	.pending header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 	.state { color: var(--dim); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; }

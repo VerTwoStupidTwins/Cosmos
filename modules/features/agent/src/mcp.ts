@@ -64,7 +64,7 @@ export async function mcpExtension(name: string, server: Server): Promise<McpToo
 		if (policy.approval) approval.add(fullName);
 		return defineTool({
 			name: fullName,
-			description: tool.description ?? tool.name,
+			description: server.about ? `${server.about} ${tool.description ?? tool.name}` : (tool.description ?? tool.name),
 			parameters: (tool.inputSchema ?? { type: "object", properties: {} }) as object,
 			replay: policy.replay ?? server.replay,
 			execute: async (args) => {

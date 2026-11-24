@@ -79,7 +79,7 @@
 					<span class="index">{zero(i + 1)}</span>
 					<span class="title">{chat.title}</span>
 					{#if chat.busy}<span class="pulse" title="answering"></span>{/if}
-					<span class="model" class:work={chat.model === "workhorse"}>{modelTag(chat.model)}</span>
+					<span class="model" class:work={chat.model !== "main"}>{modelTag(chat.model)}</span>
 					<span class="age">{ago(chat.updated)}</span>
 				</button>
 			{/each}

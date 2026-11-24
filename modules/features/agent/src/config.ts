@@ -25,7 +25,8 @@ export type Config = {
 		default: string;
 		catalog: Record<string, { contextWindow: number; maxTokens: number; reasoning: boolean; midConvoSystem: boolean }>;
 	};
-	tools: Record<string, { command: string[]; replay: "safe" | "unsafe"; tools: Record<string, ToolPolicy> }>;
+	// about: put before each of the server's tool descriptions (which vault a notes server is, say).
+	tools: Record<string, { command: string[]; replay: "safe" | "unsafe"; about: string | null; tools: Record<string, ToolPolicy> }>;
 };
 
 export function loadConfig(path: string): Config {

@@ -4,7 +4,7 @@
 	import type { ChatDetail } from "../../../src/api.ts";
 	import { MAIN_MODEL } from "../../../src/api.ts";
 	import { zero } from "../lib/format";
-	import { modelTag, type ChatActions } from "../lib/types";
+	import { modeLabel, modelTag, type ChatActions } from "../lib/types";
 
 	let {
 		tag,
@@ -59,13 +59,19 @@
 	{/if}
 
 	{#if live && actions}
-		<button class="switch" onclick={actions.switchModel} title="Switch model">⇄ {onMain ? "Work" : "Main"}</button>
+		<div class="switch" role="group" aria-label="Mode">
+			{#each chat?.modes ?? [] as mode (mode)}
+				<button class:on={chat?.model === mode} aria-pressed={chat?.model === mode} onclick={() => chat?.model !== mode && actions.switchModel(mode)}>{modeLabel(mode)}</button>
+			{/each}
+		</div>
 		<details class="more" bind:this={menu}>
 			<summary aria-label="Chat options">⋯</summary>
 			<div class="pop plate" style="--br: 8px">
 				<button class="bare" onclick={() => choose(actions.rename)}>Rename</button>
 				<button class="bare" onclick={() => choose(actions.pin)}>{chat?.pinned ? "Unpin" : "Pin"}</button>
-				<button class="bare" onclick={() => choose(actions.switchModel)}>{onMain ? "Hand to workhorse" : "Back to main"}</button>
+				{#each (chat?.modes ?? []).filter((m) => m !== chat?.model) as mode (mode)}
+					<button class="bare" onclick={() => choose(() => actions.switchModel(mode))}>Switch to {modeLabel(mode)}</button>
+				{/each}
 				<button class="bare danger" onclick={() => choose(actions.remove)}>Delete</button>
 			</div>
 		</details>
@@ -81,6 +87,10 @@
 	.readout { display: flex; align-items: baseline; gap: 6px; }
 	.readout b { font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; }
 	.readout b.work, .readout b.active { color: var(--accent-color); }
+	.switch { display: flex; }
+	.switch button { padding: 3px 9px; }
+	.switch button + button { margin-left: -1px; }
+	.switch button.on { color: var(--accent-color); border-color: var(--frame); }
 	.more { position: relative; }
 	summary {
 		list-style: none; cursor: pointer; border: 1px solid var(--line); padding: 3px 9px; font-weight: 700;

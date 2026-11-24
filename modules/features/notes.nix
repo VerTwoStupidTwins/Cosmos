@@ -114,6 +114,12 @@
           example = [ "campaigns" ];
           description = "More Obsidian Sync vaults, each synced to /var/lib/notes/<name>.";
         };
+        extraVaultPaths = lib.mkOption {
+          type = lib.types.attrsOf lib.types.str;
+          readOnly = true;
+          default = lib.removeAttrs vaults [ "" ];
+          description = "Where each of extraVaults syncs to, by name.";
+        };
         models = lib.mkOption {
           type = lib.types.str;
           default = "http://nabu.netbird.cloud:8080/v1";
