@@ -39,6 +39,9 @@ in
     # Games installed through Wolf (Steam's library and the like) go in the games subvolume, not the system's.
     wolf.stateDir = "/games/wolf";
 
+    # The tabletop vault (D&D campaigns), beside the main notes vault.
+    notes.extraVaults = [ "campaigns" ];
+
     # The desktop bar's homelab plate reads lugh's monitor.
     monitor.allowStation = true;
 

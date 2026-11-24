@@ -13,6 +13,12 @@
   #   sudo systemctl start obsidian-sync
   # ob keeps its token and the vault's settings (the end-to-end password included) in /var/lib/notes/.config, readable
   # by the notes user only.
+  #
+  # Other vaults (notes.extraVaults, e.g. the campaigns vault) sync to /var/lib/notes/<name>, each with its own
+  # obsidian-sync-<name> service. They share the login; each needs its own sync-setup, then a start:
+  #   sudo ob-notes sync-setup --vault "<remote name>" --path /var/lib/notes/<name> --device-name lugh
+  #   sudo systemctl start obsidian-sync-<name>
+  # Until a vault is set up, its service is skipped rather than failing.
   flake.modules.nixos.notes =
     {
       config,
@@ -56,6 +62,38 @@
         PrivateTmp = true;
         NoNewPrivileges = true;
       };
+
+      ob = lib.getExe' pkgs.obsidian-headless "ob";
+
+      # Every synced vault: the main one, then the extras by name.
+      vaults = {
+        "" = vault;
+      }
+      // lib.genAttrs cfg.extraVaults (name: "${home}/${name}");
+      unitName = name: if name == "" then "obsidian-sync" else "obsidian-sync-${name}";
+
+      syncService = path: {
+        description = "Sync the Obsidian vault at ${path} (Obsidian Sync)";
+        wantedBy = [ "multi-user.target" ];
+        wants = [ "network-online.target" ];
+        after = [ "network-online.target" ];
+        inherit environment;
+        # Until the owner has signed in and set this vault up (above), there's nothing to run: sync-status exits 3
+        # for a path with no sync configuration, which skips the unit instead of failing it.
+        unitConfig.ConditionPathExists = "${configHome}/obsidian-headless/auth_token";
+        serviceConfig = sandbox // {
+          User = "notes";
+          Group = "notes";
+          WorkingDirectory = home;
+          ExecCondition = "${ob} sync-status --path ${path}";
+          ExecStart = "${ob} sync --continuous --path ${path}";
+          # Files it writes stay writable by the group (the agent).
+          UMask = "0007";
+          Restart = "always";
+          RestartSec = 30;
+          ReadWritePaths = [ home ];
+        };
+      };
     in
     {
       options.notes = {
@@ -70,6 +108,12 @@
           readOnly = true;
           default = vault;
         };
+        extraVaults = lib.mkOption {
+          type = lib.types.listOf (lib.types.strMatching "[a-z][a-z0-9-]*");
+          default = [ ];
+          example = [ "campaigns" ];
+          description = "More Obsidian Sync vaults, each synced to /var/lib/notes/<name>.";
+        };
         models = lib.mkOption {
           type = lib.types.str;
           default = "http://nabu.netbird.cloud:8080/v1";
@@ -77,93 +121,82 @@
         };
       };
 
-      config = {
-        users.users.notes = {
-          isSystemUser = true;
-          group = "notes";
-          inherit home;
-        };
-        users.groups.notes = { };
-
-        # The vault is the group's to write (setgid, so new files stay in it); ob's own settings are the notes user's
-        # alone.
-        systemd.tmpfiles.settings.notes = {
-          ${home}.d = {
-            user = "notes";
+      config = lib.mkMerge [
+        {
+          systemd.services = lib.mapAttrs' (
+            name: path: lib.nameValuePair (unitName name) (syncService path)
+          ) vaults;
+          monitor.units = map unitName (lib.attrNames vaults);
+        }
+        {
+          users.users.notes = {
+            isSystemUser = true;
             group = "notes";
-            mode = "0750";
+            inherit home;
           };
-          ${vault}.d = {
-            user = "notes";
-            group = "notes";
-            mode = "2770";
-          };
-          ${configHome}.d = {
-            user = "notes";
-            group = "notes";
-            mode = "0700";
-          };
-        };
+          users.groups.notes = { };
 
-        environment.systemPackages = [ ob-notes ];
+          # The vault is the group's to write (setgid, so new files stay in it); ob's own settings are the notes user's
+          # alone.
+          systemd.tmpfiles.settings.notes = {
+            ${home}.d = {
+              user = "notes";
+              group = "notes";
+              mode = "0750";
+            };
+            ${configHome}.d = {
+              user = "notes";
+              group = "notes";
+              mode = "0700";
+            };
+          }
+          // lib.mapAttrs' (
+            _: path:
+            lib.nameValuePair path {
+              d = {
+                user = "notes";
+                group = "notes";
+                mode = "2770";
+              };
+            }
+          ) vaults;
 
-        systemd.services.obsidian-sync = {
-          description = "Sync the Obsidian vault (Obsidian Sync)";
-          wantedBy = [ "multi-user.target" ];
-          wants = [ "network-online.target" ];
-          after = [ "network-online.target" ];
-          inherit environment;
-          # Until the owner has signed in (above), there's nothing to run.
-          unitConfig.ConditionPathExists = "${configHome}/obsidian-headless/auth_token";
-          serviceConfig = sandbox // {
-            User = "notes";
-            Group = "notes";
-            WorkingDirectory = home;
-            ExecStart = "${lib.getExe' pkgs.obsidian-headless "ob"} sync --continuous --path ${vault}";
-            # Files it writes stay writable by the group (the agent).
-            UMask = "0007";
-            Restart = "always";
-            RestartSec = 30;
-            ReadWritePaths = [ home ];
-          };
-        };
+          environment.systemPackages = [ ob-notes ];
 
-        # Handwritten notes: each PNG that Excalidraw exports beside a drawing goes to the vision model, and the
-        # transcription becomes a note in Inbox (with the drawing embedded, to check it against). It never re-sends an
-        # unchanged drawing, and never replaces a transcription the owner has edited (it marks it outdated instead).
-        systemd.services.notes-transcriber = {
-          description = "Transcribe handwritten notes in the Obsidian vault";
-          wantedBy = [ "multi-user.target" ];
-          wants = [ "network-online.target" ];
-          after = [
-            "network-online.target"
-            "obsidian-sync.service"
-          ];
-          environment = {
-            NOTES = vault;
-            STATE = "/var/lib/notes-transcriber";
-            API = "${cfg.models}/chat/completions";
-            MODEL = "vision";
-            PROMPT = "${./agent-tools/notes/transcribe-prompt.txt}";
-            REQUEST = "${./agent-tools/notes/transcribe-request.txt}";
+          # Handwritten notes: each PNG that Excalidraw exports beside a drawing goes to the vision model, and the
+          # transcription becomes a note in Inbox (with the drawing embedded, to check it against). It never re-sends an
+          # unchanged drawing, and never replaces a transcription the owner has edited (it marks it outdated instead).
+          systemd.services.notes-transcriber = {
+            description = "Transcribe handwritten notes in the Obsidian vault";
+            wantedBy = [ "multi-user.target" ];
+            wants = [ "network-online.target" ];
+            after = [
+              "network-online.target"
+              "obsidian-sync.service"
+            ];
+            environment = {
+              NOTES = vault;
+              STATE = "/var/lib/notes-transcriber";
+              API = "${cfg.models}/chat/completions";
+              MODEL = "vision";
+              PROMPT = "${./agent-tools/notes/transcribe-prompt.txt}";
+              REQUEST = "${./agent-tools/notes/transcribe-request.txt}";
+            };
+            serviceConfig = sandbox // {
+              User = "notes";
+              Group = "notes";
+              ExecStart = "${lib.getExe notesTool} watch";
+              # Which PNGs it has transcribed, kept out of the vault.
+              StateDirectory = "notes-transcriber";
+              UMask = "0007";
+              Restart = "always";
+              RestartSec = 30;
+              ReadWritePaths = [ vault ];
+            };
           };
-          serviceConfig = sandbox // {
-            User = "notes";
-            Group = "notes";
-            ExecStart = "${lib.getExe notesTool} watch";
-            # Which PNGs it has transcribed, kept out of the vault.
-            StateDirectory = "notes-transcriber";
-            UMask = "0007";
-            Restart = "always";
-            RestartSec = 30;
-            ReadWritePaths = [ vault ];
-          };
-        };
 
-        monitor.units = [
-          "obsidian-sync"
-          "notes-transcriber"
-        ];
-      };
+          monitor.units = [ "notes-transcriber" ];
+        }
+      ];
     };
 }
