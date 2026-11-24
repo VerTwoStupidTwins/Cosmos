@@ -13,6 +13,8 @@
             telegram-desktop
             mpv
             pavucontrol
+            # Game streaming from lugh's Wolf (modules/features/wolf.nix), over NetBird.
+            moonlight-qt
           ];
         }
       )
