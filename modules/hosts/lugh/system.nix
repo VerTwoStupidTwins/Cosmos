@@ -36,6 +36,9 @@ in
       nixos.observed
     ];
 
+    # Games installed through Wolf (Steam's library and the like) go in the games subvolume, not the system's.
+    wolf.stateDir = "/games/wolf";
+
     # The desktop bar's homelab plate reads lugh's monitor.
     monitor.allowStation = true;
 
