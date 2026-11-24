@@ -116,14 +116,37 @@
       };
       users.groups.git = { };
 
+      # Forgejo sets up its sign-in sources only as it starts, and id.gatica.one is reached over NetBird, which comes
+      # up seconds into boot: started first, Forgejo runs with no way to sign in until it's restarted. So it waits for
+      # Pocket ID to answer, for a minute at most, then starts regardless, so Git over SSH works with Pocket ID down.
+      systemd.services.forgejo = {
+        after = [
+          "network-online.target"
+          "netbird-wt0.service"
+        ]
+        ++ lib.optional config.services.pocket-id.enable "pocket-id.service";
+        wants = [ "network-online.target" ];
+        serviceConfig.ExecStartPre = lib.mkBefore [
+          (pkgs.writeShellScript "forgejo-wait-for-pocket-id" ''
+            while [ "$SECONDS" -lt 60 ]; do
+              ${lib.getExe pkgs.curl} -sf -o /dev/null -m 2 https://id.gatica.one/.well-known/openid-configuration && exit 0
+              sleep 1
+            done
+            echo "Pocket ID didn't answer within a minute; starting without it" >&2
+          '')
+        ];
+      };
+
       # What can't go in app.ini: Pocket ID as the sign-in source, and the runner's registration. Both are made or
-      # updated in place on every start, so changing them here is enough.
+      # updated in place on every start, so changing them here is enough. If Pocket ID can't be reached, it tries
+      # again every 15 seconds.
       systemd.services.forgejo-setup = {
         description = "Set up Forgejo's sign-in source and runner";
         after = [ "forgejo.service" ];
         requires = [ "forgejo.service" ];
         wantedBy = [ "forgejo.service" ];
         partOf = [ "forgejo.service" ];
+        startLimitIntervalSec = 0;
         environment = {
           inherit (config.systemd.services.forgejo.environment)
             USER
@@ -135,6 +158,8 @@
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
+          Restart = "on-failure";
+          RestartSec = 15;
           User = cfg.user;
           Group = cfg.group;
           WorkingDirectory = cfg.stateDir;
