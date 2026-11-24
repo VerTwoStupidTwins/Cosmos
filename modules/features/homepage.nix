@@ -103,6 +103,28 @@ in
         };
       };
 
+      # Which provider the house is going out through, from lugh's internet monitor (internet.nix), with the AS
+      # number trimmed off. prometheusmetric only shows values, so this reads the label through Prometheus's API.
+      internet = {
+        Internet = {
+          icon = "mdi-web";
+          href = "https://grafana.gatica.one/d/internet";
+          description = "Checked every 5 minutes";
+          widget = {
+            type = "customapi";
+            # label_replace(internet_provider_info, "provider", "$1", "provider", "AS[0-9]+ (.+)"), URL-encoded.
+            url = "${prometheus}/api/v1/query?query=label_replace(internet_provider_info%2C%22provider%22%2C%22%241%22%2C%22provider%22%2C%22AS%5B0-9%5D%2B%20(.%2B)%22)";
+            refreshInterval = 60000;
+            mappings = [
+              {
+                label = "ISP";
+                field = "data.result.0.metric.provider";
+              }
+            ];
+          };
+        };
+      };
+
       # Alerts firing now and not silenced, from Alertmanager: one line each, its summary and severity.
       alerts = {
         "Firing alerts" = {
@@ -230,7 +252,10 @@ in
               Systems = map hostCard hosts ++ [ alerts ];
               # Media joins the apps on Home: one row, not two half-empty ones.
               Apps = (sited.Apps or [ ]) ++ (sited.Media or [ ]);
-              Network = [ blocky ];
+              Network = [
+                internet
+                blocky
+              ];
             };
           in
           lib.concatMap (name: lib.optional (all ? ${name}) { ${name} = all.${name}; }) tabGroups;
