@@ -16,7 +16,7 @@ const MAX_ENTRIES: usize = 200;
 const MAX_BODY: usize = 30_000;
 
 // [[target]], [[target|shown]], [[target#heading]], and the embedded ![[…]] forms.
-static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]").unwrap());
+pub(crate) static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]").unwrap());
 // #tag or #nested/tag in the text, not a heading (# followed by a space) or part of a word or URL.
 static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|[\s(])#([\p{L}\p{N}_/-]*[\p{L}_/-][\p{L}\p{N}_/-]*)").unwrap());
 
@@ -25,9 +25,9 @@ pub struct Library {
 }
 
 /// One note found on disk, with the parts listing and searching need.
-struct Found {
-    rel: String,
-    raw: String,
+pub(crate) struct Found {
+    pub(crate) rel: String,
+    pub(crate) raw: String,
     modified: Option<SystemTime>,
 }
 
@@ -55,12 +55,12 @@ impl Library {
         Ok(full)
     }
 
-    fn show(&self, path: &Path) -> String {
+    pub(crate) fn show(&self, path: &Path) -> String {
         path.strip_prefix(&self.root).unwrap_or(path).to_string_lossy().into_owned()
     }
 
     /// Every note (Markdown, but not Excalidraw's drawing data) under `dir`, in path order.
-    fn notes_under(&self, dir: &Path) -> Result<Vec<Found>> {
+    pub(crate) fn notes_under(&self, dir: &Path) -> Result<Vec<Found>> {
         let mut out = Vec::new();
         for path in walk(dir)? {
             let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -158,7 +158,7 @@ impl Library {
     }
 
     /// The note `name` refers to: a path in the vault (`.md` optional), or a note name found once anywhere in it.
-    fn find(&self, name: &str) -> Result<PathBuf> {
+    pub(crate) fn find(&self, name: &str) -> Result<PathBuf> {
         let name = name.trim().trim_start_matches("[[").trim_end_matches("]]");
         for candidate in [name.to_string(), format!("{name}.md")] {
             if let Ok(path) = self.resolve(&candidate)

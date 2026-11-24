@@ -396,6 +396,8 @@
           agent.tools.notes.command = lib.mkIf (config ? notes) [
             (lib.getExe config.notes.package)
             "serve"
+            # Write tools come with their approvals (next change).
+            "--read-only"
           ];
           # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
           # consolidation, announcements and undo are for the bridge.
