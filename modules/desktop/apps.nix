@@ -10,6 +10,9 @@
           home.packages = with pkgs; [
             discord
             obsidian
+            # The agent behind Obsidian's Copilot plugin (its own download is a generic Linux binary): Copilot's
+            # OpenCode setting points at this one, with nabu's models as a custom provider.
+            opencode
             telegram-desktop
             mpv
             pavucontrol
