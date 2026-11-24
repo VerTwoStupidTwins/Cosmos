@@ -43,6 +43,9 @@ in
           );
           inherit (model) checkEndpoint;
         }
+        # Listed in /v1/models as context_length, for clients that size their prompts by it (OpenCode compacts
+        # before it runs out; without it, it guesses).
+        // lib.optionalAttrs (model.context != null) { capabilities.context = model.context; }
         // lib.optionalAttrs (model.aliases != [ ]) { inherit (model) aliases; }
         # Each setting with a trailing "?", which makes it a default: a request that sets it keeps its own value.
         // lib.optionalAttrs (model.requestDefaults != { }) {
@@ -77,87 +80,111 @@ in
           default = { };
           description = "The models llama-swap serves, by the name clients ask for.";
           type = lib.types.attrsOf (
-            lib.types.submodule {
-              options = {
-                backend = lib.mkOption {
-                  type = lib.types.nullOr (lib.types.enum (lib.attrNames config.llama.backends));
-                  default = null;
-                  example = "cuda";
-                  description = "The llama.cpp backend it runs on, from llama.backends. Either this or command.";
-                };
+            lib.types.submodule (
+              submodule:
+              let
+                model = submodule.config;
+              in
+              {
+                options = {
+                  backend = lib.mkOption {
+                    type = lib.types.nullOr (lib.types.enum (lib.attrNames config.llama.backends));
+                    default = null;
+                    example = "cuda";
+                    description = "The llama.cpp backend it runs on, from llama.backends. Either this or command.";
+                  };
 
-                args = lib.mkOption {
-                  type = lib.types.listOf lib.types.str;
-                  default = [ ];
-                  description = "llama-server's flags, apart from the address and port, which llama-swap chooses.";
-                };
+                  args = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                    description = "llama-server's flags, apart from the address and port, which llama-swap chooses.";
+                  };
 
-                command = lib.mkOption {
-                  type = lib.types.nullOr lib.types.str;
-                  default = null;
-                  example = "whisper-server --host 127.0.0.1 --port \${PORT} -m ggml-large-v3-turbo-q8_0.bin";
-                  description = ''
-                    A program to run instead of llama-server, for a model llama.cpp doesn't serve. It must listen on
-                    127.0.0.1 at the port llama-swap puts in its place of ''${PORT}. Either this or backend.
-                  '';
-                };
+                  command = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    example = "whisper-server --host 127.0.0.1 --port \${PORT} -m ggml-large-v3-turbo-q8_0.bin";
+                    description = ''
+                      A program to run instead of llama-server, for a model llama.cpp doesn't serve. It must listen on
+                      127.0.0.1 at the port llama-swap puts in its place of ''${PORT}. Either this or backend.
+                    '';
+                  };
 
-                units = lib.mkOption {
-                  type = lib.types.listOf lib.types.str;
-                  default = [ ];
-                  description = ''
-                    For a command: the systemd units its cards need, as a backend's units. A llama.cpp model takes
-                    its backend's.
-                  '';
-                };
+                  units = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                    description = ''
+                      For a command: the systemd units its cards need, as a backend's units. A llama.cpp model takes
+                      its backend's.
+                    '';
+                  };
 
-                path = lib.mkOption {
-                  type = lib.types.listOf lib.types.package;
-                  default = [ ];
-                  description = "Programs its command calls, added to llama-swap's PATH.";
-                };
+                  path = lib.mkOption {
+                    type = lib.types.listOf lib.types.package;
+                    default = [ ];
+                    description = "Programs its command calls, added to llama-swap's PATH.";
+                  };
 
-                checkEndpoint = lib.mkOption {
-                  type = lib.types.str;
-                  default = "/health";
-                  description = "What llama-swap polls until it answers, to know the model has loaded.";
-                };
+                  checkEndpoint = lib.mkOption {
+                    type = lib.types.str;
+                    default = "/health";
+                    description = "What llama-swap polls until it answers, to know the model has loaded.";
+                  };
 
-                env = lib.mkOption {
-                  type = lib.types.attrsOf lib.types.str;
-                  default = { };
-                  description = "Environment on top of the backend's own.";
-                };
+                  env = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.str;
+                    default = { };
+                    description = "Environment on top of the backend's own.";
+                  };
 
-                aliases = lib.mkOption {
-                  type = lib.types.listOf lib.types.str;
-                  default = [ ];
-                  description = "Other names clients can ask for it by.";
-                };
+                  aliases = lib.mkOption {
+                    type = lib.types.listOf lib.types.str;
+                    default = [ ];
+                    description = "Other names clients can ask for it by.";
+                  };
 
-                requestDefaults = lib.mkOption {
-                  type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
-                  default = { };
-                  example = lib.literalExpression ''
-                    {
-                      main.temperature = 1.0;
-                      helper = { temperature = 0.3; chat_template_kwargs.enable_thinking = false; };
-                    }
-                  '';
-                  description = ''
-                    Request settings by the name a client asks for, applied when the request doesn't carry them.
-                    One loaded model can then act differently under each name. A name other than the model's own
-                    becomes another name for it, so it isn't listed in aliases as well.
-                  '';
-                };
+                  context = lib.mkOption {
+                    type = lib.types.nullOr lib.types.ints.positive;
+                    # The "-c N" among its llama-server flags: with --kv-unified one request can use all of it.
+                    default =
+                      let
+                        sizes = lib.concatMap (
+                          arg:
+                          let
+                            m = builtins.match "-c ([0-9]+)" arg;
+                          in
+                          lib.optional (m != null) (lib.toInt (lib.head m))
+                        ) model.args;
+                      in
+                      if sizes == [ ] then null else lib.last sizes;
+                    defaultText = lib.literalMD "the `-c` value in `args`, if any";
+                    description = "The longest prompt plus answer it takes, in tokens, as told to clients.";
+                  };
 
-                preload = lib.mkOption {
-                  type = lib.types.bool;
-                  default = true;
-                  description = "Load it when llama-swap starts, so the first request doesn't wait for it to load.";
+                  requestDefaults = lib.mkOption {
+                    type = lib.types.attrsOf (lib.types.attrsOf lib.types.anything);
+                    default = { };
+                    example = lib.literalExpression ''
+                      {
+                        main.temperature = 1.0;
+                        helper = { temperature = 0.3; chat_template_kwargs.enable_thinking = false; };
+                      }
+                    '';
+                    description = ''
+                      Request settings by the name a client asks for, applied when the request doesn't carry them.
+                      One loaded model can then act differently under each name. A name other than the model's own
+                      becomes another name for it, so it isn't listed in aliases as well.
+                    '';
+                  };
+
+                  preload = lib.mkOption {
+                    type = lib.types.bool;
+                    default = true;
+                    description = "Load it when llama-swap starts, so the first request doesn't wait for it to load.";
+                  };
                 };
-              };
-            }
+              }
+            )
           );
         };
       };
