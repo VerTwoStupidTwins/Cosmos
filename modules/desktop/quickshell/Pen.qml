@@ -11,7 +11,7 @@ import Quickshell.Io
 Singleton {
     id: root
 
-    readonly property bool available: Config.convertible && Config.rnote !== ""
+    readonly property bool available: Config.convertible && Config.evtest !== ""
     property bool out: false
     property bool menu: false
     // 0–100, or -1 while the pen isn't reporting.
@@ -35,7 +35,7 @@ Singleton {
     }
     // A blank drawing, named and laid out the way the Excalidraw plugin makes them (uncompressed;
     // the plugin compresses it on its first save), then opened in Obsidian, which shows it in the
-    // Excalidraw view. Falls back to Rnote when the vault isn't there.
+    // Excalidraw view. Does nothing when the vault isn't there.
     function note() {
         menu = false;
         const name = "Drawing " + Qt.formatDateTime(new Date(), "yyyy-MM-dd HH.mm.ss") + ".excalidraw.md";
@@ -44,14 +44,14 @@ Singleton {
             + "&file=" + encodeURIComponent(path);
         Quickshell.execDetached({
             command: [Config.bash, "-c",
-                'if [ ! -d "$VAULT/.obsidian" ]; then exec "$RUN" --user --scope --collect --quiet --slice=app.slice -- "$RNOTE"; fi\n'
+                '[ -d "$VAULT/.obsidian" ] || exit 1\n'
                 + 'mkdir -p "$(dirname "$VAULT/$FILE")" && [ ! -e "$VAULT/$FILE" ] && printf "%s" "$CONTENT" > "$VAULT/$FILE" || exit 1\n'
                 // Gives Obsidian's vault watcher a moment to see the new file.
                 + 'sleep 0.5\n'
                 + 'exec "$RUN" --user --scope --collect --quiet --slice=app.slice -- "$XDGOPEN" "$URI"'],
             environment: {
                 VAULT: root.vault, FILE: path, URI: uri, CONTENT: root.blankDrawing(),
-                RUN: Config.systemdRun, XDGOPEN: Config.xdgOpen, RNOTE: Config.rnote
+                RUN: Config.systemdRun, XDGOPEN: Config.xdgOpen
             }
         });
     }
@@ -66,9 +66,6 @@ Singleton {
         return ["---", "", "excalidraw-plugin: parsed", "tags: [excalidraw]", "", "---",
             "==⚠  Switch to EXCALIDRAW VIEW in the MORE OPTIONS menu of this document. ⚠==", "", "",
             "## Drawing", "```json", JSON.stringify(scene), "```", "%%", ""].join("\n");
-    }
-    function sketch() {
-        launch([Config.rnote]);
     }
     function paint() {
         launch(["krita"]);

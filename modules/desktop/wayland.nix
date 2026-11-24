@@ -194,8 +194,6 @@
                   readonly property string evtest: "${lib.optionalString convertible (lib.getExe pkgs.evtest)}"
                   readonly property string iioNiri: "${lib.optionalString convertible (lib.getExe pkgs.iio-niri)}"
                   readonly property string wvkbd: "${lib.optionalString convertible (lib.getExe' pkgs.wvkbd "wvkbd-mobintl")}"
-                  // The pen menu's note app (Pen.qml).
-                  readonly property string rnote: "${lib.optionalString convertible (lib.getExe' pkgs.rnote "rnote")}"
                   readonly property string grim: "${lib.getExe pkgs.grim}"
               }
               QML

@@ -12,9 +12,6 @@
       # which iio-sensor-proxy uses to pick the screen's.
       hardware.sensor.iio.enable = true;
 
-      # Handwriting and sketching for the pen, opened from the bar's pen menu (and the launcher).
-      environment.systemPackages = [ pkgs.rnote ];
-
       # The tablet-mode switch, and the pen garage where there is one, at fixed paths the logged-in
       # user can read: the bar watches both with evtest (Tablet.qml, Pen.qml).
       # Its own file, numbered before 73-seat-late.rules, which is where uaccess tags take effect;
