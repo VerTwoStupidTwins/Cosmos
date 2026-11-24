@@ -5,10 +5,10 @@ in
 {
   # The homelab's infrastructure server: it watches every host (metrics, logs, dashboards, alerts to the phone through
   # ntfy), runs the homelab's Matrix server and its agent (with its memory's Qdrant), and builds for the others and keeps
-  # their builds in the binary cache. Game streaming from the
-  # B580 and modded Minecraft and Foundry VTT servers come later, all over NetBird.
+  # their builds in the binary cache. For play: game streaming from the B580 (Wolf) and Foundry VTT, with modded
+  # Minecraft servers to come, all over NetBird.
   hosts.lugh = {
-    topology.self.hardware.info = "AMD Ryzen 9 5900X, 64 GB, Arc B580; infrastructure server";
+    topology.self.hardware.info = "AMD Ryzen 9 5900X, 128 GB, Arc B580; infrastructure server";
     imports = [
       nixos.systemd-boot
       nixos.server
@@ -19,6 +19,7 @@ in
       nixos.homepage
       nixos.forgejo
       nixos.foundry
+      nixos.wolf
       nixos.notes
       nixos.cache-push
       # Its own cache too: a build nh's cleanup collected comes back as a download, not a rebuild.
