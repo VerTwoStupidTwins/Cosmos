@@ -146,7 +146,7 @@ impl Qdrant {
                     "id": p.id,
                     "vector": { "text": dense, "words": { "indices": indices, "values": values } },
                     "payload": { "type": p.kind_of, "kind": p.kind, "status": p.status, "core": p.core, "room": p.room,
-                                 "at": p.created_at() },
+                                 "at": p.created_at(), "tags": p.tags },
                 })
             })
             .collect();

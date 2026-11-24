@@ -21,7 +21,8 @@ export type Change = {
 	thread_of: string | null;
 };
 
-export type Exchange = { room: string; event: string; message: string; previous?: string; answer: string };
+// tags: labels for the conversation it was in ("campaign" for a campaign chat), which items made from it carry too.
+export type Exchange = { room: string; event: string; message: string; previous?: string; answer: string; tags?: string[] };
 
 // The section is rendered before every request; Pi sends it again only when its text changed. When the server can't
 // be reached, the last text stands, so a hiccup doesn't change the prompt.

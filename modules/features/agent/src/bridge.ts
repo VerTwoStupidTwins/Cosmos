@@ -120,7 +120,9 @@ const CHAT_CAMPAIGN = [
 	"anything players see. New material goes in as drafts with campaign__create (it lands in the inbox); changing or",
 	"moving an existing note (campaign__edit, campaign__move) waits for the owner's approval, so propose it and say",
 	"why. You also have their personal notes (notes__) and memory: an idea from either may fit the other, and you may",
-	"say so. Be a creative partner: offer options, ask what they want, build on their ideas rather than replacing them.",
+	"say so. When you remember something from this chat, tag it \"campaign\" and the campaign's name (memory shows each",
+	"item's tags, so you can tell where an idea came from). Be a creative partner: offer options, ask what they want,",
+	"build on their ideas rather than replacing them.",
 	"When the talk leaves the campaign, call hand_back with a short reason and tell the owner in one line.",
 ].join(" ");
 const handOffPrompt = (reason: string, to: string) =>
@@ -694,6 +696,7 @@ export class Bridge {
 				const key = memoryKey(owed);
 				const exchange: Exchange = { room: key, event: owed.event, message: owed.text ?? "", answer: markdown };
 				if (owed.previous !== undefined) exchange.previous = owed.previous;
+				if (owed.chat !== undefined && this.#state.chats[owed.chat]?.model === CAMPAIGN_MODE) exchange.tags = [CAMPAIGN_MODE];
 				const at = Date.now(); // one value for the stored state and the copy in memory
 				// A chat whose answer came with a hand_off moves to workhorse in the commit that settles it, with a run
 				// that picks up the work; one whose answer came with a hand_back moves to main, which answers the next

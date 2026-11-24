@@ -119,6 +119,8 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
         return Ok(json!({ "exchanges": 0, "topics": [], "changes": 0 }));
     };
     let ids: Vec<i64> = exchanges.iter().map(|e| e.id).collect();
+    // The conversation's labels (a campaign chat's "campaign"), which items it gives rise to carry too.
+    let session_tags: Vec<String> = exchanges.iter().flat_map(|e| e.tags.iter().cloned()).collect::<BTreeSet<_>>().into_iter().collect();
 
     // The kept items nearest to each exchange, so the helper updates instead of repeating them.
     let items_only = json!({ "must": [{ "key": "type", "match": { "value": "item" } }] });
@@ -187,7 +189,7 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
         for c in &kept {
             match c.update {
                 None => {
-                    Store::create_item(&tx, &c.kind, &c.content, c.status.as_deref(), false, &c.links, Some(room), "session")?;
+                    Store::create_item(&tx, &c.kind, &c.content, c.status.as_deref(), false, &c.links, &session_tags, Some(room), "session")?;
                     written += 1;
                 }
                 Some(id) => {
@@ -202,6 +204,7 @@ pub async fn run(app: &App, room: &str) -> Result<Value> {
                         core: None,
                         content: Some(c.content.clone()),
                         links: Some(links),
+                        tags: None,
                     };
                     if Store::update_item(&tx, id, &patch, "session", None)?.is_some() {
                         written += 1;

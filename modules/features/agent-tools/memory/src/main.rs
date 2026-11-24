@@ -166,7 +166,7 @@ impl App {
 
 fn hit_json(p: &Point, score: Option<f64>) -> Value {
     json!({
-        "id": p.id, "type": p.kind_of, "kind": p.kind, "status": p.status, "core": p.core, "date": p.date(),
+        "id": p.id, "type": p.kind_of, "kind": p.kind, "status": p.status, "core": p.core, "date": p.date(), "tags": p.tags,
         "content": clip(&p.content, 800), "score": score.map(|s| (s * 1000.0).round() / 1000.0),
     })
 }
@@ -275,6 +275,10 @@ struct RememberRequest {
     /// Numbers of related items.
     #[serde(default)]
     links: Vec<i64>,
+    /// Where it comes from, when that's a part of the owner's life with its own label: "campaign" and the campaign's
+    /// name for D&D campaign ideas. Leave empty otherwise.
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -287,6 +291,8 @@ struct UpdateRequest {
     core: Option<bool>,
     /// Replaces the item's links.
     links: Option<Vec<i64>>,
+    /// Replaces the item's tags.
+    tags: Option<Vec<String>>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -305,6 +311,9 @@ struct ExchangeRequest {
     message: String,
     previous: Option<String>,
     answer: String,
+    /// Labels for the conversation it was in ("campaign" in a campaign chat); items made from it get them too.
+    #[serde(default)]
+    tags: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -393,7 +402,7 @@ impl Memory {
                 }
                 let change = self
                     .app
-                    .write(|tx| Store::create_item(tx, &req.kind, &req.content, req.status.as_deref(), req.core, &req.links, None, "chat"))
+                    .write(|tx| Store::create_item(tx, &req.kind, &req.content, req.status.as_deref(), req.core, &req.links, &req.tags, None, "chat"))
                     .await?;
                 self.app.change_json(change).await
             }
@@ -406,7 +415,7 @@ impl Memory {
     async fn update(&self, Parameters(req): Parameters<UpdateRequest>) -> CallToolResult {
         or_error(
             async {
-                let patch = Patch { kind: req.kind, status: req.status, core: req.core, content: req.content, links: req.links };
+                let patch = Patch { kind: req.kind, status: req.status, core: req.core, content: req.content, links: req.links, tags: req.tags };
                 match self.app.write(|tx| Store::update_item(tx, req.id, &patch, "chat", None)).await? {
                     Some(change) => self.app.change_json(change).await,
                     None => Ok(json!({ "unchanged": req.id })),
@@ -511,7 +520,7 @@ impl Memory {
                     content.push_str(&format!("(Before that, the owner said: {})\n", clip(prev, 300)));
                 }
                 content.push_str(&format!("Owner: {}\nAssistant: {}", clip(&req.message, 3000), clip(&req.answer, 2500)));
-                let (id, new) = self.app.store.lock().await.add_exchange(&req.room, &req.event, &content, None)?;
+                let (id, new) = self.app.store.lock().await.add_exchange(&req.room, &req.event, &content, &req.tags, None)?;
                 if let Err(e) = self.app.index_pending().await {
                     eprintln!("memory: indexing an exchange failed (retried later): {e:#}");
                 }

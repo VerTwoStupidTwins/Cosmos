@@ -62,6 +62,8 @@ pub struct Point {
     pub content: String,
     pub room: Option<String>,
     pub links: Vec<i64>,
+    /// Labels such as where it came from ("campaign"), so an idea from one part of the owner's life shows its origin.
+    pub tags: Vec<String>,
     pub created: String,
     pub updated: String,
     #[serde(skip)]
@@ -78,11 +80,11 @@ impl Point {
     /// The fields a change records before and after.
     fn snapshot(&self) -> Value {
         json!({ "kind": self.kind, "status": self.status, "core": self.core, "content": self.content,
-                "links": self.links, "retracted": self.retracted })
+                "links": self.links, "retracted": self.retracted, "tags": self.tags })
     }
 }
 
-const POINT_FIELDS: &str = "id, type, kind, status, core, retracted, content, room, links, created, updated, version";
+const POINT_FIELDS: &str = "id, type, kind, status, core, retracted, content, room, links, created, updated, version, tags";
 
 fn row_point(r: &Row) -> rusqlite::Result<Point> {
     let links: String = r.get(8)?;
@@ -99,6 +101,7 @@ fn row_point(r: &Row) -> rusqlite::Result<Point> {
         created: r.get(9)?,
         updated: r.get(10)?,
         version: r.get(11)?,
+        tags: serde_json::from_str(&r.get::<_, String>(12)?).unwrap_or_default(),
     })
 }
 
@@ -126,10 +129,29 @@ pub struct Patch {
     pub core: Option<bool>,
     pub content: Option<String>,
     pub links: Option<Vec<i64>>,
+    pub tags: Option<Vec<String>>,
 }
 
 pub fn now() -> String {
     Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+/// Tags as stored: trimmed, lower case, spaces as dashes, each once, at most eight of up to 40 characters.
+pub fn clean_tags(tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tags {
+        let t: String = t.trim().trim_start_matches('#').to_lowercase().split_whitespace().collect::<Vec<_>>().join("-");
+        let t: String = t.chars().take(40).collect();
+        if !t.is_empty() && !out.contains(&t) && out.len() < 8 {
+            out.push(t);
+        }
+    }
+    out
+}
+
+fn tag_text(after: &Value) -> String {
+    let tags: Vec<&str> = after["tags"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if tags.is_empty() { String::new() } else { format!(" [{}]", tags.join(", ")) }
 }
 
 fn status_word(status: &str) -> String {
@@ -142,11 +164,12 @@ pub fn notice_text(action: &str, item: i64, before: Option<&Value>, after: &Valu
     let content = after["content"].as_str().unwrap_or("");
     let status = after["status"].as_str().map(|s| format!(" ({})", status_word(s))).unwrap_or_default();
     let core = if after["core"] == json!(true) { " ⭐" } else { "" };
+    let tags = tag_text(after);
     let prefix = if undo { "↩ Undone. " } else { "" };
     match action {
-        "create" => format!("{prefix}🧠 New {kind} #{item}{status}{core}: {content}"),
+        "create" => format!("{prefix}🧠 New {kind} #{item}{status}{core}{tags}: {content}"),
         "retract" => format!("{prefix}🗑 Retracted {kind} #{item}: {content}"),
-        "restore" => format!("{prefix}♻ Restored {kind} #{item}{status}{core}: {content}"),
+        "restore" => format!("{prefix}♻ Restored {kind} #{item}{status}{core}{tags}: {content}"),
         _ => {
             let before = before.cloned().unwrap_or(Value::Null);
             let mut what = Vec::new();
@@ -165,6 +188,9 @@ pub fn notice_text(action: &str, item: i64, before: Option<&Value>, after: &Valu
                 let links: Vec<String> =
                     after["links"].as_array().into_iter().flatten().map(|l| format!("#{l}")).collect();
                 what.push(format!("linked to {}", if links.is_empty() { "nothing".into() } else { links.join(", ") }));
+            }
+            if before["tags"] != after["tags"] && !(before["tags"].is_null() && after["tags"] == json!([])) {
+                what.push(if tags.is_empty() { "no tags".into() } else { format!("tagged{tags}") });
             }
             let what = if what.is_empty() { String::new() } else { format!(" ({})", what.join("; ")) };
             format!("{prefix}🧠 Updated {kind} #{item}{what}: {content}")
@@ -188,6 +214,9 @@ impl Store {
         };
         if !has("nudged")? {
             db.execute_batch("ALTER TABLE points ADD COLUMN nudged TEXT")?;
+        }
+        if !has("tags")? {
+            db.execute_batch("ALTER TABLE points ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")?;
         }
         Ok(Store { db })
     }
@@ -256,7 +285,7 @@ impl Store {
     // ---- exchanges, topics and consolidation
 
     /// Stores one exchange; the same Matrix event again returns the first one's id.
-    pub fn add_exchange(&mut self, room: &str, event: &str, content: &str, at: Option<&str>) -> Result<(i64, bool)> {
+    pub fn add_exchange(&mut self, room: &str, event: &str, content: &str, tags: &[String], at: Option<&str>) -> Result<(i64, bool)> {
         let existing: Option<i64> = self
             .db
             .query_row("SELECT id FROM points WHERE type = 'exchange' AND source_event = ?1", [event], |r| r.get(0))
@@ -266,8 +295,8 @@ impl Store {
         }
         let at = at.map(str::to_string).unwrap_or_else(now);
         self.db.execute(
-            "INSERT INTO points (type, content, room, source_event, created, updated) VALUES ('exchange', ?1, ?2, ?3, ?4, ?4)",
-            params![content, room, event, at],
+            "INSERT INTO points (type, content, room, source_event, tags, created, updated) VALUES ('exchange', ?1, ?2, ?3, ?5, ?4, ?4)",
+            params![content, room, event, at, serde_json::to_string(&clean_tags(tags))?],
         )?;
         Ok((self.db.last_insert_rowid(), true))
     }
@@ -351,6 +380,7 @@ impl Store {
         status: Option<&str>,
         core: bool,
         links: &[i64],
+        tags: &[String],
         room: Option<&str>,
         origin: &str,
     ) -> Result<i64> {
@@ -361,9 +391,9 @@ impl Store {
         let status = Self::check(kind, status)?;
         let at = now();
         tx.execute(
-            "INSERT INTO points (type, kind, status, core, content, room, links, created, updated)
-             VALUES ('item', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
-            params![kind, status, core, content, room, serde_json::to_string(links)?, at],
+            "INSERT INTO points (type, kind, status, core, content, room, links, tags, created, updated)
+             VALUES ('item', ?1, ?2, ?3, ?4, ?5, ?6, ?8, ?7, ?7)",
+            params![kind, status, core, content, room, serde_json::to_string(links)?, at, serde_json::to_string(&clean_tags(tags))?],
         )?;
         let id = tx.last_insert_rowid();
         let after = Self::get_in(tx, id)?.context("vanished")?.snapshot();
@@ -382,11 +412,12 @@ impl Store {
         let content = patch.content.as_deref().map(str::trim).filter(|c| !c.is_empty()).unwrap_or(&point.content).to_string();
         let core = patch.core.unwrap_or(point.core);
         let links = patch.links.clone().unwrap_or(point.links.clone());
+        let tags = patch.tags.as_deref().map(clean_tags).unwrap_or(point.tags.clone());
         let before = point.snapshot();
         tx.execute(
-            "UPDATE points SET kind = ?1, status = ?2, core = ?3, content = ?4, links = ?5, updated = ?6, indexed = NULL, version = version + 1
-             WHERE id = ?7",
-            params![kind, status, core, content, serde_json::to_string(&links)?, now(), id],
+            "UPDATE points SET kind = ?1, status = ?2, core = ?3, content = ?4, links = ?5, updated = ?6, tags = ?8, indexed = NULL,
+             version = version + 1 WHERE id = ?7",
+            params![kind, status, core, content, serde_json::to_string(&links)?, now(), id, serde_json::to_string(&tags)?],
         )?;
         let after = Self::get_in(tx, id)?.context("vanished")?.snapshot();
         if after == before {
@@ -433,6 +464,7 @@ impl Store {
                     core: b["core"].as_bool(),
                     content: b["content"].as_str().map(Into::into),
                     links: serde_json::from_value(b["links"].clone()).ok(),
+                    tags: serde_json::from_value(b["tags"].clone()).ok(),
                 };
                 Self::update_item(&tx, item, &patch, "undo", Some(change))?.context("nothing to undo: it is already as it was")?
             }
@@ -589,7 +621,7 @@ mod tests {
     fn create_update_undo() {
         let mut s = store();
         let tx = s.transaction().unwrap();
-        let c1 = Store::create_item(&tx, "idea", "Separate ducts per P100.", None, false, &[], None, "test").unwrap();
+        let c1 = Store::create_item(&tx, "idea", "Separate ducts per P100.", None, false, &[], &[], None, "test").unwrap();
         tx.commit().unwrap();
         let item = s.unannounced().unwrap()[0].item;
         assert_eq!(s.get(item).unwrap().unwrap().status.as_deref(), Some("open"));
@@ -616,13 +648,54 @@ mod tests {
     }
 
     #[test]
+    fn tags_are_cleaned_shown_and_undone() {
+        let mut s = store();
+        let tx = s.transaction().unwrap();
+        let tags = vec!["Campaign".to_string(), " #Vantle ".into(), "campaign".into(), "".into(), "rib towns".into()];
+        Store::create_item(&tx, "idea", "Towns hang from the god's ribs.", None, false, &[], &tags, None, "t").unwrap();
+        tx.commit().unwrap();
+        let created = &s.unannounced().unwrap()[0];
+        let item = created.item;
+        assert_eq!(s.get(item).unwrap().unwrap().tags, vec!["campaign", "vantle", "rib-towns"]);
+        assert!(created.notice_text.contains("(open) [campaign, vantle, rib-towns]:"), "{}", created.notice_text);
+
+        let tx = s.transaction().unwrap();
+        let patch = Patch { tags: Some(vec!["campaign".into()]), ..Default::default() };
+        let change = Store::update_item(&tx, item, &patch, "t", None).unwrap().unwrap();
+        tx.commit().unwrap();
+        let updated = s.change(change).unwrap().unwrap();
+        assert!(updated.notice_text.contains("(tagged [campaign])"), "{}", updated.notice_text);
+        s.undo(change).unwrap();
+        assert_eq!(s.get(item).unwrap().unwrap().tags, vec!["campaign", "vantle", "rib-towns"]);
+
+        let (exchange, _) = s.add_exchange("chat:9", "$t", "Owner: the god\nAgent: sleeps", &["campaign".into()], None).unwrap();
+        assert_eq!(s.get(exchange).unwrap().unwrap().tags, vec!["campaign"]);
+    }
+
+    #[test]
+    fn an_older_database_gains_tags() {
+        let path = std::env::temp_dir().join(format!("memory-old-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let path = path.to_str().unwrap();
+        {
+            let db = Connection::open(path).unwrap();
+            db.execute_batch(SCHEMA).unwrap();
+            db.execute("INSERT INTO points (type, kind, status, content, created, updated) VALUES ('item', 'fact', NULL, 'old', 't', 't')", []).unwrap();
+        }
+        let s = Store::open(path).unwrap();
+        assert_eq!(s.get(1).unwrap().unwrap().tags, Vec::<String>::new());
+        drop(s);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn status_counts_per_conversation() {
         let mut s = store();
-        s.add_exchange("chat:322", "$a", "Owner: hi\nAgent: hello", None).unwrap();
-        s.add_exchange("chat:322", "$b", "Owner: ducts?\nAgent: parked", None).unwrap();
-        s.add_exchange("!agent", "$c", "Owner: x\nAgent: y", None).unwrap();
+        s.add_exchange("chat:322", "$a", "Owner: hi\nAgent: hello", &[], None).unwrap();
+        s.add_exchange("chat:322", "$b", "Owner: ducts?\nAgent: parked", &[], None).unwrap();
+        s.add_exchange("!agent", "$c", "Owner: x\nAgent: y", &[], None).unwrap();
         let tx = s.transaction().unwrap();
-        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], None, "t").unwrap();
+        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], &[], None, "t").unwrap();
         tx.commit().unwrap();
         s.db.execute("INSERT INTO consolidated (room, upto) VALUES ('chat:322', 1)", []).unwrap();
         let status = s.status(5).unwrap();
@@ -636,10 +709,10 @@ mod tests {
     fn stale_threads_once_a_month() {
         let mut s = store();
         let tx = s.transaction().unwrap();
-        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], None, "t").unwrap();
-        Store::create_item(&tx, "idea", "Fresh idea.", None, false, &[], None, "t").unwrap();
-        Store::create_item(&tx, "fact", "nabu has two P100s.", None, false, &[], None, "t").unwrap();
-        Store::create_item(&tx, "plan", "Done plan.", Some("done"), false, &[], None, "t").unwrap();
+        Store::create_item(&tx, "idea", "Per-card ducts.", Some("parked"), false, &[], &[], None, "t").unwrap();
+        Store::create_item(&tx, "idea", "Fresh idea.", None, false, &[], &[], None, "t").unwrap();
+        Store::create_item(&tx, "fact", "nabu has two P100s.", None, false, &[], &[], None, "t").unwrap();
+        Store::create_item(&tx, "plan", "Done plan.", Some("done"), false, &[], &[], None, "t").unwrap();
         tx.commit().unwrap();
         s.db.execute("UPDATE points SET updated = '2026-01-01T00:00:00Z' WHERE content != 'Fresh idea.'", []).unwrap();
         let stale = s.stale_threads(30, 30, 7).unwrap();
@@ -667,9 +740,9 @@ mod tests {
     fn statuses_only_where_they_belong() {
         let mut s = store();
         let tx = s.transaction().unwrap();
-        Store::create_item(&tx, "fact", "nabu has two P100s.", Some("open"), false, &[], None, "t").unwrap();
-        assert!(Store::create_item(&tx, "idea", "x", Some("someday"), false, &[], None, "t").is_err());
-        assert!(Store::create_item(&tx, "feeling", "x", None, false, &[], None, "t").is_err());
+        Store::create_item(&tx, "fact", "nabu has two P100s.", Some("open"), false, &[], &[], None, "t").unwrap();
+        assert!(Store::create_item(&tx, "idea", "x", Some("someday"), false, &[], &[], None, "t").is_err());
+        assert!(Store::create_item(&tx, "feeling", "x", None, false, &[], &[], None, "t").is_err());
         tx.commit().unwrap();
         assert_eq!(s.items(Some("fact"), None, None, 10).unwrap()[0].status, None);
     }
@@ -677,11 +750,11 @@ mod tests {
     #[test]
     fn exchanges_and_consolidation_ranges() {
         let mut s = store();
-        let (a, new) = s.add_exchange("!r", "$e1", "Owner: hi", None).unwrap();
+        let (a, new) = s.add_exchange("!r", "$e1", "Owner: hi", &[], None).unwrap();
         assert!(new);
-        assert_eq!(s.add_exchange("!r", "$e1", "Owner: hi", None).unwrap(), (a, false));
-        let (b, _) = s.add_exchange("!r", "$e2", "Owner: more", None).unwrap();
-        s.add_exchange("!other", "$e3", "Owner: elsewhere", None).unwrap();
+        assert_eq!(s.add_exchange("!r", "$e1", "Owner: hi", &[], None).unwrap(), (a, false));
+        let (b, _) = s.add_exchange("!r", "$e2", "Owner: more", &[], None).unwrap();
+        s.add_exchange("!other", "$e3", "Owner: elsewhere", &[], None).unwrap();
         assert_eq!(s.unconsolidated("!r", 10).unwrap().len(), 2);
         let tx = s.transaction().unwrap();
         Store::mark_consolidated(&tx, "!r", b).unwrap();
