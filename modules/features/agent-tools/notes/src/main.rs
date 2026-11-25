@@ -5,8 +5,12 @@
 //! and never leave it. Each vault keeps its own rules for how it's organised in a note.
 //!
 //! `notes watch` is the transcriber service: it turns each handwritten Excalidraw drawing into an inbox note.
+//!
+//! `notes index` keeps the vault's index for search by meaning in step with it (meaning.rs); with --qdrant, `serve`
+//! searches that index too.
 
 mod library;
+mod meaning;
 mod note;
 mod transcribe;
 mod write;
@@ -47,6 +51,13 @@ enum Command {
         /// Read only: no create, edit or move tools.
         #[arg(long)]
         read_only: bool,
+        #[command(flatten)]
+        meaning: meaning::Config,
+    },
+    /// Keep the vault's index for search by meaning in step with it.
+    Index {
+        #[command(flatten)]
+        meaning: meaning::Config,
     },
     /// Transcribe drawings into inbox notes as they're exported.
     Watch {
@@ -70,7 +81,14 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve { inbox, read_only } => tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only)),
+        Command::Serve { inbox, read_only, meaning } => {
+            let index = meaning::Index::new(&meaning)?.map(Arc::new);
+            tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only, index))
+        }
+        Command::Index { meaning } => {
+            let index = meaning::Index::new(&meaning)?.context("--qdrant is needed")?;
+            meaning::watch(&Library { root: cli.vault }, &index)
+        }
         Command::Watch { state, api, model, prompt, request } => {
             let read = |path: &PathBuf| fs::read_to_string(path).with_context(|| format!("reading {}", path.display()));
             let model = transcribe::Http::new(api, model, read(&prompt)?, read(&request)?);
@@ -87,6 +105,8 @@ fn or_error(result: Result<Value>) -> CallToolResult {
 #[derive(Clone)]
 struct Notes {
     library: Arc<Library>,
+    /// The index for search by meaning, when there is one.
+    index: Option<Arc<meaning::Index>>,
     inbox: String,
     read_only: bool,
     // One write at a time: the model can call several tools at once, and two edits of a note mustn't interleave.
@@ -123,6 +143,19 @@ struct SearchRequest {
     #[serde(default)]
     folder: String,
     /// The most notes to return, up to 50.
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct MeaningRequest {
+    /// What you're looking for, in your own words: a question or a description ("how loud the server closet fan
+    /// was", "who wants the harbour closed"). The exact words needn't be in the note.
+    query: String,
+    /// Only search this folder (and its subfolders); "" for the whole vault.
+    #[serde(default)]
+    folder: String,
+    /// The most notes to return, up to 20.
     #[serde(default = "default_limit")]
     limit: usize,
 }
@@ -183,11 +216,25 @@ impl Notes {
         or_error(self.library.read(&req.note))
     }
 
-    /// Find notes in the vault by words (all must appear), best matches first, with the lines that match. Use it for
-    /// "what did I write about…"; then read the notes that look right. Try other words, or fewer, if nothing comes up.
+    /// Find notes in the vault by exact words (all must appear), best matches first, with the lines that match. Good
+    /// for names, tags and phrases you know are there; for a topic or a question, search_by_meaning finds notes that
+    /// put it in other words. Read the notes that look right.
     #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
     async fn search(&self, Parameters(req): Parameters<SearchRequest>) -> CallToolResult {
         or_error(self.library.search(&req.query, &req.folder, req.limit))
+    }
+
+    /// Find notes about something, however they word it: by meaning, not exact words, best first. Each comes with the
+    /// section that matched (and its other matching sections), an excerpt and a relevance from 0 to 1 (under about
+    /// 0.1 is likely unrelated). Use it first for "what did I write about…" and questions; then read the notes that
+    /// look right, and say which ones you drew on.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn search_by_meaning(&self, Parameters(req): Parameters<MeaningRequest>) -> CallToolResult {
+        let (Some(index), library) = (self.index.clone(), self.library.clone()) else {
+            return or_error(Err(anyhow::anyhow!("search by meaning isn't set up for this vault")));
+        };
+        let result = tokio::task::spawn_blocking(move || index.search(&library, &req.query, &req.folder, req.limit)).await;
+        or_error(result.map_err(anyhow::Error::from).and_then(|r| r))
     }
 
     /// Write a new note into the vault's inbox (never over an existing one). Read the vault's rules and the
@@ -218,14 +265,18 @@ impl ServerHandler for Notes {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(Implementation::new("notes", env!("CARGO_PKG_VERSION")))
             .with_instructions(
-                "An Obsidian vault: list folders, read and search notes, write new notes into its inbox, edit and \
-                 move notes. Paths are relative to the vault. Nothing is ever deleted.",
+                "An Obsidian vault: list folders, read notes, search them by words or by meaning, write new notes into \
+                 its inbox, edit and move notes. Paths are relative to the vault. Nothing is ever deleted.",
             )
     }
 }
 
-async fn serve(vault: PathBuf, inbox: String, read_only: bool) -> Result<()> {
-    let notes = Notes { library: Arc::new(Library { root: vault }), inbox, read_only, writing: Arc::default(), tool_router: Notes::tool_router() };
+async fn serve(vault: PathBuf, inbox: String, read_only: bool, index: Option<Arc<meaning::Index>>) -> Result<()> {
+    let mut tool_router = Notes::tool_router();
+    if index.is_none() {
+        tool_router.remove_route("search_by_meaning");
+    }
+    let notes = Notes { library: Arc::new(Library { root: vault }), index, inbox, read_only, writing: Arc::default(), tool_router };
     notes.serve(stdio()).await?.waiting().await?;
     Ok(())
 }

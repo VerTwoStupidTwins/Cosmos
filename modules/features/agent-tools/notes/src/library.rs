@@ -34,7 +34,7 @@ pub(crate) struct Found {
 impl Library {
     /// A path the model gave, relative to the vault, made absolute: no root, no `..`, nothing hidden, and (once
     /// symlinks are resolved) still inside the vault.
-    fn resolve(&self, rel: &str) -> Result<PathBuf> {
+    pub(crate) fn resolve(&self, rel: &str) -> Result<PathBuf> {
         let rel = rel.trim().trim_start_matches("./").trim_end_matches('/');
         let path = Path::new(rel);
         if rel.is_empty() {
@@ -261,7 +261,7 @@ pub fn inline_tags(text: &str) -> Vec<String> {
 }
 
 /// Text cut to at most `max` characters (on a character boundary), and whether it was cut.
-fn clip(text: &str, max: usize) -> (String, bool) {
+pub(crate) fn clip(text: &str, max: usize) -> (String, bool) {
     match text.char_indices().nth(max) {
         Some((i, _)) => (format!("{}…", &text[..i]), true),
         None => (text.to_string(), false),

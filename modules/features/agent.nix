@@ -175,17 +175,43 @@
         };
       };
 
+      # Search by meaning in the vaults, where the agent's Qdrant runs (memory-store.nix): each vault has a collection
+      # of its own, embedded and reranked by nabu's models, and a <collection>-index service that keeps it in step.
+      meaningSearch = config.services.qdrant.enable && config ? notes;
+      meaningArgs =
+        collection:
+        lib.optionals meaningSearch [
+          "--qdrant"
+          "http://127.0.0.1:${toString config.services.qdrant.settings.service.http_port}"
+          "--collection"
+          collection
+          "--models"
+          cfg.models.endpoint
+        ];
+      # Each vault by its collection's name.
+      indexedVaults = lib.optionalAttrs meaningSearch (
+        {
+          notes = config.notes.vault;
+        }
+        // lib.mapAttrs' (name: path: lib.nameValuePair "notes-${name}" path) config.notes.extraVaultPaths
+      );
+
       # The notes tool for one vault: reading is safe to repeat after a crash; a write might have happened, so it
       # isn't, and changing or moving an existing note waits for the owner.
       vaultTools =
-        { vault, about }:
+        {
+          vault,
+          collection,
+          about,
+        }:
         {
           command = [
             (lib.getExe config.notes.package)
             "--vault"
             vault
             "serve"
-          ];
+          ]
+          ++ meaningArgs collection;
           inherit about;
           tools = {
             create.replay = "unsafe";
@@ -450,12 +476,14 @@
           # owner's ✅ (shown as a diff). Nothing is deleted.
           agent.tools.notes = lib.mkIf (config ? notes) (vaultTools {
             vault = config.notes.vault;
+            collection = "notes";
             about = "[Notes vault: the owner's personal notes; its rules: Reference/How this vault works]";
           });
           agent.tools.campaign =
             lib.mkIf (config ? notes && config.notes.extraVaultPaths ? campaigns)
               (vaultTools {
                 vault = config.notes.extraVaultPaths.campaigns;
+                collection = "notes-campaigns";
                 about = "[Campaigns vault: the owner's D&D campaigns and worlds; its rules: AGENTS.md]";
               });
           # The same vault, read-only, for the background investigator of campaign chats.
@@ -466,7 +494,8 @@
               config.notes.extraVaultPaths.campaigns
               "serve"
               "--read-only"
-            ];
+            ]
+            ++ meaningArgs "notes-campaigns";
             about = "[Campaigns vault, read-only: the owner's D&D campaigns and worlds; its rules: AGENTS.md]";
             tools = lib.genAttrs [ "create" "edit" "move" ] (_: {
               expose = false;
@@ -629,7 +658,48 @@
             };
           };
 
-          monitor.units = [ "agent" ];
+          monitor.units = [
+            "agent"
+          ]
+          ++ map (collection: "${collection}-index") (lib.attrNames indexedVaults);
+        }
+
+        {
+          # Re-embeds a vault's notes as they change (a few seconds after a save), and at least hourly; searches catch
+          # up on anything newer themselves.
+          systemd.services = lib.mapAttrs' (
+            collection: vault:
+            lib.nameValuePair "${collection}-index" {
+              description = "Keep the search index of the vault at ${vault} in step with it";
+              wantedBy = [ "multi-user.target" ];
+              wants = [ "network-online.target" ];
+              after = [
+                "network-online.target"
+                "netbird-wt0.service"
+                "qdrant.service"
+              ];
+              serviceConfig = {
+                ExecStart = lib.escapeShellArgs (
+                  [
+                    (lib.getExe config.notes.package)
+                    "--vault"
+                    vault
+                    "index"
+                  ]
+                  ++ meaningArgs collection
+                );
+                DynamicUser = true;
+                # Reads the vault; writes only to Qdrant.
+                SupplementaryGroups = [ "notes" ];
+                LoadCredential = [ "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}" ];
+                ProtectHome = true;
+                PrivateTmp = true;
+                NoNewPrivileges = true;
+                Restart = "always";
+                RestartSec = 30;
+              };
+            }
+          ) indexedVaults;
         }
 
         {
