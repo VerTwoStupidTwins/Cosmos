@@ -1,7 +1,8 @@
 # modules/desktop/files.nix
 # Files on the desktop: Thunar, with gvfs for the trash, network shares and phones, udisks2 and
 # udiskie so USB drives mount on their own (a notification says so, and the bar's DRV plate lists
-# them), tumbler for thumbnails, and File Roller behind Thunar's "Extract here".
+# them), tumbler for thumbnails, File Roller behind Thunar's "Extract here", and Loupe for viewing
+# images (GTK4, so it follows the theme, with pinch-zoom and swipe on the touchscreen).
 {
   flake.modules.nixos.desktop =
     { pkgs, ... }:
@@ -22,9 +23,12 @@
 
       home-manager.sharedModules = [
         (
-          { pkgs, ... }:
+          { pkgs, lib, ... }:
           {
-            home.packages = [ pkgs.file-roller ];
+            home.packages = [
+              pkgs.file-roller
+              pkgs.loupe
+            ];
 
             # Mounts drives as they're plugged in, under /run/media/twins; the bar's DRV plate
             # unmounts and ejects them.
@@ -46,7 +50,21 @@
                 "x-scheme-handler/tg" = "org.telegram.desktop.desktop";
                 "x-scheme-handler/tonsite" = "org.telegram.desktop.desktop";
                 "x-scheme-handler/ton" = "org.telegram.desktop.desktop";
-              };
+              }
+              # Images open in Loupe rather than Krita, which had claimed PNGs; Krita stays under "Open with".
+              // lib.genAttrs [
+                "image/png"
+                "image/jpeg"
+                "image/webp"
+                "image/gif"
+                "image/apng"
+                "image/avif"
+                "image/heic"
+                "image/jxl"
+                "image/bmp"
+                "image/tiff"
+                "image/svg+xml"
+              ] (_: "org.gnome.Loupe.desktop");
             };
           }
         )
