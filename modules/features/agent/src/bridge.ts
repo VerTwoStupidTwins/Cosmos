@@ -202,12 +202,18 @@ const divePrompt = (question: string, context: string) =>
 // The investigator's findings, as the campaign chat's model gets them.
 const diveFindings = (question: string, findings: string) =>
 	`[The investigation you started has finished. Question: ${question}]\n\n${findings}\n\n[The owner sees these findings in full above your reply. In a few lines, say what stands out and how it could shape the story, then carry on the conversation.]`;
-const handOffPrompt = (reason: string, to: string) =>
-	to === CAMPAIGN_MODE
-		? `[main switched this chat to campaign mode because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
-		: to === PICTURE_MODE
-			? `[main switched this chat to picture mode because: ${reason}. Pick up the owner's last request: draw it.]`
-			: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
+// `request`: the owner's message main answered with the hand-off, quoted so the model taking over acts on it (left to
+// find it in the history, main in picture mode answered "let me know what they want").
+const handOffPrompt = (reason: string, to: string, request?: string) => {
+	const quoted = request?.trim() ? `\n\nThe owner's request, word for word:\n> ${request.trim().replace(/\n/g, "\n> ")}` : "";
+	const lead =
+		to === CAMPAIGN_MODE
+			? `[main switched this chat to campaign mode because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
+			: to === PICTURE_MODE
+				? `[main switched this chat to picture mode because: ${reason}. Draw the owner's request now: write the prompt from it and call draw, then answer as your instructions say.]`
+				: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
+	return lead + quoted;
+};
 
 type BridgeState = {
 	since: string | null;
@@ -812,7 +818,7 @@ export class Bridge {
 						if (reason === undefined || !conversation || !target) return undefined;
 						const entry = { kind: "cosmos.handoff", data: { reason, model: target } };
 						const admitted = next
-							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason, target), requestId: next.event, entry })
+							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason, target, owed.text), requestId: next.event, entry })
 							: await conversation.submit(tx, { type: "write", entry });
 						await configure(tx, conversation.id, this.#chatAgent(target, chat?.dark));
 						return admitted;
