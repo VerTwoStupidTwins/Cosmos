@@ -200,12 +200,14 @@
       );
 
       # The notes tool for one vault: reading is safe to repeat after a crash; a write might have happened, so it
-      # isn't, and changing or moving an existing note waits for the owner.
+      # isn't, and changing or moving an existing note waits for the owner. With filing, it also files the inbox notes
+      # the owner accepted and deletes the ones they rejected: their review mark is the approval.
       vaultTools =
         {
           vault,
           collection,
           about,
+          filing ? false,
         }:
         {
           command = [
@@ -214,6 +216,7 @@
             vault
             "serve"
           ]
+          ++ lib.optional filing "--filing"
           ++ meaningArgs collection;
           inherit about;
           tools = {
@@ -226,6 +229,10 @@
               replay = "unsafe";
               approval = true;
             };
+          }
+          // lib.optionalAttrs filing {
+            file_note.replay = "unsafe";
+            discard_note.replay = "unsafe";
           };
         };
     in
@@ -480,6 +487,7 @@
           agent.tools.notes = lib.mkIf (config ? notes) (vaultTools {
             vault = config.notes.vault;
             collection = "notes";
+            filing = true;
             about = "[Notes vault: the owner's personal notes; its rules: Reference/How this vault works]";
           });
           agent.tools.campaign =

@@ -100,7 +100,7 @@ impl Library {
     }
 
     /// Where the note called `name` (any case) is, if there is one.
-    fn named(&self, name: &str) -> Result<Option<String>> {
+    pub(crate) fn named(&self, name: &str) -> Result<Option<String>> {
         let wanted = format!("{}.md", name.to_lowercase());
         Ok(self
             .notes_under(&self.root)?
@@ -111,7 +111,7 @@ impl Library {
 
     /// A path for a file that may not exist yet: relative, nothing hidden, and none of the folders on the way a
     /// symlink (so it can't lead out of the vault).
-    fn new_path(&self, rel: &str) -> Result<PathBuf> {
+    pub(crate) fn new_path(&self, rel: &str) -> Result<PathBuf> {
         let rel = rel.trim().trim_start_matches("./");
         let path = Path::new(rel);
         if rel.is_empty() || !rel.ends_with(".md") {
@@ -136,7 +136,7 @@ impl Library {
 }
 
 /// A note's name, checked: what's left once ".md" is taken off, with nothing Obsidian can't use in a name.
-fn note_name(name: &str) -> Result<String> {
+pub(crate) fn note_name(name: &str) -> Result<String> {
     let name = name.trim().trim_end_matches(".md").trim();
     if name.is_empty() || name.starts_with('.') || name.contains(BAD_NAME) {
         bail!(
@@ -178,7 +178,7 @@ fn temp_beside(path: &Path, content: &str) -> Result<PathBuf> {
 }
 
 /// Writes a new file, never over an existing one.
-fn write_new(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_new(path: &Path, content: &str) -> Result<()> {
     fs::create_dir_all(path.parent().context("no folder")?)?;
     let temp = temp_beside(path, content)?;
     // A hard link fails if the name is taken, so a note that appeared meanwhile isn't overwritten.
@@ -188,7 +188,7 @@ fn write_new(path: &Path, content: &str) -> Result<()> {
 }
 
 /// Replaces an existing file's content in one step.
-fn replace(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn replace(path: &Path, content: &str) -> Result<()> {
     let temp = temp_beside(path, content)?;
     fs::rename(&temp, path).with_context(|| format!("replacing {}", path.display()))
 }

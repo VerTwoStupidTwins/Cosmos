@@ -1,7 +1,8 @@
 //! The owner's Obsidian vaults on lugh (under /var/lib/notes, kept in step by Obsidian Sync, notes.nix).
 //!
 //! `notes serve` is the agent's note tools for one vault, an MCP server over stdio: list, read and search, and
-//! (unless --read-only) create in the inbox, edit and move, never delete (write.rs). Paths are relative to the vault
+//! (unless --read-only) create in the inbox, edit and move, never delete (write.rs). With --filing, also file the inbox
+//! notes the owner accepted and delete the ones they rejected (inbox.rs). Paths are relative to the vault
 //! and never leave it. Each vault keeps its own rules for how it's organised in a note.
 //!
 //! `notes watch` is the transcriber service: it turns each handwritten Excalidraw drawing into an inbox note.
@@ -9,6 +10,7 @@
 //! `notes index` keeps the vault's index for search by meaning in step with it (meaning.rs); with --qdrant, `serve`
 //! searches that index too.
 
+mod inbox;
 mod library;
 mod meaning;
 mod note;
@@ -51,6 +53,12 @@ enum Command {
         /// Read only: no create, edit or move tools.
         #[arg(long)]
         read_only: bool,
+        /// File reviewed inbox notes: the file_note and discard_note tools.
+        #[arg(long)]
+        filing: bool,
+        /// Where filed notes' to-dos go, relative to the vault.
+        #[arg(long, default_value = "Reference/Tasks.md")]
+        tasks_note: String,
         #[command(flatten)]
         meaning: meaning::Config,
     },
@@ -81,9 +89,10 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve { inbox, read_only, meaning } => {
+        Command::Serve { inbox, read_only, filing, tasks_note, meaning } => {
             let index = meaning::Index::new(&meaning)?.map(Arc::new);
-            tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only, index))
+            let filing = (filing && !read_only).then_some(tasks_note);
+            tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only, filing, index))
         }
         Command::Index { meaning } => {
             let index = meaning::Index::new(&meaning)?.context("--qdrant is needed")?;
@@ -109,6 +118,8 @@ struct Notes {
     index: Option<Arc<meaning::Index>>,
     inbox: String,
     read_only: bool,
+    /// The tasks note, when filing is on.
+    tasks_note: Option<String>,
     // One write at a time: the model can call several tools at once, and two edits of a note mustn't interleave.
     writing: Arc<std::sync::Mutex<()>>,
     tool_router: ToolRouter<Self>,
@@ -158,6 +169,37 @@ struct MeaningRequest {
     /// The most notes to return, up to 20.
     #[serde(default = "default_limit")]
     limit: usize,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct FileRequest {
+    /// The inbox note: its path or name.
+    note: String,
+    /// Where it goes: folder and a clear new name, following the vault's rules ("Ideas/Quieter server fan",
+    /// "Projects/Homelab/Game servers", "Reference/Ignition certification").
+    to: String,
+    /// idea, project or reference.
+    #[serde(rename = "type")]
+    kind: String,
+    /// For an idea or project: open, parked, in-progress, done or dropped.
+    #[serde(default)]
+    status: Option<String>,
+    /// Its tags, for ongoing topics (homelab, health…): the vault's existing tags where they fit. Keep "handwritten"
+    /// on a transcription.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// The day it was written, YYYY-MM-DD; default: the day it was transcribed.
+    #[serde(default)]
+    created: Option<String>,
+    /// Existing notes it relates to (paths or names), linked from it.
+    #[serde(default)]
+    related: Vec<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct DiscardRequest {
+    /// The inbox note marked review: delete: its path or name.
+    note: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -237,6 +279,38 @@ impl Notes {
         or_error(result.map_err(anyhow::Error::from).and_then(|r| r))
     }
 
+    /// File an inbox note the owner accepted (review: accept), or one with no review mark: it gets the vault's
+    /// properties, its open to-dos move into the tasks note, links to related notes are added, and it moves to its
+    /// place. Its text stays as the owner wrote it. No approval needed: their accept is the approval. A note still
+    /// marked pending is refused.
+    #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
+    async fn file_note(&self, Parameters(req): Parameters<FileRequest>) -> CallToolResult {
+        let Some(tasks) = self.tasks_note.clone() else {
+            return or_error(Err(anyhow::anyhow!("filing isn't on for this vault")));
+        };
+        let filing = inbox::Filing {
+            inbox: &self.inbox,
+            tasks: &tasks,
+            note: &req.note,
+            to: &req.to,
+            kind: req.kind.trim(),
+            status: req.status.as_deref(),
+            tags: &req.tags,
+            created: req.created.as_deref(),
+            related: &req.related,
+        };
+        self.write(|lib| lib.file(&filing))
+    }
+
+    /// Delete an inbox note the owner marked review: delete, with its drawing. Refused for any other note.
+    #[tool(annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false))]
+    async fn discard_note(&self, Parameters(req): Parameters<DiscardRequest>) -> CallToolResult {
+        if self.tasks_note.is_none() {
+            return or_error(Err(anyhow::anyhow!("filing isn't on for this vault")));
+        }
+        self.write(|lib| lib.discard(&self.inbox, &req.note))
+    }
+
     /// Write a new note into the vault's inbox (never over an existing one). Read the vault's rules and the
     /// matching template first, and fill the template in rather than copying it. Give the owner the note's name.
     #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
@@ -271,12 +345,23 @@ impl ServerHandler for Notes {
     }
 }
 
-async fn serve(vault: PathBuf, inbox: String, read_only: bool, index: Option<Arc<meaning::Index>>) -> Result<()> {
+async fn serve(
+    vault: PathBuf,
+    inbox: String,
+    read_only: bool,
+    tasks_note: Option<String>,
+    index: Option<Arc<meaning::Index>>,
+) -> Result<()> {
     let mut tool_router = Notes::tool_router();
     if index.is_none() {
         tool_router.remove_route("search_by_meaning");
     }
-    let notes = Notes { library: Arc::new(Library { root: vault }), index, inbox, read_only, writing: Arc::default(), tool_router };
+    if tasks_note.is_none() {
+        tool_router.remove_route("file_note");
+        tool_router.remove_route("discard_note");
+    }
+    let notes =
+        Notes { library: Arc::new(Library { root: vault }), index, inbox, read_only, tasks_note, writing: Arc::default(), tool_router };
     notes.serve(stdio()).await?.waiting().await?;
     Ok(())
 }
