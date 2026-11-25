@@ -288,13 +288,21 @@ export function startWeb(
 		// ?dark=1: the dark side's chats and Trash instead of the ordinary ones.
 		const dark = url.searchParams.get("dark") === "1";
 		if (request.method === "GET" && path === "/api/chats") return json(response, 200, { chats: bridge.chats(dark) });
-		// A drawn picture: its id is random and it never changes, so browsers may keep it (privately).
+		// A drawn picture: its id is random and it never changes, so browsers may keep it (privately). ?download=name
+		// sends it as a file to save under that name (phones ignore a link's download attribute more often).
 		const picture = /^\/api\/pictures\/([0-9a-f-]{36})\.png$/.exec(path);
 		if (request.method === "GET" && picture) {
 			const png = options.picture?.(picture[1]!);
 			if (!png) return json(response, 404, { error: "no such picture" });
+			const name = url.searchParams.get("download");
+			const safe = name ? name.replace(/[^\w.-]/g, "_").replace(/^\.+/, "").slice(0, 100) : "";
 			return response
-				.writeHead(200, { "content-type": "image/png", "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff" })
+				.writeHead(200, {
+					"content-type": "image/png",
+					"cache-control": "private, max-age=31536000, immutable",
+					"x-content-type-options": "nosniff",
+					...(safe && { "content-disposition": `attachment; filename="${safe.endsWith(".png") ? safe : `${safe}.png`}"` }),
+				})
 				.end(png);
 		}
 		if (request.method === "GET" && path === "/api/memory/status") return json(response, 200, await bridge.memoryStatus());

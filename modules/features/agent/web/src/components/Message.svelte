@@ -8,6 +8,13 @@
 
 	let { item }: { item: ChatItem } = $props();
 
+	// What a picture saves as: cosmos-<day it was drawn>-<start of its id>.png.
+	const fileName = (id: string, at?: number) => {
+		const d = new Date(at ?? Date.now());
+		const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+		return `cosmos-${day}-${id.slice(0, 8)}.png`;
+	};
+
 	// "observe__query" → server "observe", tool "query".
 	const split = (name: string) => {
 		const at = name.indexOf("__");
@@ -75,7 +82,14 @@
 		{#if item.pictures?.length}
 			<div class="pictures">
 				{#each item.pictures as picture (picture)}
-					<a href="/api/pictures/{picture}.png" target="_blank" rel="noopener"><img src="/api/pictures/{picture}.png" alt="Drawn for this answer" loading="lazy" /></a>
+					{@const name = fileName(picture, item.at)}
+					<figure>
+						<a href="/api/pictures/{picture}.png" target="_blank" rel="noopener"><img src="/api/pictures/{picture}.png" alt="Drawn for this answer" loading="lazy" /></a>
+						<figcaption>
+							<a class="act" href="/api/pictures/{picture}.png" target="_blank" rel="noopener">Open</a>
+							<a class="act" href="/api/pictures/{picture}.png?download={name}" download={name}>Download</a>
+						</figcaption>
+					</figure>
 				{/each}
 			</div>
 		{/if}
@@ -95,9 +109,13 @@
 	.answer .prose { overflow-wrap: anywhere; padding-left: 12px; border-left: 2px solid var(--line); }
 	.answer.work .prose { border-left-color: var(--frame); }
 	.pictures { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px 12px; }
-	.pictures a { display: block; line-height: 0; border: 1px solid var(--line); }
-	.pictures a:hover { border-color: var(--accent-color); }
-	.pictures img { max-width: min(100%, 512px); max-height: 512px; height: auto; }
+	.pictures figure { margin: 0; max-width: min(100%, 512px); }
+	.pictures figure > a { display: block; line-height: 0; border: 1px solid var(--line); }
+	.pictures figure > a:hover { border-color: var(--accent-color); }
+	.pictures img { max-width: 100%; max-height: 512px; height: auto; }
+	figcaption { display: flex; gap: 12px; padding: 4px 2px 0; }
+	.act { color: var(--dim); font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; text-decoration: none; }
+	.act:hover { color: var(--accent-color); }
 	.dive .question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 12px; }
 
 	.tools { margin: 0 0 8px 12px; font-size: 11.5px; }
