@@ -14,6 +14,7 @@ import { mcpExtension, type ServerCall } from "./mcp.js";
 import { memoryExtension } from "./memory.js";
 import { nabuModels } from "./models.js";
 import { netbirdExtension } from "./netbird.js";
+import { Pictures } from "./pictures.js";
 import { startWeb } from "./web.js";
 
 const config = loadConfig(process.argv[2] ?? "/etc/agent/config.json");
@@ -57,18 +58,24 @@ const TestTools = defineExtension({
 // is set up) for D&D campaign work. The bridge sees the call in the transcript and switches the chat once main's answer
 // is out.
 const campaignMode = "campaign" in config.tools;
+const pictureMode = Boolean(config.chat?.pictures);
+const handOffTargets = ["workhorse", ...(campaignMode ? ["campaign"] : []), ...(pictureMode ? ["picture"] : [])];
 const HandOff = defineExtension({
 	name: "hand-off",
 	tools: [
 		defineTool({
 			name: "hand_off",
-			description: campaignMode
-				? 'Hand this chat to workhorse, the bigger model, which takes over right after your answer. to: "workhorse" (the default) when the conversation turns to work on the homelab or needs heavier reasoning; "campaign" when it turns to the owner\'s D&D campaigns or worldbuilding (workhorse with the campaigns vault).'
-				: "Hand this chat to workhorse, the bigger model with the homelab tools, when the conversation turns to work on the homelab or needs heavier reasoning. It takes over right after your answer.",
-			parameters: campaignMode ? obj({ reason: str(), to: opt(oneOf(["workhorse", "campaign"])) }) : obj({ reason: str() }),
+			description: [
+				"Hand this chat on; the switch happens right after your answer. To workhorse, the bigger model with the homelab tools (the default), when the conversation turns to work on the homelab or needs heavier reasoning.",
+				campaignMode ? 'to: "campaign" when it turns to the owner\'s D&D campaigns or worldbuilding (the campaigns vault).' : "",
+				pictureMode ? 'to: "picture" when the owner wants a picture or image drawn (the image model).' : "",
+			]
+				.filter(Boolean)
+				.join(" "),
+			parameters: handOffTargets.length > 1 ? obj({ reason: str(), to: opt(oneOf(handOffTargets)) }) : obj({ reason: str() }),
 			replay: "safe",
 			execute: async () => ({
-				output: [{ type: "text", text: "Noted: workhorse takes over after your answer. Tell the owner in one short line that you're handing over and why; don't start the work yourself." }],
+				output: [{ type: "text", text: "Noted: the switch happens after your answer. Tell the owner in one short line where you're handing over and why; don't start the work yourself." }],
 			}),
 		}),
 	],
@@ -161,7 +168,8 @@ for (const [name, server] of Object.entries(config.tools)) {
 }
 // Long-term memory: the core block in every conversation, and the bridge's recall, storing and announcing.
 const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
-if (memory) install(memoryExtension(memory.call));
+const memoryTools = memory ? memoryExtension(memory.call) : undefined;
+if (memoryTools) install(memoryTools);
 if (config.testTools) install(TestTools, true);
 // What campaign chats and investigations leave out of the defaults besides the homelab tools.
 const notForCampaigns: Extension[] = [];
@@ -182,6 +190,10 @@ if (config.chat) {
 	registry.install(HandBack);
 	if (campaignTools && loreTools) registry.install(Investigate);
 }
+
+// Picture mode, where the image model is set up: its pictures live in the agent's state folder.
+const pictures = config.chat?.pictures ? new Pictures(join(process.env.STATE_DIRECTORY ?? ".", "pictures"), config.models.endpoint, config.chat.pictures.model) : undefined;
+if (pictures) registry.install(pictures.extension);
 
 const bridge = new Bridge({
 	matrix,
@@ -207,6 +219,8 @@ const bridge = new Bridge({
 				loreTools && {
 					campaign: { tools: campaignTools, lore: loreTools, investigate: Investigate, drop: notForCampaigns, ...(notesTools && { notes: notesTools }) },
 				}),
+			...(pictures && { pictures: { tools: pictures.extension, read: (id: string) => pictures.read(id), drop: notForCampaigns } }),
+			...(memoryTools && { memory: memoryTools }),
 		},
 	}),
 	context,
@@ -258,6 +272,7 @@ const webServer = config.chat ? startWeb(bridge, {
 			context,
 			themeToken: optionalCredential("chat-theme-token"),
 			themeFile: join(process.env.STATE_DIRECTORY ?? ".", "theme.json"),
+			...(pictures && { picture: (id: string) => pictures.read(id) }),
 		}) : undefined;
 
 let closing = false;

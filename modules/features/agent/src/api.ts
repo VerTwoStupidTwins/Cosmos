@@ -7,7 +7,8 @@ export type ToolCall = { name: string; args: string; id?: string; result?: strin
 // `ms` how long the model took, summed over its tool rounds.
 export type ChatItem =
 	| { kind: "user"; text: string; from: string; at?: number }
-	| { kind: "answer"; text: string; tools: ToolCall[]; at?: number; model?: string; tokens?: number; ms?: number }
+	// pictures: ids of pictures drawn for it (picture mode), served at /api/pictures/<id>.png.
+	| { kind: "answer"; text: string; tools: ToolCall[]; at?: number; model?: string; tokens?: number; ms?: number; pictures?: string[] }
 	| { kind: "notice"; text: string; at?: number }
 	// A campaign chat's investigation, finished: its question and findings (Markdown).
 	| { kind: "dive"; question: string; text: string; at?: number };
@@ -21,10 +22,11 @@ export type ChatDetail = {
 	title: string;
 	model: string;
 	pinned: boolean;
+	dark: boolean; // a dark chat: web only, kept out of memory, listed only behind the Dark button
 	deleted: number | null;
 	busy: boolean;
 	approvals: { event: string; call: string; preview: string }[]; // preview: Markdown (approval.ts)
-	// What the chat can switch to: MAIN_MODEL, WORK_MODEL and, where the campaigns vault is set up, CAMPAIGN_MODE.
+	// What the chat can switch to: MAIN_MODEL, WORK_MODEL and, where they're set up, CAMPAIGN_MODE and PICTURE_MODE.
 	modes: string[];
 	// Investigations of a campaign chat still running (started: when, or null while queued).
 	dives: { question: string; started: number | null }[];
@@ -67,3 +69,5 @@ export const MAIN_MODEL = "main";
 export const WORK_MODEL = "workhorse";
 // Not a model of its own: workhorse with the campaigns vault's tools and the D&D campaign instructions.
 export const CAMPAIGN_MODE = "campaign";
+// Not a model of its own either: main writing image prompts and drawing them with nabu's image model.
+export const PICTURE_MODE = "picture";

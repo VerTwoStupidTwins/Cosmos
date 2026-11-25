@@ -1,6 +1,8 @@
 <!-- The app: login until signed in, then the sidebar plate and one page (a chat, Memory or the Trash), set on the
      background like the bar's islands. The address bar keeps the page (#<chat id>, #memory, #trash).
-     Keys: Ctrl+K search chats · Alt+N new chat · Alt+↑/↓ previous/next chat · Esc closes the menu. -->
+     Keys: Ctrl+K search chats · Alt+N new chat · Alt+↑/↓ previous/next chat · Esc closes the menu.
+     The Dark button turns the app to the dark side: its own chats and Trash, new chats there dark too. It is never
+     remembered (a reload is back on the ordinary side) and a dark chat never shows in the address bar. -->
 <script lang="ts">
 	import type { ChatSummary } from "../../src/api.ts";
 	import ChatView from "./components/ChatView.svelte";
@@ -18,13 +20,17 @@
 	let current: string | null = $state(null);
 	let menuOpen = $state(false);
 	let search: HTMLInputElement | undefined = $state();
+	let dark = $state(false);
 
 	whenSignedOut(() => (signedIn = false));
 
 	async function refresh() {
 		try {
-			chats = await api.chats();
-			trashCount = (await api.trash()).length;
+			const side = dark;
+			const [list, trash] = await Promise.all([api.chats(side), api.trash(side)]);
+			if (side !== dark) return; // switched sides meanwhile
+			chats = list;
+			trashCount = trash.length;
 			signedIn = true;
 		} catch {
 			// a lapsed session shows the login (whenSignedOut); anything else waits for the next refresh
@@ -35,7 +41,16 @@
 		page = to;
 		current = id;
 		menuOpen = false;
-		history.replaceState(null, "", to === "chat" ? (id ? `#${id}` : location.pathname) : `#${to}`);
+		history.replaceState(null, "", dark ? location.pathname : to === "chat" ? (id ? `#${id}` : location.pathname) : `#${to}`);
+	}
+
+	// To the other side: a new chat there, its own list.
+	function toggleDark() {
+		dark = !dark;
+		chats = [];
+		trashCount = 0;
+		go(page === "memory" && !dark ? "memory" : "chat");
+		void refresh();
 	}
 
 	// First load: where the address bar points, then keep the list fresh.
@@ -77,19 +92,20 @@
 {#if signedIn === false}
 	<Login onsignedin={refresh} />
 {:else if signedIn}
-	<div class="app" class:menu-open={menuOpen}>
+	<div class="app" class:menu-open={menuOpen} class:dark>
 		<div class="side">
-			<Sidebar bind:search {chats} {current} {page} {trashCount} onnew={() => go("chat")} onopen={(id) => go("chat", id)} onpage={(p) => go(p)} />
+			<Sidebar bind:search {chats} {current} {page} {trashCount} {dark} ondark={toggleDark} onnew={() => go("chat")} onopen={(id) => go("chat", id)} onpage={(p) => go(p)} />
 		</div>
 		<button class="scrim bare" aria-label="Close menu" tabindex="-1" onclick={() => (menuOpen = false)}></button>
 		<main>
 			{#if page === "memory"}
 				<MemoryPanel onmenu={toggleMenu} />
 			{:else if page === "trash"}
-				<TrashPanel onmenu={toggleMenu} onopen={(id) => go("chat", id)} onchanged={refresh} />
+				<TrashPanel {dark} onmenu={toggleMenu} onopen={(id) => go("chat", id)} onchanged={refresh} />
 			{:else}
 				<ChatView
 					id={current}
+					{dark}
 					onmenu={toggleMenu}
 					onstarted={(id) => {
 						go("chat", id);
@@ -112,6 +128,11 @@
 		gap: 8px; padding: 8px; height: 100vh; height: 100dvh;
 	}
 	.side { min-height: 0; }
+	/* The dark side: the palette's purple for the accent, and a deeper background. */
+	.app.dark {
+		--accent-color: var(--base0E, #cba6f7);
+		background: color-mix(in srgb, #000 35%, var(--bg));
+	}
 	main { display: flex; flex-direction: column; gap: 8px; min-height: 0; min-width: 0; overflow: hidden; }
 	.scrim { display: none; }
 	@media (max-width: 760px) {

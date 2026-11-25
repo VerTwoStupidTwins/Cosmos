@@ -72,6 +72,13 @@
 				{/each}
 			</details>
 		{/if}
+		{#if item.pictures?.length}
+			<div class="pictures">
+				{#each item.pictures as picture (picture)}
+					<a href="/api/pictures/{picture}.png" target="_blank" rel="noopener"><img src="/api/pictures/{picture}.png" alt="Drawn for this answer" loading="lazy" /></a>
+				{/each}
+			</div>
+		{/if}
 		<div class="prose" use:codeBlocks={item.text}>{@html markdown(item.text)}</div>
 	</article>
 {/if}
@@ -87,6 +94,10 @@
 	}
 	.answer .prose { overflow-wrap: anywhere; padding-left: 12px; border-left: 2px solid var(--line); }
 	.answer.work .prose { border-left-color: var(--frame); }
+	.pictures { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 8px 12px; }
+	.pictures a { display: block; line-height: 0; border: 1px solid var(--line); }
+	.pictures a:hover { border-color: var(--accent-color); }
+	.pictures img { max-width: min(100%, 512px); max-height: 512px; height: auto; }
 	.dive .question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 12px; }
 
 	.tools { margin: 0 0 8px 12px; font-size: 11.5px; }

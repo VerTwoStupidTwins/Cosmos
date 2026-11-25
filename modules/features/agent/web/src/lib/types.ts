@@ -7,4 +7,4 @@ export const modelTag = (model: string | undefined) =>
 	model === "main" ? "main" : model === "workhorse" ? "work" : (model ?? "main");
 
 // What the switch and the menu call each mode.
-export const modeLabel = (model: string) => (model === "main" ? "Main" : model === "workhorse" ? "Work" : model === "campaign" ? "Campaign" : model);
+export const modeLabel = (model: string) => (model === "main" ? "Main" : model === "workhorse" ? "Work" : model === "campaign" ? "Campaign" : model === "picture" ? "Picture" : model);

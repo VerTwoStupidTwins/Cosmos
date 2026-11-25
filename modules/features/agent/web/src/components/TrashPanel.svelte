@@ -5,11 +5,11 @@
 	import { when, zero } from "../lib/format";
 	import Bar from "./Bar.svelte";
 
-	let { onmenu, onopen, onchanged }: { onmenu: () => void; onopen: (id: string) => void; onchanged: () => void } = $props();
+	let { dark, onmenu, onopen, onchanged }: { dark: boolean; onmenu: () => void; onopen: (id: string) => void; onchanged: () => void } = $props();
 
 	let chats: TrashEntry[] | undefined = $state();
 	$effect(() => {
-		api.trash().then((c) => (chats = c), report);
+		api.trash(dark).then((c) => (chats = c), report);
 	});
 
 	async function restore(id: string) {
@@ -33,7 +33,7 @@
 				<span class="tag">TRS</span><span class="key">Deleted chats</span><span class="leader"></span>
 				<span class="count">{zero(chats?.length ?? 0)}</span>
 			</div>
-			<p class="sub">Each stays 7 days. Its ideas and plans go to memory as soon as it's deleted, and memory keeps the whole chat.</p>
+			<p class="sub">{dark ? "Each stays 7 days, then it's gone. Dark chats never reach memory." : "Each stays 7 days. Its ideas and plans go to memory as soon as it's deleted, and memory keeps the whole chat."}</p>
 			{#if chats === undefined}
 				<p class="empty dots">Loading</p>
 			{:else}
@@ -43,7 +43,7 @@
 						<div class="grow">
 							<div class="title">{c.title}</div>
 							<div class="meta">
-								del {when(c.deleted).slice(5)} · <span class:ok={c.consolidated}>{c.consolidated ? "in memory" : "to memory"}</span> · purge {when(c.gone).slice(5)}
+								del {when(c.deleted).slice(5)} · {#if !dark}<span class:ok={c.consolidated}>{c.consolidated ? "in memory" : "to memory"}</span> · {/if}purge {when(c.gone).slice(5)}
 							</div>
 						</div>
 						<button onclick={() => onopen(c.id)}>View</button>

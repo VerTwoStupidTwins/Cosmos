@@ -27,10 +27,11 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 
 export const api = {
 	login: (password: string) => call<{ ok: true }>("POST", "/api/login", { password }),
-	chats: async () => (await call<{ chats: ChatSummary[] }>("GET", "/api/chats")).chats,
-	trash: async () => (await call<{ chats: TrashEntry[] }>("GET", "/api/trash")).chats,
+	// dark: the dark side's chats and Trash (the Dark button) instead of the ordinary ones.
+	chats: async (dark = false) => (await call<{ chats: ChatSummary[] }>("GET", `/api/chats${dark ? "?dark=1" : ""}`)).chats,
+	trash: async (dark = false) => (await call<{ chats: TrashEntry[] }>("GET", `/api/trash${dark ? "?dark=1" : ""}`)).chats,
 	memory: () => call<MemoryStatus>("GET", "/api/memory/status"),
-	newChat: async (text: string) => (await call<{ id: string }>("POST", "/api/chats", { text })).id,
+	newChat: async (text: string, dark = false) => (await call<{ id: string }>("POST", "/api/chats", { text, dark })).id,
 	send: (id: string, text: string) => call("POST", `/api/chats/${id}/messages`, { text }),
 	model: (id: string, model: string) => call("POST", `/api/chats/${id}/model`, { model }),
 	rename: (id: string, title: string) => call("POST", `/api/chats/${id}/rename`, { title }),

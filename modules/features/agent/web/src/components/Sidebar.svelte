@@ -9,6 +9,8 @@
 		current,
 		page,
 		trashCount,
+		dark,
+		ondark,
 		onnew,
 		onopen,
 		onpage,
@@ -18,6 +20,8 @@
 		current: string | null;
 		page: Page;
 		trashCount: number;
+		dark: boolean;
+		ondark: () => void;
 		onnew: () => void;
 		onopen: (id: string) => void;
 		onpage: (page: Page) => void;
@@ -57,7 +61,8 @@
 	<span class="strip"></span>
 	<header>
 		<span class="tag">COM</span>
-		<h1>Cosmos<span class="sep">//</span>Chat</h1>
+		<h1>Cosmos<span class="sep">//</span>{dark ? "Dark" : "Chat"}</h1>
+		<button class="darkness" class:on={dark} aria-pressed={dark} onclick={ondark} title={dark ? "Back to the ordinary chats" : "Dark chats: kept apart, out of memory and Matrix"}>{dark ? "Light" : "Dark"}</button>
 		<button class="primary" onclick={onnew} title="New chat (Alt+N)">+ New</button>
 	</header>
 
@@ -84,7 +89,7 @@
 				</button>
 			{/each}
 		{:else}
-			<p class="none">{query ? "No chat matches." : "No chats yet."}</p>
+			<p class="none">{query ? "No chat matches." : dark ? "No dark chats yet." : "No chats yet."}</p>
 		{/each}
 	</nav>
 
@@ -104,6 +109,8 @@
 	header { display: flex; align-items: center; gap: 8px; padding: 14px 12px 10px; }
 	h1 { flex: 1; margin: 0; font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; white-space: nowrap; }
 	.sep { color: var(--accent-color); margin: 0 2px; }
+	.darkness { color: var(--dim); }
+	.darkness.on { color: var(--accent-color); border-color: var(--accent-color); }
 
 	.find { display: flex; align-items: center; gap: 8px; margin: 0 12px 8px; padding: 4px 6px; border: 1px solid var(--line); }
 	.find:focus-within { border-color: var(--frame); }

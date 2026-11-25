@@ -12,6 +12,7 @@ import { type Context, withAbortSignal } from "@earendil-works/chord/context";
 import type { EntryRecord } from "@earendil-works/pi-durable";
 import type { ChatEvent, ChatItem, ToolCall } from "./api.js";
 import type { Bridge } from "./bridge.js";
+import { pictureIds } from "./pictures.js";
 
 const COOKIE = "cosmos_chat";
 const SESSION_DAYS = 30;
@@ -141,6 +142,8 @@ export function chatItems(entries: readonly EntryRecord[]): ChatItem[] {
 			} else if (message.role === "toolResult" && answer) {
 				const tool = answer.tools.find((t) => t.id === message.toolCallId);
 				if (tool) Object.assign(tool, { result: clip(textOf(message.content), 1500), error: message.isError === true });
+				const drawn = message.isError ? [] : pictureIds(textOf(message.content));
+				if (drawn.length > 0) answer.pictures = [...(answer.pictures ?? []), ...drawn];
 			}
 		}
 	}
@@ -155,7 +158,10 @@ function live(docs: Readonly<Record<string, unknown>>) {
 
 // Without a password, nginx's sign-in (Pocket ID through oauth2-proxy, agent.chat.sso) is the gate: every request that
 // reaches this port has passed it, so the app's own login is skipped.
-export function startWeb(bridge: Bridge, options: { port: number; password?: string; context: Context; themeToken?: string; themeFile: string }) {
+export function startWeb(
+	bridge: Bridge,
+	options: { port: number; password?: string; context: Context; themeToken?: string; themeFile: string; picture?: (id: string) => Buffer | undefined },
+) {
 	const password = options.password;
 	const key = createHmac("sha256", "cosmos-chat-session").update(password ?? "").digest();
 	const sign = (expires: number) => `${expires}.${createHmac("sha256", key).update(String(expires)).digest("base64url")}`;
@@ -279,13 +285,24 @@ export function startWeb(bridge: Bridge, options: { port: number; password?: str
 		if (!path.startsWith("/api/")) return json(response, 404, { error: "not found" });
 		if (!signedIn(request)) return json(response, 401, { error: "sign in" });
 
-		if (request.method === "GET" && path === "/api/chats") return json(response, 200, { chats: bridge.chats() });
+		// ?dark=1: the dark side's chats and Trash instead of the ordinary ones.
+		const dark = url.searchParams.get("dark") === "1";
+		if (request.method === "GET" && path === "/api/chats") return json(response, 200, { chats: bridge.chats(dark) });
+		// A drawn picture: its id is random and it never changes, so browsers may keep it (privately).
+		const picture = /^\/api\/pictures\/([0-9a-f-]{36})\.png$/.exec(path);
+		if (request.method === "GET" && picture) {
+			const png = options.picture?.(picture[1]!);
+			if (!png) return json(response, 404, { error: "no such picture" });
+			return response
+				.writeHead(200, { "content-type": "image/png", "cache-control": "private, max-age=31536000, immutable", "x-content-type-options": "nosniff" })
+				.end(png);
+		}
 		if (request.method === "GET" && path === "/api/memory/status") return json(response, 200, await bridge.memoryStatus());
-		if (request.method === "GET" && path === "/api/trash") return json(response, 200, { chats: bridge.trash() });
+		if (request.method === "GET" && path === "/api/trash") return json(response, 200, { chats: bridge.trash(dark) });
 		if (request.method === "POST" && path === "/api/chats") {
-			const { text } = await body(request);
+			const { text, dark: darkChat } = await body(request);
 			if (typeof text !== "string" || !text.trim()) return json(response, 400, { error: "empty message" });
-			return json(response, 200, { id: await bridge.webNewChat(text.trim()) });
+			return json(response, 200, { id: await bridge.webNewChat(text.trim(), darkChat === true) });
 		}
 		const match = /^\/api\/chats\/(\d+)(?:\/(events|messages|model|approve|rename|pin|delete|restore))?$/.exec(path);
 		if (!match) return json(response, 404, { error: "not found" });

@@ -19,7 +19,8 @@ export type Config = {
 	topology: string | null; // the homelab map (markdown), or null
 	netbirdDeclared: string | null; // modules/netbird-policies.nix as JSON, for the drift check
 	// Chats (web app + Matrix Chat room): they start on `mainModel` and hand off to `workModel` for homelab work.
-	chat: { roomName: string; port: number; mainModel: string; workModel: string; titleModel: string } | null;
+	// pictures: picture mode, with the llama-swap image model it draws with, or null.
+	chat: { roomName: string; port: number; mainModel: string; workModel: string; titleModel: string; pictures: { model: string } | null } | null;
 	models: {
 		endpoint: string;
 		default: string;

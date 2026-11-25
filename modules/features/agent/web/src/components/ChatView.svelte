@@ -10,8 +10,9 @@
 	import Composer from "./Composer.svelte";
 	import Message from "./Message.svelte";
 
-	let { id, onmenu, onstarted, onchanged, onclosed }: {
+	let { id, dark, onmenu, onstarted, onchanged, onclosed }: {
 		id: string | null;
+		dark: boolean; // new chats start on the dark side
 		onmenu: () => void;
 		onstarted: (id: string) => void; // a new chat got its id
 		onchanged: () => void; // the list needs refreshing (title, model, pin…)
@@ -71,7 +72,7 @@
 
 	async function send(text: string) {
 		try {
-			if (id === null) onstarted(await api.newChat(text));
+			if (id === null) onstarted(await api.newChat(text, dark));
 			else await api.send(id, text);
 		} catch (e) {
 			report(e);
@@ -120,7 +121,7 @@
 		{#if id === null}
 			<div class="start">
 				<span class="tag">New</span>
-				<p>Start a chat with main. It hands over to workhorse when the talk turns to work, or to campaign mode for your D&amp;D campaigns, and says so. /work, /campaign and /chat switch it yourself.</p>
+				{#if dark}<p>A dark chat: adult talk and pictures, with main. It stays here: not in memory, Matrix or the ordinary list. /picture draws; /chat comes back.</p>{:else}<p>Start a chat with main. It hands over to workhorse when the talk turns to work, to campaign mode for your D&amp;D campaigns, or to picture mode to draw, and says so. /work, /campaign, /picture and /chat switch it yourself.</p>{/if}
 			</div>
 		{/if}
 		{#each items as item, i (i)}

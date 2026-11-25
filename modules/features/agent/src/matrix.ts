@@ -75,6 +75,18 @@ export class Matrix {
 		return event_id;
 	}
 
+	// Uploads a file to the homeserver's media store; returns its mxc:// URI.
+	async upload(body: Buffer, type: string, filename: string): Promise<string> {
+		const response = await fetch(`${this.homeserver}/_matrix/media/v3/upload?filename=${encodeURIComponent(filename)}`, {
+			method: "POST",
+			headers: { Authorization: `Bearer ${this.token}`, "Content-Type": type },
+			body: new Uint8Array(body),
+		});
+		const text = await response.text();
+		if (!response.ok) throw new Error(`Matrix upload: ${response.status} ${text.slice(0, 200)}`);
+		return (JSON.parse(text) as { content_uri: string }).content_uri;
+	}
+
 	// Removes an event's content (the agent can redact others' messages in rooms it made, where it is admin).
 	redact(roomId: string, eventId: string, reason: string) {
 		const txn = `${Date.now()}-${this.#txn++}`;

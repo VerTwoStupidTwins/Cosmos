@@ -131,6 +131,7 @@
                   workModel
                   titleModel
                   ;
+                pictures = if cfg.chat.pictureModel == null then null else { model = cfg.chat.pictureModel; };
               }
             else
               null;
@@ -321,6 +322,14 @@
             type = lib.types.str;
             default = "helper";
             description = "The llama-swap model that names chats.";
+          };
+          pictureModel = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = "image";
+            description = ''
+              The llama-swap image model (OpenAI's /v1/images/generations) that picture mode draws with: main writes the
+              prompts. Pictures are kept in the agent's state folder. null: no picture mode.
+            '';
           };
         };
 

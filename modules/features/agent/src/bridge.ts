@@ -28,7 +28,8 @@ import { bool, obj } from "@earendil-works/pi-schema";
 import { marked } from "marked";
 import { approvalText } from "./approval.js";
 import { inThread, type Matrix, type MatrixEvent, replyTo, textContent } from "./matrix.js";
-import { CAMPAIGN_MODE, type ChatDetail, type ChatSummary, type MemoryStatus, type TrashEntry } from "./api.js";
+import { CAMPAIGN_MODE, PICTURE_MODE, type ChatDetail, type ChatSummary, type MemoryStatus, type TrashEntry } from "./api.js";
+import { pictureIds } from "./pictures.js";
 import type { Config } from "./config.js";
 import type { ServerCall } from "./mcp.js";
 import { type Change, type Exchange, type Hit, memoriesBlock, recalledNotice } from "./memory.js";
@@ -71,7 +72,9 @@ type DiveRequest = { chat: string; question: string; context: string; key: strin
 // A chat: one conversation, shared by the web app and a thread in the Matrix Chat room (`thread`, its root event).
 // Keyed by conversation ID. `model` is the catalog model it is on now.
 // `deleted`: when it went to the Trash (hidden, its Matrix thread redacted); it leaves the Trash for good 7 days later.
-export type ChatInfo = { title: string; model: string; thread: string; created: number; updated: number; titled?: boolean; pinned?: boolean; deleted?: number };
+// dark: a chat of the dark side (the web app's Dark button): listed only there, web-only (no Matrix thread: `thread` is
+// empty), and kept out of memory both ways.
+export type ChatInfo = { title: string; model: string; thread: string; created: number; updated: number; titled?: boolean; pinned?: boolean; deleted?: number; dark?: boolean };
 const TRASH_MS = 7 * 86_400_000;
 
 export type ChatOptions = {
@@ -88,6 +91,9 @@ export type ChatOptions = {
 	// campaign chat keeps while the other homelab tools go.
 	// lore: the vault read-only, for the investigator; investigate: its tool; drop: defaults neither of them needs.
 	campaign?: { tools: Extension; notes?: Extension; lore: Extension; investigate: Extension; drop: Extension[] };
+	// Picture mode (PICTURE_MODE), where an image model is set up: main with the draw tool and none of the homelab's.
+	pictures?: { tools: Extension; read: (id: string) => Buffer | undefined; drop: Extension[] };
+	memory?: Extension; // the memory tools and core block, which dark chats leave out
 };
 
 const CHAT_MAIN = [
@@ -128,6 +134,33 @@ const CHAT_MAIN_CAMPAIGN = [
 	'turns to a campaign, a world, NPCs, places, sessions or other worldbuilding, call hand_off with to: "campaign":',
 	"the chat moves to campaign mode, where you have the campaigns vault and a background investigator.",
 ].join(" ");
+// Told to main when picture mode exists.
+const CHAT_MAIN_PICTURE = [
+	'When the owner asks for a picture or image to be drawn or made, call hand_off with to: "picture": the chat moves',
+	"to picture mode, where you can draw with the image model.",
+].join(" ");
+const CHAT_PICTURE = [
+	"This chat is in picture mode: you are main, turning the owner's requests into pictures with draw, which sends your",
+	"prompt to the image model (Qwen-Image 2.1, uncensored; photos, illustration, anime, painting; it renders short",
+	"text well). Write the prompt yourself from what they ask: plain descriptive English, the subject first, then the",
+	"setting, composition and framing, camera or medium, lighting, colours, mood and style, as specific as they'd want",
+	"and nothing they didn't ask for. If they give a prompt of their own, use it as it is unless they ask you to improve",
+	"it. Pick the size from the shape: 1024x1536 for portraits and tall things, 1536x1024 for landscapes and scenes.",
+	"Draw first and ask after: when a request is vague, make a good guess, then offer one or two directions to try.",
+	"For changes, draw again with the prompt adjusted (the model doesn't edit a picture; each one is new). After",
+	"drawing, show the prompt you used in a ```text block so the owner can reuse it, in a line or two say what you",
+	"went for, and stop. If they only want a prompt written (for another tool), write it without drawing. When the",
+	"talk leaves pictures, call hand_back.",
+].join(" ");
+// Dark chats: the owner's private, adult side of the app.
+const CHAT_DARK = [
+	"This is a dark chat: the owner's private space in their own homelab, for adult conversation and adult pictures.",
+	"The owner is an adult and asked for this; explicit sexual content, nudity, crude humour and dark themes are fine",
+	"here when they want them, written without disclaimers or moralising. One hard line: everyone in anything sexual is",
+	"an adult, clearly and unambiguously (never minors, never childlike bodies or descriptions, whatever is claimed).",
+	"Nothing here reaches memory or the owner's other chats, and you have no homelab tools.",
+].join(" ");
+const CHAT_DARK_MAIN = "You are main. Talk naturally, follow the owner's lead, and keep it brief unless they want more.";
 const CHAT_CAMPAIGN = [
 	"This chat is in campaign mode: you are main, the owner's fast brainstorming partner for their D&D campaigns (5e 2024",
 	"rules, homebrew worlds). Keep it quick and conversational: short replies, a few options at a time, questions back;",
@@ -172,7 +205,9 @@ const diveFindings = (question: string, findings: string) =>
 const handOffPrompt = (reason: string, to: string) =>
 	to === CAMPAIGN_MODE
 		? `[main switched this chat to campaign mode because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
-		: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
+		: to === PICTURE_MODE
+			? `[main switched this chat to picture mode because: ${reason}. Pick up the owner's last request: draw it.]`
+			: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
 
 type BridgeState = {
 	since: string | null;
@@ -349,7 +384,7 @@ export class Bridge {
 	// A scheduled run has no message to thread under yet: its lines are kept and posted under its answer.
 	#where(conversationId: ConversationId): { room: string; thread?: string; buffer?: string[] } | undefined {
 		const chat = this.#state.chats[String(conversationId)];
-		if (chat?.deleted) return undefined; // a chat in the Trash shows nothing in Matrix
+		if (chat?.deleted || chat?.dark) return undefined; // a chat in the Trash, or a dark one, shows nothing in Matrix
 		if (chat && this.#state.chatRoom) return { room: this.#state.chatRoom, thread: chat.thread };
 		const room = Object.entries(this.#state.rooms).find(([, id]) => id === Number(conversationId))?.[0];
 		if (!room) return undefined;
@@ -739,16 +774,18 @@ export class Bridge {
 						for (const line of lines) await this.#notice({ room: owed.room, thread: post }, line);
 						console.error(`schedule: ${owed.event} posted (${lines.length} tool calls)`);
 					}
-				} else if (!(owed.chat && this.#state.chats[owed.chat]?.deleted)) {
+				} else if (!(owed.chat && (this.#state.chats[owed.chat]?.deleted || this.#state.chats[owed.chat]?.dark))) {
 					const where = owed.thread ? inThread(owed.thread) : replyTo(owed.event);
 					await this.options.matrix.send(owed.room, { ...textContent(markdown, html(markdown)), ...where });
+					if (owed.chat !== undefined && this.options.chat?.pictures) await this.#postPictures(owed.chat, owed.room, where);
 				}
 				// The answered exchange is owed to memory in the same commit that settles the message.
-				const remember = answered && owed.text !== undefined && this.#indexed(owed.room);
+				const remember = answered && owed.text !== undefined && this.#indexed(owed.room) && !(owed.chat && this.#state.chats[owed.chat]?.dark);
 				const key = memoryKey(owed);
 				const exchange: Exchange = { room: key, event: owed.event, message: owed.text ?? "", answer: markdown };
 				if (owed.previous !== undefined) exchange.previous = owed.previous;
-				if (owed.chat !== undefined && this.#state.chats[owed.chat]?.model === CAMPAIGN_MODE) exchange.tags = [CAMPAIGN_MODE];
+				const mode = owed.chat !== undefined ? this.#state.chats[owed.chat]?.model : undefined;
+				if (mode === CAMPAIGN_MODE || mode === PICTURE_MODE) exchange.tags = [mode];
 				const at = Date.now(); // one value for the stored state and the copy in memory
 				// A chat whose answer came with a hand_off moves to workhorse in the commit that settles it, with a run
 				// that picks up the work; one whose answer came with a hand_back moves to main, which answers the next
@@ -758,8 +795,11 @@ export class Bridge {
 				const onMain = chat?.model === c?.mainModel;
 				const request = answered && chat && owed.chat && c ? await this.#switchRequest(owed.chat, onMain ? "hand_off" : "hand_back", markdown) : undefined;
 				const reason = request?.reason;
-				// main goes to campaign mode when it asks for it (and there is one), else to workhorse; the others go back to main.
-				const target = onMain ? (request?.to === CAMPAIGN_MODE && c?.campaign ? CAMPAIGN_MODE : c?.workModel) : c?.mainModel;
+				// main goes to campaign or picture mode when it asks for it (and there is one), else to workhorse; the others go
+				// back to main.
+				const asked = request?.to === CAMPAIGN_MODE && c?.campaign ? CAMPAIGN_MODE : request?.to === PICTURE_MODE && c?.pictures ? PICTURE_MODE : undefined;
+				// A dark chat goes only between main and picture mode.
+				const target = chat?.dark ? (onMain ? (asked === PICTURE_MODE ? asked : undefined) : c?.mainModel) : onMain ? (asked ?? c?.workModel) : c?.mainModel;
 				const next: Pending | undefined =
 					reason !== undefined && onMain ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
 				// Investigations a campaign answer asked for, started once it's settled (queued in the same commit, so a crash
@@ -774,7 +814,7 @@ export class Bridge {
 						const admitted = next
 							? await conversation.submit(tx, { type: "input", content: handOffPrompt(reason, target), requestId: next.event, entry })
 							: await conversation.submit(tx, { type: "write", entry });
-						await configure(tx, conversation.id, this.#chatAgent(target));
+						await configure(tx, conversation.id, this.#chatAgent(target, chat?.dark));
 						return admitted;
 					},
 					(s, admitted) => {
@@ -796,7 +836,7 @@ export class Bridge {
 				if (dives.length > 0) void this.#startDives();
 				if (continued !== undefined && chat && !chat.deleted) {
 					console.error(`chat: ${owed.chat} handed to ${target}: ${reason}`);
-					await this.#notice({ room: owed.room, thread: chat.thread }, `🔀 Switched to ${target}: ${reason}`);
+					if (!chat.dark) await this.#notice({ room: owed.room, thread: chat.thread }, `🔀 Switched to ${target}: ${reason}`);
 					if (next) this.#deliver(String(continued));
 				}
 				if (answered && chat && owed.chat && !chat.titled && owed.text !== undefined) void this.#title(owed.chat, owed.text, markdown);
@@ -829,8 +869,19 @@ export class Bridge {
 
 	// What a chat's conversation runs with: main with memory and hand_off, or workhorse with everything (the
 	// harness's default extensions, which leave hand_off out).
-	#chatAgent(model: string): AgentChange {
+	#chatAgent(model: string, dark = false): AgentChange {
 		const c = this.options.chat!;
+		if (dark) {
+			// main or picture mode only, without memory, the homelab or the web.
+			const remove = [...c.homelab, ...(c.memory ? [c.memory] : []), ...(c.pictures?.drop ?? []), ...(c.web ? [c.web] : [])];
+			return model === PICTURE_MODE && c.pictures
+				? { model: { provider: "nabu", modelId: c.mainModel }, extensions: { add: [c.handBack, c.pictures.tools], remove }, instructions: `${CHAT_DARK} ${CHAT_PICTURE}` }
+				: {
+						model: { provider: "nabu", modelId: c.mainModel },
+						extensions: { add: c.pictures ? [c.handOff] : [], remove },
+						instructions: [CHAT_DARK, CHAT_DARK_MAIN, c.pictures ? CHAT_MAIN_PICTURE : ""].filter(Boolean).join(" "),
+					};
+		}
 		const web = c.web ? [c.web] : [];
 		if (model === CAMPAIGN_MODE && c.campaign) {
 			const { tools, notes, investigate, drop } = c.campaign;
@@ -840,7 +891,15 @@ export class Bridge {
 				instructions: `${CHAT_CAMPAIGN} ${CHAT_DIAGRAMS}`,
 			};
 		}
-		const main = c.campaign ? `${CHAT_MAIN} ${CHAT_MAIN_CAMPAIGN}` : CHAT_MAIN;
+		if (model === PICTURE_MODE && c.pictures) {
+			const { tools, drop } = c.pictures;
+			return {
+				model: { provider: "nabu", modelId: c.mainModel },
+				extensions: { add: [c.handBack, tools], remove: [...c.homelab, ...drop] },
+				instructions: CHAT_PICTURE,
+			};
+		}
+		const main = [CHAT_MAIN, c.campaign ? CHAT_MAIN_CAMPAIGN : "", c.pictures ? CHAT_MAIN_PICTURE : ""].filter(Boolean).join(" ");
 		return model === c.mainModel
 			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: `${main} ${CHAT_DIAGRAMS}` }
 			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack, ...web] }, instructions: `${CHAT_WORK} ${CHAT_DIAGRAMS}${c.web ? ` ${CHAT_WEB}` : ""}` };
@@ -864,16 +923,16 @@ export class Bridge {
 		return room;
 	}
 
-	async #newChat(thread: string, firstMessage: string): Promise<string> {
+	async #newChat(thread: string, firstMessage: string, dark = false): Promise<string> {
 		const conversation = await this.#harness!.createConversation(
-			{ ownership: { kind: "ownerless" }, agent: { ...this.#chatAgent(this.options.chat!.mainModel), maxTurns: this.options.maxTurns } },
+			{ ownership: { kind: "ownerless" }, agent: { ...this.#chatAgent(this.options.chat!.mainModel, dark), maxTurns: this.options.maxTurns } },
 			this.#ctx,
 		);
 		const id = String(conversation.id);
 		const now = Date.now();
 		const title = clip(firstMessage.replace(/\s+/g, " ").trim(), 60);
 		await this.#commit((s) => {
-			s.chats[id] = { title, model: this.options.chat!.mainModel, thread, created: now, updated: now };
+			s.chats[id] = { title, model: this.options.chat!.mainModel, thread, created: now, updated: now, ...(dark && { dark: true }) };
 		});
 		console.error(`chat: started ${id}`);
 		return id;
@@ -894,13 +953,13 @@ export class Bridge {
 		if (rest) await this.#chatSubmit(id, rest, event.event_id, "matrix");
 	}
 
-	// "/work", "/campaign" or "/chat" switches the chat; text after it is then sent as a message to the model switched to.
-	// Returns what is left to send.
+	// "/work", "/campaign", "/picture" or "/chat" switches the chat; text after it is then sent as a message to the model
+	// switched to. Returns what is left to send.
 	async #command(id: string, text: string): Promise<string> {
-		const command = /^\/(work|campaign|chat)\b\s*([\s\S]*)$/.exec(text.trim());
+		const command = /^\/(work|campaign|picture|chat)\b\s*([\s\S]*)$/.exec(text.trim());
 		if (!command) return text;
 		const c = this.options.chat!;
-		const to = command[1] === "work" ? c.workModel : command[1] === "campaign" ? CAMPAIGN_MODE : c.mainModel;
+		const to = { work: c.workModel, campaign: CAMPAIGN_MODE, picture: PICTURE_MODE }[command[1] as "work"] ?? c.mainModel;
 		await this.switchModel(id, to, "the owner switched");
 		return command[2]?.trim() ?? "";
 	}
@@ -911,7 +970,7 @@ export class Bridge {
 		if (chat.deleted) throw new Error("this chat is in the Trash: restore it first");
 		const room = await this.#chatRoom();
 		const key = `chat:${id}`;
-		const recalled = await this.#recall(key, text);
+		const recalled = chat.dark ? { content: text } : await this.#recall(key, text);
 		if (recalled.notice) void this.#notice({ room, thread: chat.thread }, recalled.notice);
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		if (!conversation) throw new Error(`chat ${id} has no conversation`);
@@ -927,7 +986,7 @@ export class Bridge {
 				if (s.chats[id]) s.chats[id]!.updated = now;
 			},
 		);
-		void this.options.matrix.typing(room, this.#me, true);
+		if (!chat.dark) void this.options.matrix.typing(room, this.#me, true);
 		this.#deliver(String(submitted));
 	}
 
@@ -939,7 +998,7 @@ export class Bridge {
 		if (called !== undefined) return called;
 		// Only an announcement of a switch happening now ("I'm handing this over to workhorse", "let me hand you off to
 		// workhorse", "switching to workhorse"), not a description of how chats work ("unless I hand off to workhorse").
-		const target = tool === "hand_off" ? "(?:workhorse|campaign mode)" : "main";
+		const target = tool === "hand_off" ? "(?:workhorse|campaign mode|picture mode)" : "main";
 		const move = tool === "hand_off" ? "(?:over|off)" : "back";
 		const said = new RegExp(
 			[
@@ -953,7 +1012,8 @@ export class Bridge {
 		if (line === undefined || /\b(?:unless|if|when|whenever)\b[^.]*\bhand/i.test(line)) return undefined;
 		console.error(`chat: ${id} said it hands over without calling ${tool}; switching anyway`);
 		if (tool !== "hand_off") return { reason: "workhorse said main takes it from here" };
-		return { reason: "main said it's handing over", ...(/campaign mode/i.test(line) && { to: CAMPAIGN_MODE }) };
+		const to = /campaign mode/i.test(line) ? CAMPAIGN_MODE : /picture mode/i.test(line) ? PICTURE_MODE : undefined;
+		return { reason: "main said it's handing over", ...(to && { to }) };
 	}
 
 	async #calledWhileAnswering(id: string, tool: string): Promise<{ reason: string; to?: string } | undefined> {
@@ -976,6 +1036,41 @@ export class Bridge {
 
 	// The arguments of every call to `tool` in the chat's last answer (newest first in the transcript, up to the message
 	// it answered).
+	// The pictures drawn for a chat's latest answer, posted under it in Matrix (the web app shows them from the
+	// transcript). Best effort: a failed upload costs the phone its copy, not the chat.
+	async #postPictures(id: string, room: string, where: Record<string, unknown>) {
+		const ids = await this.#picturesWhileAnswering(id);
+		for (const picture of ids) {
+			try {
+				const png = this.options.chat!.pictures!.read(picture);
+				if (!png) continue;
+				const url = await this.options.matrix.upload(png, "image/png", `${picture}.png`);
+				await this.options.matrix.send(room, { msgtype: "m.image", body: `${picture}.png`, url, info: { mimetype: "image/png", size: png.length }, ...where });
+			} catch (error) {
+				console.error(`chat: ${id}: posting picture ${picture}: ${String(error)}`);
+			}
+		}
+	}
+
+	async #picturesWhileAnswering(id: string): Promise<string[]> {
+		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
+		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
+		const found: string[] = [];
+		for (const entry of page?.items ?? []) {
+			if (["cosmos.message", "pi.user", "cosmos.handoff", "cosmos.dive"].includes(entry.kind)) break;
+			// Entries come newest first, the messages in each oldest first: the result is oldest first.
+			const here: string[] = [];
+			for (const message of (entry.model ?? []) as unknown as readonly { role: string; content: unknown; isError?: boolean }[]) {
+				if (message.role !== "toolResult" || message.isError || !Array.isArray(message.content)) continue;
+				for (const part of message.content as { type: string; text?: string }[]) {
+					if (part.type === "text" && part.text) here.push(...pictureIds(part.text));
+				}
+			}
+			found.unshift(...here);
+		}
+		return found;
+	}
+
 	async #callsWhileAnswering(id: string, tool: string): Promise<Record<string, unknown>[]> {
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
@@ -1165,17 +1260,17 @@ export class Bridge {
 	}
 
 	// Pinned first, then the latest.
-	chats(): ChatSummary[] {
+	chats(dark = false): ChatSummary[] {
 		return Object.entries(this.#state.chats)
-			.filter(([, c]) => !c.deleted)
+			.filter(([, c]) => !c.deleted && (c.dark === true) === dark)
 			.map(([id, c]) => ({ id, title: c.title, model: c.model, updated: c.updated, pinned: c.pinned === true, busy: Object.values(this.#state.pending).some((p) => p.chat === id) }))
 			.sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated - a.updated);
 	}
 
 	// The Trash: deleted chats, whether their consolidation is done, and when they leave for good.
-	trash(): TrashEntry[] {
+	trash(dark = false): TrashEntry[] {
 		return Object.entries(this.#state.chats)
-			.filter(([, c]) => c.deleted !== undefined)
+			.filter(([, c]) => c.deleted !== undefined && (c.dark === true) === dark)
 			.map(([id, c]) => ({ id, title: c.title, deleted: c.deleted!, gone: c.deleted! + TRASH_MS, consolidated: this.#state.sessions[`chat:${id}`] === undefined }))
 			.sort((a, b) => b.deleted - a.deleted);
 	}
@@ -1195,7 +1290,7 @@ export class Bridge {
 			if (s.sessions[key] !== undefined) s.sessions[key] = Math.min(s.sessions[key]!, now - quiet);
 		});
 		console.error(`chat: ${id} moved to the Trash`);
-		void this.#redactThread(chat.thread);
+		if (!chat.dark) void this.#redactThread(chat.thread);
 	}
 
 	async #redactThread(root: string) {
@@ -1217,6 +1312,12 @@ export class Bridge {
 	async restoreChat(id: string) {
 		const chat = this.#state.chats[id];
 		if (!chat?.deleted) return;
+		if (chat.dark) {
+			await this.#commit((s) => {
+				if (s.chats[id]) delete s.chats[id]!.deleted;
+			});
+			return;
+		}
 		const room = await this.#chatRoom();
 		const label = `♻ ${chat.title}`;
 		const root = await this.options.matrix.send(room, textContent(label, html(label)));
@@ -1240,7 +1341,7 @@ export class Bridge {
 		await this.#commit((s) => {
 			if (s.chats[id]) Object.assign(s.chats[id]!, { title: clean, titled: true });
 		});
-		if (!chat.deleted && this.#state.chatRoom) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, `✏ Renamed: ${clean}`);
+		if (!chat.deleted && !chat.dark && this.#state.chatRoom) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, `✏ Renamed: ${clean}`);
 	}
 
 	async pinChat(id: string, pinned: boolean) {
@@ -1275,10 +1376,11 @@ export class Bridge {
 			title: c.title,
 			model: c.model,
 			pinned: c.pinned === true,
+			dark: c.dark === true,
 			deleted: c.deleted ?? null,
 			busy: Object.values(this.#state.pending).some((p) => p.chat === id),
 			approvals,
-			modes: this.#modes(),
+			modes: this.#modes(c.dark),
 			dives: [
 				...this.#state.divesOwed.filter((d) => d.chat === id).map((d) => ({ question: d.question, started: null })),
 				...Object.values(this.#state.pending).flatMap((p) => (p.dive?.chat === id ? [{ question: p.dive.question, started: p.dive.started }] : [])),
@@ -1287,14 +1389,22 @@ export class Bridge {
 	}
 
 	// What a chat can run in: main, workhorse and, where the campaigns vault is set up, campaign mode.
-	#modes(): string[] {
+	#modes(dark = false): string[] {
 		const c = this.options.chat;
 		if (!c) return [];
-		return c.campaign ? [c.mainModel, c.workModel, CAMPAIGN_MODE] : [c.mainModel, c.workModel];
+		if (dark) return [c.mainModel, ...(c.pictures ? [PICTURE_MODE] : [])];
+		return [c.mainModel, c.workModel, ...(c.campaign ? [CAMPAIGN_MODE] : []), ...(c.pictures ? [PICTURE_MODE] : [])];
 	}
 
 	// A chat begun on the web gets its Matrix thread at once, rooted at the owner's first message, so the phone has it.
-	async webNewChat(text: string): Promise<string> {
+	// A dark one has no thread: it lives in the web app only.
+	async webNewChat(text: string, dark = false): Promise<string> {
+		if (dark) {
+			const id = await this.#newChat("", text, true);
+			const rest = await this.#command(id, text);
+			if (rest) await this.#chatSubmit(id, rest, `web:${randomUUID()}`, "web");
+			return id;
+		}
 		const room = await this.#chatRoom();
 		const root = await this.options.matrix.send(room, textContent(`🖥 ${text}`, html(`🖥 ${text}`)));
 		const id = await this.#newChat(root, text);
@@ -1306,8 +1416,10 @@ export class Bridge {
 	async webSend(id: string, text: string) {
 		const chat = this.#state.chats[id];
 		if (!chat) throw new Error(`no chat ${id}`);
-		const room = await this.#chatRoom();
-		await this.options.matrix.send(room, { ...textContent(`🖥 ${text}`, html(`🖥 ${text}`)), ...inThread(chat.thread) });
+		if (!chat.dark) {
+			const room = await this.#chatRoom();
+			await this.options.matrix.send(room, { ...textContent(`🖥 ${text}`, html(`🖥 ${text}`)), ...inThread(chat.thread) });
+		}
 		const rest = await this.#command(id, text);
 		if (rest) await this.#chatSubmit(id, rest, `web:${randomUUID()}`, "web");
 	}
@@ -1331,14 +1443,15 @@ export class Bridge {
 	async switchModel(id: string, model: string, reason: string) {
 		const chat = this.#state.chats[id];
 		if (!chat) throw new Error(`no chat ${id}`);
-		if (!this.#modes().includes(model)) throw new Error(`a chat runs in ${this.#modes().join(", ")}, not ${model}`);
+		const modes = this.#modes(chat.dark);
+		if (!modes.includes(model)) throw new Error(`this chat runs in ${modes.join(", ")}, not ${model}`);
 		if (chat.model === model) return;
 		const conversation = (await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx))!;
 		const text = `🔀 Switched to ${model}: ${reason}`;
 		await this.#commitAdmitting(
 			async (tx) => {
 				const admitted = await conversation.submit(tx, { type: "write", entry: { kind: "cosmos.notice", data: { text } } });
-				await configure(tx, conversation.id, this.#chatAgent(model));
+				await configure(tx, conversation.id, this.#chatAgent(model, chat.dark));
 				return admitted;
 			},
 			(s) => {
@@ -1346,7 +1459,7 @@ export class Bridge {
 			},
 		);
 		console.error(`chat: ${id} switched to ${model} by the owner`);
-		if (this.#state.chatRoom) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, text);
+		if (this.#state.chatRoom && !chat.dark) await this.#notice({ room: this.#state.chatRoom, thread: chat.thread }, text);
 	}
 
 	async #onReaction(room: string, event: MatrixEvent) {
