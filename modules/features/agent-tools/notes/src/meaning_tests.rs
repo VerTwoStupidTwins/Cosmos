@@ -104,3 +104,13 @@ fn search_results_are_one_per_note() {
     assert_eq!(out[1]["path"], "b.md");
     assert!(out[1].get("section").is_none());
 }
+
+#[test]
+fn excluded_folders_cover_everything_below_them() {
+    let skip = vec!["copilot".to_string()];
+    assert!(excluded("copilot/skills/obsidian-markdown/SKILL.md", &skip));
+    assert!(excluded("copilot/notes.md", &skip));
+    assert!(!excluded("copilot.md", &skip), "a note named like the folder stays");
+    assert!(!excluded("Worlds/copilot/Skerry.md", &skip), "only the folder at the vault's top");
+    assert!(!excluded("Rules/House rules.md", &skip));
+}

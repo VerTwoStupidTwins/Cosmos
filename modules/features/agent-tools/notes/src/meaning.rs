@@ -43,6 +43,9 @@ pub struct Config {
     pub embedding_model: String,
     #[arg(long, default_value = "reranker")]
     pub reranker_model: String,
+    /// A folder (relative to the vault) to leave out of the index, such as a plugin's own files; repeatable.
+    #[arg(long = "exclude")]
+    pub exclude: Vec<String>,
 }
 
 pub struct Index {
@@ -52,6 +55,7 @@ pub struct Index {
     models: String,
     embedding: String,
     reranker: String,
+    exclude: Vec<String>,
     http: ureq::Agent,
     /// The embedding's dimensions, once the collection is made to fit them.
     dims: OnceLock<usize>,
@@ -84,6 +88,7 @@ impl Index {
             models: config.models.trim_end_matches('/').into(),
             embedding: config.embedding_model.clone(),
             reranker: config.reranker_model.clone(),
+            exclude: config.exclude.iter().map(|f| f.trim().trim_matches('/').to_string()).filter(|f| !f.is_empty()).collect(),
             http: ureq::AgentBuilder::new().timeout(Duration::from_secs(120)).build(),
             dims: OnceLock::new(),
         }))
@@ -231,8 +236,13 @@ impl Index {
     /// Brings the collection in step with the vault, embedding at most `limit` notes.
     pub fn sync(&self, library: &Library, limit: Option<usize>) -> Result<Synced> {
         self.ensure()?;
-        let disk: BTreeMap<String, String> =
-            library.notes_under(&library.root)?.into_iter().map(|found| (found.rel, found.raw)).collect();
+        // Notes in an excluded folder count as gone, so excluding one drops what was indexed from it.
+        let disk: BTreeMap<String, String> = library
+            .notes_under(&library.root)?
+            .into_iter()
+            .filter(|found| !excluded(&found.rel, &self.exclude))
+            .map(|found| (found.rel, found.raw))
+            .collect();
         let indexed = self.indexed()?;
         let plan = plan(&disk, &indexed, &self.embedding);
         let mut synced = Synced::default();
@@ -514,6 +524,11 @@ fn split(section: Section) -> Vec<Section> {
 fn title(path: &str) -> String {
     let name = path.rsplit('/').next().unwrap_or(path);
     name.strip_suffix(".md").unwrap_or(name).to_string()
+}
+
+/// Whether a note is in one of the excluded folders (or below it).
+fn excluded(path: &str, folders: &[String]) -> bool {
+    folders.iter().any(|f| path.strip_prefix(f.as_str()).is_some_and(|rest| rest.starts_with('/')))
 }
 
 /// Every folder a note is in, outermost first: "Worlds/Vantle/Skerry.md" is in "Worlds" and "Worlds/Vantle".

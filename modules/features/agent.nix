@@ -187,6 +187,9 @@
           collection
           "--models"
           cfg.models.endpoint
+          # Obsidian Copilot's saved chats and skill docs: the plugin's files, not the owner's notes.
+          "--exclude"
+          "copilot"
         ];
       # Each vault by its collection's name.
       indexedVaults = lib.optionalAttrs meaningSearch (
