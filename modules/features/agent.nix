@@ -87,6 +87,15 @@
         meta.mainProgram = "observe";
       };
 
+      # The web through Tavily: search and page reading.
+      web = pkgs.rustPlatform.buildRustPackage {
+        pname = "web";
+        version = "0.1.0";
+        src = ./agent-tools/web;
+        cargoLock.lockFile = ./agent-tools/web/Cargo.lock;
+        meta.mainProgram = "web";
+      };
+
       # Long-term memory (memory-store.nix runs its Qdrant): items, session topics and past exchanges.
       memory = pkgs.rustPlatform.buildRustPackage {
         pname = "memory";
@@ -279,6 +288,12 @@
           };
         };
 
+        web = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = "Give investigations, campaign chats and work chats web search and page reading (Tavily; its key is tavily-api-key in secrets/common.yaml).";
+        };
+
         netbirdApi = lib.mkOption {
           type = lib.types.bool;
           default = true;
@@ -457,6 +472,11 @@
               expose = false;
             });
           };
+          # Web search and page reading; the bridge gives them to investigations, campaign chats and work chats only.
+          agent.tools.web = lib.mkIf cfg.web {
+            command = [ (lib.getExe web) ];
+            about = "[Web]";
+          };
           # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
           # consolidation, announcements and undo are for the bridge.
           agent.tools.memory = lib.mkIf config.services.qdrant.enable {
@@ -521,6 +541,9 @@
             sopsFile = ../../secrets/${config.networking.hostName}.yaml;
           };
           # The read-only NetBird token (CosmosAuditor, modules/features/netbird-api.nix) for the netbird_access tool.
+          sops.secrets.tavily-api-key = lib.mkIf cfg.web {
+            sopsFile = ../../secrets/common.yaml;
+          };
           sops.secrets.netbird-api-token = lib.mkIf cfg.netbirdApi {
             sopsFile = ../../secrets/common.yaml;
           };
@@ -578,6 +601,8 @@
               ]
               # memory reads it from $CREDENTIALS_DIRECTORY.
               ++ lib.optional hasMemory "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}"
+              # web reads it from $CREDENTIALS_DIRECTORY.
+              ++ lib.optional cfg.web "tavily-api-key:${config.sops.secrets.tavily-api-key.path}"
               ++ lib.optional cfg.netbirdApi "netbird-api-token:${config.sops.secrets.netbird-api-token.path}"
               ++ lib.optional cfg.chat.enable "chat-theme-token:${config.sops.secrets.chat-theme-token.path}"
               ++ lib.optional (

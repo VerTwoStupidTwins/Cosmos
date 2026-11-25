@@ -146,13 +146,15 @@ const calls: Record<string, ServerCall> = {};
 let campaignTools: Extension | undefined;
 let loreTools: Extension | undefined; // the campaigns vault read-only, for the background investigator
 let notesTools: Extension | undefined; // the notes vault's, which campaign chats get too
+let webTools: Extension | undefined; // the web: registered, for investigations, campaign chats and work chats only
 for (const [name, server] of Object.entries(config.tools)) {
 	const tools = await mcpExtension(name, server);
 	for (const tool of tools.approval) approval.add(tool);
-	if (name === "campaign" || name === "lore") {
+	if (name === "campaign" || name === "lore" || name === "web") {
 		registry.install(tools.extension);
 		if (name === "campaign") campaignTools = tools.extension;
-		else loreTools = tools.extension;
+		else if (name === "lore") loreTools = tools.extension;
+		else webTools = tools.extension;
 	} else install(tools.extension, name !== "memory");
 	if (name === "notes") notesTools = tools.extension;
 	calls[name] = tools.call;
@@ -200,6 +202,7 @@ const bridge = new Bridge({
 			homelab,
 			handOff: HandOff,
 			handBack: HandBack,
+			...(webTools && { web: webTools }),
 			...(campaignTools &&
 				loreTools && {
 					campaign: { tools: campaignTools, lore: loreTools, investigate: Investigate, drop: notForCampaigns, ...(notesTools && { notes: notesTools }) },
