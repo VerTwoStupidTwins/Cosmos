@@ -1,13 +1,14 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
-# Clients ask for a role: main (and helper) on the RX 7900 XT for everyday chats, quick automations and Hermes'
-# background jobs; workhorse on the P100 pair for deep analysis, coding and long work; vision, transcription,
-# decision, embedding and reranker on the Arc Pro B50.
+# Clients ask for a role: main (also called workhorse) on the RX 7900 XT for chats and long work alike; helper, which
+# names chats, on one P100; image on the other; vision, transcription, decision, embedding and reranker on the Arc Pro
+# B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
 
   helpers = "/models/helpers";
+  imageModels = "/models/image/qwen-image-2.1";
 
   # The B50 is the only Intel card, so SYCL's first device. Its five models together peak at 12.9 GB of its 16.
   # Gemma needs about 1.5 GB more while it reads a picture; short of it, it crashes.
@@ -30,91 +31,107 @@ in
       # The agent on lugh thinks with these models (modules/features/agent.nix).
       llm.openOnMesh = true;
 
-      # Swift 1.5 on Qwen3.8-27B with a Heretic edit against refusals: mradermacher's Q6_K, which carries the
-      # model's MTP head. It spans both P100s through Kmic-68's fork (llama.cuda.src). It reads prompts at about 430
-      # tokens a second and writes 50-70 with MTP, on cool cards. The most capable model, and the slowest.
-      llm.models.workhorse = {
-        backend = "cuda";
-        aliases = [ "swift-27b-heretic" ];
+      # Ornith 1.5 35B-A3B (a Qwen 3.5-family MoE), abliterated: gbuzhf's APEX-I-Mini quant with its MTP head. It
+      # replaced Gemma 12B as main and Swift 27B as workhorse (2026-11-25): on the agent test it solved as many tasks as
+      # Swift (10 of 12) in about 60% of the time, called tools right in all 18 cases with 5 and with 55 tools, and
+      # finished the long-session test. It reads about 2,300 tokens a second and writes 125-165 with MTP, against
+      # Swift's 430 and 50-70 on both P100s.
+      llm.models.main = {
+        backend = "rocm";
+        # Clients that ask for workhorse get it with thinking on; main runs without unless a request asks.
+        aliases = [
+          "workhorse"
+          "ornith-35b"
+        ];
         args = [
-          "-m /models/swift-qwen3.8-27b-heretic/Swift-Qwen3.8-27b-heretic.Q6_K.gguf"
+          "-m /models/ornith-1.5-35b/Ornith-1.5-35B-A3B-Abliterated-MTPv2-APEX-I-Mini-v2D-lite.gguf"
+          "-dev ROCm0"
           "-ngl 99"
-          # Splits each layer across both cards, which the fork tunes its exchange for. Faster than a layer split.
-          "-sm tensor"
-          "-dev CUDA0,CUDA1"
           "-fa on"
-          # The full native context, shared by two slots: one long conversation can use all of it, and a second job
-          # needn't wait for the first. With MTP, the fork crashes with four slots (it can't roll back rejected
-          # drafts on the recurrent layers of several sequences); two passed every test. The cards are left with
-          # about 350 MB free at the peak, so there's no room for the vision projector.
+          # The full native context, shared by two slots, so a background job needn't wait for a chat. 18.8 GB of the
+          # card's 20 after a 21K prompt.
           "-c 262144"
           "-np 2"
           "--kv-unified"
-          "-ctk q4_0 -ctv q4_0"
-          # Prompts are read in chunks of 1024: after an edit or a regenerated answer the cache resumes at the last
-          # chunk, so half as much is read again as with 2048. Cold prompts read 4-5% slower, and two slots share
-          # the cards more evenly.
-          "-b 2048 -ub 1024"
-          # The model's own MTP head drafts four tokens at a time; two to six were measured, and four was fastest.
-          # It doubles to triples the writing speed. -ubd is the fork's own: the draft's batch size.
+          "-ctk q8_0 -ctv q8_0"
+          # The model's MTP head drafts two tokens at a time.
           "--spec-type draft-mtp"
-          "--spec-draft-n-max 4"
-          "--spec-draft-p-min 0.2"
-          "-ngld 99 -ubd 64"
-          "-ctkd q4_0 -ctvd q4_0"
+          "--spec-draft-n-max 2"
+          "-ngld 99"
+          "-ctkd q8_0 -ctvd q8_0"
           # Its recurrent layers resume a prompt only from a saved state, so other prompts are kept in RAM to resume
           # from rather than reading them again.
           "--cache-ram 32768"
           "--jinja"
-          # Its own template, except that it accepts a system message later in a conversation (the agent sends a changed
-          # prompt section there instead of rewriting the start, which would make it read the whole conversation again).
-          "--chat-template-file ${./workhorse-template.jinja}"
+          # Its own template, except that a system message later in a conversation is kept as a system turn; the
+          # original drops it without a word.
+          "--chat-template-file ${./main-template.jinja}"
           # The model card's sampling.
-          "--temp 1.0 --top-k 20 --top-p 0.95 --min-p 0.0"
+          "--temp 0.6 --top-p 0.95 --top-k 20 --min-p 0"
         ];
-        # The fork's drafts sample like the target, as the model card's sampling above.
-        env = {
-          LLAMA_SPEC_SAMPLE_TEMP = "1.0";
-          LLAMA_SPEC_DRAFT_TOPK = "20";
-        };
+        requestDefaults.main.chat_template_kwargs.enable_thinking = false;
       };
 
       # Gemma 4 12B with a Heretic (ARA) edit on Google's QAT weights, by SC117, in the Q4_0 those weights were
       # trained for; Gemma's own MTP head drafts for it. On lugh's helper test with real Hermes sessions it beat
       # Ornith 9B, lugh's helper: titles 29/30 against 20, memory capture 35/39 against 35, compression 62/68
-      # against 61, with no refusals and summaries a fifth the length; a title took 1.3 s while a compression ran.
-      # It reads long prompts at about 1,000 tokens a second and writes 55-95, faster when the answer follows its
-      # input. It takes 9.4 GB of the card's 20, which leaves room for an image model.
-      llm.models.main = {
-        backend = "rocm";
+      # against 61, with no refusals and summaries a fifth the length. It names the agent's chats; main compacts
+      # them itself. On a P100 through the fork it reads about 390 tokens a second and writes about 50; at 64K it
+      # took 8.2 GB of the card's 16, and it held 160K in a test, so 96K leaves room.
+      llm.models.helper = {
+        backend = "cuda";
+        aliases = [ "gemma-4-12b-heretic" ];
         args = [
           "-m ${helpers}/gemma-4-12b-heretic-qat-sc117/gemma-4-12B-it-heretic-QAT-UD-Q4_K_XL.gguf"
-          "-dev ROCm0"
+          # The second P100 in PCI order; the first draws images.
+          "-dev CUDA1"
           "-ngl 99"
           "-fa on"
-          # Shared by two slots, so a helper job can run beside a chat.
+          # Shared by two slots, so a title needn't wait for another job.
           "-c 96000"
           "-np 2"
           "--kv-unified"
           "-ctk q8_0 -ctv q8_0"
-          # Gemma's MTP head drafts three tokens at a time: rewrites and JSON ran about 1.7 times faster, prose
-          # about the same. Six drafts were slower.
           "-md ${helpers}/gemma-4-12b-heretic-qat-sc117/mtp-gemma-4-12B-it.gguf"
           "--spec-type draft-mtp"
           "-ngld 99"
           "--jinja"
-          # Google's recommended sampling.
-          "--temp 1.0 --top-k 64 --top-p 0.95"
+          # Steady sampling for background jobs; it doesn't think (the helper test ran without it).
+          "--temp 0.3 --top-k 64 --top-p 0.95"
         ];
-        # One model under two names. Chats get Google's sampling; Hermes' background jobs (titles, memory capture,
-        # compression) a steadier one. Neither thinks unless a request asks: the helper test ran without it.
-        requestDefaults = {
-          main.chat_template_kwargs.enable_thinking = false;
-          helper = {
-            temperature = 0.3;
-            chat_template_kwargs.enable_thinking = false;
-          };
-        };
+        requestDefaults.helper.chat_template_kwargs.enable_thinking = false;
+      };
+
+      # Qwen-Image 2.1 with chatrlabs' Omni adapter (uncensored: explicit scenes and anime as well as photos), Q8, with
+      # chatrlabs' 8-step Turbo LoRA merged in (sd-cli -M convert; sd-server doesn't take LoRAs from a prompt). Its text
+      # encoder (Qwen3-VL-8B, Qwen's Q4_K_M), the model and the VAE all run on the first P100: about 55 s for a
+      # 1024x1024 image, peak 15.2 GB of 16. 1024x1536 takes about 100 s; at 1536x1536 the VAE decodes in tiles on its
+      # own. OpenAI's /v1/images/generations takes a prompt and a size; other settings ride in the prompt as
+      # <sd_cpp_extra_args>{...}</sd_cpp_extra_args>.
+      llm.models.image = {
+        command = lib.concatStringsSep " " [
+          (lib.getExe' (pkgs.stable-diffusion-cpp.override {
+            cudaSupport = true;
+            inherit (config.gpu.nvidia) cudaPackages;
+          }) "sd-server")
+          "--listen-port \${PORT}"
+          "--backend te=cuda0,diffusion=cuda0,vae=cuda0"
+          "--diffusion-model ${imageModels}/chatrlabs-omni-turbo-Q8_0.gguf"
+          "--llm ${imageModels}/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          "--vae ${imageModels}/vae/qwen_image_2.1_vae_bf16.safetensors"
+          # The Turbo LoRA's settings.
+          "--steps 8"
+          "--cfg-scale 1"
+          "--sampling-method euler"
+          "-W 1024 -H 1024"
+          # Otherwise every request uses seed 42, and the same prompt always gives the same image.
+          "--seed -1"
+        ];
+        # The same card numbers as llama.cpp's CUDA models.
+        env.CUDA_DEVICE_ORDER = "PCI_BUS_ID";
+        units = config.llama.backends.cuda.units;
+        # sd-server answers at once and loads its models with the first request, which takes a few seconds longer.
+        checkEndpoint = "/";
       };
 
       # Gemma 4 E4B with a Heretic edit, Q4_K_M: pictures, handwriting, translation and quick text jobs. It read the

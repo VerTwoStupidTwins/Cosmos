@@ -380,21 +380,21 @@
                     description = ''
                       The model's chat template accepts a system message later in a conversation, so a changed prompt
                       section (such as memory's core items) goes in there instead of rewriting the start, which keeps
-                      llama.cpp's cache. Verified for workhorse (with its patched template) and helper/main (Gemma 4).
+                      llama.cpp's cache. Verified for main/workhorse (Ornith, with its patched template) and helper (Gemma 4).
                     '';
                   };
                 };
               }
             );
             default = {
-              # 262K shared by its two slots (modules/hosts/nabu/llm.nix).
+              # One model under both names, 262K shared by its two slots (modules/hosts/nabu/llm.nix).
               workhorse = {
                 contextWindow = 131072;
                 reasoning = true;
                 midConvoSystem = true;
               };
               main = {
-                contextWindow = 32768;
+                contextWindow = 131072;
                 midConvoSystem = true;
               };
             };
