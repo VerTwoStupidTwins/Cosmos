@@ -116,6 +116,12 @@ export function chatItems(entries: readonly EntryRecord[]): ChatItem[] {
 			answer = undefined;
 			continue;
 		}
+		// An investigation's findings: shown as they are, not as the message the model got them in.
+		if (entry.kind === "cosmos.dive") {
+			items.push({ kind: "dive", question: String(data(entry).question ?? ""), text: String(data(entry).text ?? ""), ...stamp(entry) });
+			answer = undefined;
+			continue;
+		}
 		for (const message of (entry.model ?? []) as unknown as Message[]) {
 			if (message.role === "user") {
 				items.push({ kind: "user", text: textOf(message.content).replace(/\n\n<memories>[\s\S]*$/, ""), from: "", at: message.timestamp });

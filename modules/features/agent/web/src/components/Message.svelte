@@ -22,6 +22,16 @@
 		{#if item.at}<span class="time">{clock(item.at)}</span>{/if}
 		<span class="rule"></span>
 	</div>
+{:else if item.kind === "dive"}
+	<article class="entry answer work dive">
+		<header>
+			<span class="tag">Dive</span>
+			<span class="question">{item.question}</span>
+			<span class="leader"></span>
+			{#if item.at}<span class="time">{clock(item.at)}</span>{/if}
+		</header>
+		<div class="prose" use:codeBlocks={""}>{@html markdown(item.text)}</div>
+	</article>
 {:else if item.kind === "user"}
 	<article class="entry own">
 		<header>
@@ -77,6 +87,7 @@
 	}
 	.answer .prose { overflow-wrap: anywhere; padding-left: 12px; border-left: 2px solid var(--line); }
 	.answer.work .prose { border-left-color: var(--frame); }
+	.dive .question { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 12px; }
 
 	.tools { margin: 0 0 8px 12px; font-size: 11.5px; }
 	.tools summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; color: var(--dim); }

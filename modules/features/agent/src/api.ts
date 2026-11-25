@@ -8,7 +8,9 @@ export type ToolCall = { name: string; args: string; id?: string; result?: strin
 export type ChatItem =
 	| { kind: "user"; text: string; from: string; at?: number }
 	| { kind: "answer"; text: string; tools: ToolCall[]; at?: number; model?: string; tokens?: number; ms?: number }
-	| { kind: "notice"; text: string; at?: number };
+	| { kind: "notice"; text: string; at?: number }
+	// A campaign chat's investigation, finished: its question and findings (Markdown).
+	| { kind: "dive"; question: string; text: string; at?: number };
 
 // A chat in the list.
 export type ChatSummary = { id: string; title: string; model: string; updated: number; pinned: boolean; busy: boolean };
@@ -24,6 +26,8 @@ export type ChatDetail = {
 	approvals: { event: string; call: string; preview: string }[]; // preview: Markdown (approval.ts)
 	// What the chat can switch to: MAIN_MODEL, WORK_MODEL and, where the campaigns vault is set up, CAMPAIGN_MODE.
 	modes: string[];
+	// Investigations of a campaign chat still running (started: when, or null while queued).
+	dives: { question: string; started: number | null }[];
 };
 
 // One server-sent event of a chat: its state, the answer being written, and its items when they changed.

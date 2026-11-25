@@ -135,6 +135,13 @@
 				<div class="call prose" use:codeBlocks={""}>{@html markdown(approval.preview, { diagrams: false })}</div>
 			</div>
 		{/each}
+		{#each chat?.dives ?? [] as dive, i (i)}
+			<div class="banner plate dive-run" style="--br: 8px">
+				<span class="tag">Dive</span>
+				<span class="grow">Workhorse is investigating: {dive.question}</span>
+				<span class="state dots">{dive.started === null ? "queued" : "digging"}</span>
+			</div>
+		{/each}
 		{#if busy}
 			<article class="pending">
 				<header>
@@ -160,6 +167,7 @@
 	.start p { margin: 0; max-width: 420px; font-size: 12.5px; }
 	.banner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin: 0 0 18px; --frame-solid: color-mix(in srgb, var(--warn) 60%, var(--bg)); }
 	.grow { flex: 1; min-width: 160px; }
+	.dive-run { --frame-solid: color-mix(in srgb, var(--accent-color) 45%, var(--bg)); }
 	.call { flex: 1 1 100%; font-size: 13px; overflow-wrap: anywhere; }
 	.pending { margin: 0 0 18px; }
 	.pending header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }

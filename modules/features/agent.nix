@@ -443,6 +443,20 @@
                 vault = config.notes.extraVaultPaths.campaigns;
                 about = "[Campaigns vault: the owner's D&D campaigns and worlds; its rules: AGENTS.md]";
               });
+          # The same vault, read-only, for the background investigator of campaign chats.
+          agent.tools.lore = lib.mkIf (config ? notes && config.notes.extraVaultPaths ? campaigns) {
+            command = [
+              (lib.getExe config.notes.package)
+              "--vault"
+              config.notes.extraVaultPaths.campaigns
+              "serve"
+              "--read-only"
+            ];
+            about = "[Campaigns vault, read-only: the owner's D&D campaigns and worlds; its rules: AGENTS.md]";
+            tools = lib.genAttrs [ "create" "edit" "move" ] (_: {
+              expose = false;
+            });
+          };
           # Long-term memory, where its Qdrant runs. The model gets recall, get, list and the writes; indexing,
           # consolidation, announcements and undo are for the bridge.
           agent.tools.memory = lib.mkIf config.services.qdrant.enable {

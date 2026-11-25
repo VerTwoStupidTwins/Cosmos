@@ -48,11 +48,25 @@ const emptyState = (): BridgeState => ({
 	scheduleLast: {},
 	chatRoom: null,
 	chats: {},
+	divesOwed: [],
 });
 
 // A message still owed its answer. `text` and `previous` are what memory stores of it once answered; `thread` is set
 // when the answer belongs in a thread (a reply under a Memory room notice).
-type Pending = { room: string; event: string; thread?: string; text?: string; previous?: string; schedule?: boolean; chat?: string };
+// `dive`: a campaign chat's background investigation, whose findings go back into that chat (not to memory).
+type Pending = {
+	room: string;
+	event: string;
+	thread?: string;
+	text?: string;
+	previous?: string;
+	schedule?: boolean;
+	chat?: string;
+	dive?: { chat: string; question: string; started: number };
+};
+
+// An investigation a campaign chat asked for, not yet started (`key`: unique, from the answer that asked).
+type DiveRequest = { chat: string; question: string; context: string; key: string };
 
 // A chat: one conversation, shared by the web app and a thread in the Matrix Chat room (`thread`, its root event).
 // Keyed by conversation ID. `model` is the catalog model it is on now.
@@ -71,7 +85,8 @@ export type ChatOptions = {
 	handBack: Extension; // what only workhorse gets in a chat: hand_back
 	// Campaign mode (CAMPAIGN_MODE), where the campaigns vault is set up: its tools, and the notes vault's, which a
 	// campaign chat keeps while the other homelab tools go.
-	campaign?: { tools: Extension; notes?: Extension };
+	// lore: the vault read-only, for the investigator; investigate: its tool; drop: defaults neither of them needs.
+	campaign?: { tools: Extension; notes?: Extension; lore: Extension; investigate: Extension; drop: Extension[] };
 };
 
 const CHAT_MAIN = [
@@ -106,28 +121,48 @@ const CHAT_WORK = [
 	"hand_back with a short reason and tell the owner in one line that main takes it from here. Not while work is",
 	"still going on. Saying it does nothing by itself: always call hand_back.",
 ].join(" ");
-// Told to main when campaign mode exists: when to hand off there instead.
+// Told to main when campaign mode exists: when to switch the chat there.
 const CHAT_MAIN_CAMPAIGN = [
 	"The owner also runs D&D campaigns (5e 2024, homebrew worlds) kept in their campaigns vault. When the conversation",
 	'turns to a campaign, a world, NPCs, places, sessions or other worldbuilding, call hand_off with to: "campaign":',
-	"workhorse takes over as their co-writer, with the vault. You don't have the campaigns vault yourself.",
+	"the chat moves to campaign mode, where you have the campaigns vault and a background investigator.",
 ].join(" ");
 const CHAT_CAMPAIGN = [
-	"This chat is in campaign mode: you are workhorse, the owner's co-writer for their D&D campaigns (5e 2024 rules,",
-	"homebrew worlds). The campaign__ tools are their campaigns vault. Before writing anything, read its rules note,",
-	"AGENTS.md, and follow it: know which campaign you're working on (ask if it isn't clear), read that campaign's note",
-	"and its world's note, fill templates from _templates/ in rather than copying them, and keep secrets out of",
-	"anything players see. New material goes in as drafts with campaign__create (it lands in the inbox); changing or",
-	"moving an existing note (campaign__edit, campaign__move) waits for the owner's approval, so propose it and say",
-	"why. You also have their personal notes (notes__) and memory: an idea from either may fit the other, and you may",
-	"say so. When you remember something from this chat, tag it \"campaign\" and the campaign's name (memory shows each",
-	"item's tags, so you can tell where an idea came from). Be a creative partner: offer options, ask what they want,",
-	"build on their ideas rather than replacing them.",
-	"When the talk leaves the campaign, call hand_back with a short reason and tell the owner in one line.",
+	"This chat is in campaign mode: you are main, the owner's fast brainstorming partner for their D&D campaigns (5e 2024",
+	"rules, homebrew worlds). Keep it quick and conversational: short replies, a few options at a time, questions back;",
+	"build on their ideas rather than replacing them, and leave the writing of documents to them. The campaign__ tools",
+	"are their campaigns vault: look things up when it helps (its rules note is AGENTS.md; know which campaign you're",
+	"in, and ask if it isn't clear). When an idea seems worth keeping, offer to save it; if they agree, write a short",
+	"note with campaign__create (type: idea, status: draft, source: llm, the campaign or world property, a few lines in",
+	"their words). Changing or moving an existing note waits for their approval. For a question that needs digging",
+	"(testing a plot theory, what past events imply, how factions, places and history connect, contradictions,",
+	"real-world historical parallels), call investigate with the question and what the investigator should know:",
+	"workhorse researches it in the background and its findings come back into this chat in a few minutes. Say so in",
+	"one line and keep brainstorming meanwhile; when findings arrive, pick out what matters for the story. You also",
+	"have their personal notes (notes__) and memory: an idea from either may fit the other. When you remember something",
+	'from this chat, tag it "campaign" and the campaign\'s name. When the talk leaves the campaign, call hand_back.',
 ].join(" ");
+// The background investigator's instructions (workhorse, read-only vault, memory).
+const DIVE = [
+	"You are workhorse, investigating a question for the owner's D&D campaign (5e 2024 rules, homebrew world) while they",
+	"keep brainstorming with main. The lore__ tools read their campaigns vault; its rules note AGENTS.md explains the",
+	"layout and what counts as canon. Dig: read the campaign's note and its world's note, then the notes on the people,",
+	"places, factions, lore, arcs, threads and sessions involved; follow links, and look for timelines, causes and",
+	"consequences. Memory may hold ideas from earlier chats. Also draw on real-world history: events, eras, cultures or",
+	"figures that parallel the situation and could inspire it, marked plainly as real-world parallels. Then answer in",
+	"compact Markdown with these parts, leaving out any that would be empty: **Findings** (what the vault establishes,",
+	"naming the notes), **Implications** (what follows for the story), **Ideas** (two to four directions it could take),",
+	"**Real-world parallels**, **Open questions** (gaps and contradictions). Keep canon and speculation clearly apart.",
+	"Don't write or change notes, don't store memories, no preamble.",
+].join(" ");
+const divePrompt = (question: string, context: string) =>
+	`Question: ${question}${context.trim() ? `\n\nWhat the chat knows: ${context.trim()}` : ""}`;
+// The investigator's findings, as the campaign chat's model gets them.
+const diveFindings = (question: string, findings: string) =>
+	`[The investigation you started has finished. Question: ${question}]\n\n${findings}\n\n[The owner sees these findings in full above your reply. In a few lines, say what stands out and how it could shape the story, then carry on the conversation.]`;
 const handOffPrompt = (reason: string, to: string) =>
 	to === CAMPAIGN_MODE
-		? `[main handed this conversation to you, workhorse, in campaign mode, because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
+		? `[main switched this chat to campaign mode because: ${reason}. Pick up the owner's last request, with the campaigns vault.]`
 		: `[main handed this conversation to you, workhorse, because: ${reason}. Pick up the owner's last request and do the work, with your tools where they help.]`;
 
 type BridgeState = {
@@ -150,11 +185,13 @@ type BridgeState = {
 	// Chats: the Matrix room their threads live in, and each chat.
 	chatRoom: string | null;
 	chats: Record<string, ChatInfo>;
+	// Investigations asked for in campaign chats and not started yet (started ones are pending, with `dive`).
+	divesOwed: DiveRequest[];
 };
 
 export const BridgeDoc = defineDoc<BridgeState>({
 	kind: "cosmos.bridge",
-	version: 5,
+	version: 6,
 	scope: "session",
 	initial: emptyState,
 	migrate: (value) => ({ ...emptyState(), ...(value as Partial<BridgeState>) }),
@@ -283,6 +320,7 @@ export class Bridge {
 		this.#state = structuredClone((await harness.snapshot(BridgeDoc, this.#ctx)) ?? emptyState()) as BridgeState;
 		this.#me = (await this.options.matrix.whoami()).user_id;
 		for (const id of Object.keys(this.#state.pending)) this.#deliver(id);
+		void this.#startDives();
 		void this.#syncLoop();
 		void this.#typingLoop();
 		if (this.options.memory) void this.#memoryLoop();
@@ -672,6 +710,11 @@ export class Bridge {
 						answered = true;
 					} else markdown = `⚠ No answer: ${"reason" in settled ? settled.reason : settled.status}${"detail" in settled && settled.detail ? ` (${settled.detail})` : ""}`;
 				}
+				if (owed.dive) {
+					await this.#diveFinished(id, owed, markdown, answered);
+					this.#delivering.delete(id);
+					return;
+				}
 				if (owed.schedule && !owed.thread) {
 					// A scheduled run: its answer is a post of its own, its tool lines go under it, and a quiet job
 					// that found nothing posts nothing.
@@ -710,6 +753,9 @@ export class Bridge {
 				const target = onMain ? (request?.to === CAMPAIGN_MODE && c?.campaign ? CAMPAIGN_MODE : c?.workModel) : c?.mainModel;
 				const next: Pending | undefined =
 					reason !== undefined && onMain ? { room: owed.room, event: `handoff:${owed.chat}:${id}`, thread: chat!.thread, chat: owed.chat! } : undefined;
+				// Investigations a campaign answer asked for, started once it's settled (queued in the same commit, so a crash
+				// can't lose them).
+				const dives = answered && chat?.model === CAMPAIGN_MODE && owed.chat && c?.campaign ? await this.#callsWhileAnswering(owed.chat, "investigate") : [];
 				// Looked up before the commit: a Harness read inside a commit waits for that commit, for ever.
 				const conversation = reason !== undefined ? await this.#harness!.conversation(Number(owed.chat) as ConversationId, this.#ctx) : undefined;
 				const continued = await this.#commitAdmitting(
@@ -724,6 +770,9 @@ export class Bridge {
 					},
 					(s, admitted) => {
 						delete s.pending[id];
+						for (const [i, d] of dives.entries()) {
+							s.divesOwed.push({ chat: owed.chat!, question: String(d.question ?? ""), context: String(d.context ?? ""), key: `${id}:${i}` });
+						}
 						if (remember) {
 							if (!s.toIndex.some((x) => x.event === exchange.event)) s.toIndex.push(exchange);
 							if (this.#consolidated(owed.room)) s.sessions[key] = at;
@@ -735,6 +784,7 @@ export class Bridge {
 					},
 				);
 				if (remember) void this.#flushIndex();
+				if (dives.length > 0) void this.#startDives();
 				if (continued !== undefined && chat && !chat.deleted) {
 					console.error(`chat: ${owed.chat} handed to ${target}: ${reason}`);
 					await this.#notice({ room: owed.room, thread: chat.thread }, `🔀 Switched to ${target}: ${reason}`);
@@ -773,10 +823,10 @@ export class Bridge {
 	#chatAgent(model: string): AgentChange {
 		const c = this.options.chat!;
 		if (model === CAMPAIGN_MODE && c.campaign) {
-			const { tools, notes } = c.campaign;
+			const { tools, notes, investigate, drop } = c.campaign;
 			return {
-				model: { provider: "nabu", modelId: c.workModel },
-				extensions: { add: [c.handBack, tools], remove: c.homelab.filter((e) => e !== notes) },
+				model: { provider: "nabu", modelId: c.mainModel },
+				extensions: { add: [c.handBack, tools, investigate], remove: [...c.homelab.filter((e) => e !== notes), ...drop] },
 				instructions: `${CHAT_CAMPAIGN} ${CHAT_DIAGRAMS}`,
 			};
 		}
@@ -784,6 +834,13 @@ export class Bridge {
 		return model === c.mainModel
 			? { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handOff], remove: c.homelab }, instructions: `${main} ${CHAT_DIAGRAMS}` }
 			: { model: { provider: "nabu", modelId: model }, extensions: { add: [c.handBack] }, instructions: `${CHAT_WORK} ${CHAT_DIAGRAMS}` };
+	}
+
+	// A campaign chat's background investigator: workhorse with the campaigns vault read-only and memory, nothing else.
+	#diveAgent(): AgentChange {
+		const c = this.options.chat!;
+		const { lore, drop } = c.campaign!;
+		return { model: { provider: "nabu", modelId: c.workModel }, extensions: { add: [lore], remove: [...c.homelab, ...drop] }, instructions: DIVE };
 	}
 
 	// The Chat room: made on the first chat, with the owner invited.
@@ -893,7 +950,7 @@ export class Bridge {
 		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
 		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
 		for (const entry of page?.items ?? []) {
-			if (entry.kind === "cosmos.message" || entry.kind === "pi.user" || entry.kind === "cosmos.handoff") return undefined;
+			if (["cosmos.message", "pi.user", "cosmos.handoff", "cosmos.dive"].includes(entry.kind)) return undefined;
 			for (const message of entry.model ?? []) {
 				if (message.role !== "assistant") continue;
 				for (const part of message.content) {
@@ -905,6 +962,125 @@ export class Bridge {
 			}
 		}
 		return undefined;
+	}
+
+	// The arguments of every call to `tool` in the chat's last answer (newest first in the transcript, up to the message
+	// it answered).
+	async #callsWhileAnswering(id: string, tool: string): Promise<Record<string, unknown>[]> {
+		const conversation = await this.#harness!.conversation(Number(id) as ConversationId, this.#ctx);
+		const page = await conversation?.entries({}, 40, undefined, this.#ctx);
+		const calls: Record<string, unknown>[] = [];
+		for (const entry of page?.items ?? []) {
+			if (["cosmos.message", "pi.user", "cosmos.handoff", "cosmos.dive"].includes(entry.kind)) break;
+			for (const message of entry.model ?? []) {
+				if (message.role !== "assistant") continue;
+				for (const part of message.content) {
+					if (part.type === "toolCall" && part.name === tool) calls.push(part.arguments);
+				}
+			}
+		}
+		return calls.reverse();
+	}
+
+	// ---- investigations (campaign chats)
+
+	#diving = false;
+
+	// Starts each investigation asked for: a conversation of its own on workhorse, silent in Matrix, whose answer comes
+	// back into the chat (#diveFinished).
+	async #startDives() {
+		if (this.#diving) return;
+		this.#diving = true;
+		try {
+			while (this.#state.divesOwed.length > 0) {
+				const d = this.#state.divesOwed[0]!;
+				const chat = this.#state.chats[d.chat];
+				if (!chat || chat.deleted || !this.options.chat?.campaign || !d.question.trim()) {
+					await this.#commit((s) => {
+						s.divesOwed = s.divesOwed.filter((x) => x.key !== d.key);
+					});
+					continue;
+				}
+				const room = await this.#chatRoom();
+				const conversation = await this.#harness!.createConversation(
+					{ ownership: { kind: "ownerless" }, agent: { ...this.#diveAgent(), maxTurns: this.options.maxTurns } },
+					this.#ctx,
+				);
+				const chatConversation = await this.#harness!.conversation(Number(d.chat) as ConversationId, this.#ctx);
+				const notice = `🔎 Investigating: ${d.question}`;
+				const event = `dive:${d.key}`;
+				const started = Date.now();
+				const admitted = await this.#commitAdmitting(
+					async (tx) => {
+						// A line in the chat too, which also tells the page an investigation is running.
+						await chatConversation?.submit(tx, { type: "write", entry: { kind: "cosmos.notice", data: { text: notice, at: started } } });
+						return conversation.submit(tx, { type: "input", content: divePrompt(d.question, d.context), requestId: event });
+					},
+					(s, admitted) => {
+						s.divesOwed = s.divesOwed.filter((x) => x.key !== d.key);
+						if (admitted !== undefined) s.pending[String(admitted)] = { room, event, thread: chat.thread, dive: { chat: d.chat, question: d.question, started } };
+					},
+				);
+				console.error(`chat: ${d.chat} investigating: ${d.question}`);
+				await this.#notice({ room, thread: chat.thread }, notice);
+				if (admitted !== undefined) this.#deliver(String(admitted));
+			}
+		} catch (error) {
+			console.error(`chat: starting an investigation failed: ${String(error)}; retrying in 60 s`);
+			setTimeout(() => void this.#startDives(), 60_000);
+		} finally {
+			this.#diving = false;
+		}
+	}
+
+	// An investigation's findings: posted in the chat's thread, and given to the chat's model as a message of their own
+	// (shown on the page as the findings), which it answers.
+	async #diveFinished(id: string, owed: Pending, findings: string, answered: boolean) {
+		const { chat: chatId, question } = owed.dive!;
+		const chat = this.#state.chats[chatId];
+		const conversation = chat && !chat.deleted ? await this.#harness!.conversation(Number(chatId) as ConversationId, this.#ctx) : undefined;
+		if (!chat || !conversation) {
+			await this.#commit((s) => {
+				delete s.pending[id];
+			});
+			return;
+		}
+		const where = { room: owed.room, thread: chat.thread };
+		if (!answered) {
+			const text = `🔎 The investigation didn't finish (${question}): ${findings.replace(/^⚠\s*/, "")}`;
+			await this.#commitAdmitting(
+				async (tx) => {
+					await conversation.submit(tx, { type: "write", entry: { kind: "cosmos.notice", data: { text } } });
+					return undefined;
+				},
+				(s) => {
+					delete s.pending[id];
+				},
+			);
+			await this.#notice(where, text);
+			return;
+		}
+		const post = `🔎 **Investigation:** ${question}\n\n${findings}`;
+		await this.options.matrix.send(owed.room, { ...textContent(post, html(post)), ...inThread(chat.thread) });
+		const event = `${owed.event}:back`;
+		const admitted = await this.#commitAdmitting(
+			(tx) =>
+				conversation.submit(tx, {
+					type: "input",
+					content: diveFindings(question, findings),
+					requestId: event,
+					entry: { kind: "cosmos.dive", data: { question, text: findings, at: Date.now() } },
+				}),
+			(s, admitted) => {
+				delete s.pending[id];
+				if (admitted !== undefined) s.pending[String(admitted)] = { room: owed.room, event, thread: chat.thread, chat: chatId };
+			},
+		);
+		console.error(`chat: ${chatId} investigation finished: ${question}`);
+		if (admitted !== undefined) {
+			void this.options.matrix.typing(owed.room, this.#me, true);
+			this.#deliver(String(admitted));
+		}
 	}
 
 	// Names a chat after its first exchange, with the helper model; until then it's its first message.
@@ -1093,6 +1269,10 @@ export class Bridge {
 			busy: Object.values(this.#state.pending).some((p) => p.chat === id),
 			approvals,
 			modes: this.#modes(),
+			dives: [
+				...this.#state.divesOwed.filter((d) => d.chat === id).map((d) => ({ question: d.question, started: null })),
+				...Object.values(this.#state.pending).flatMap((p) => (p.dive?.chat === id ? [{ question: p.dive.question, started: p.dive.started }] : [])),
+			],
 		};
 	}
 

@@ -74,18 +74,39 @@ const HandOff = defineExtension({
 	],
 });
 
-// Only in chats on workhorse: the way back to main once the work is done.
+// Only in work and campaign chats: the way back to main's everyday chat once the work or the campaign talk is done.
 const HandBack = defineExtension({
 	name: "hand-back",
 	tools: [
 		defineTool({
 			name: "hand_back",
 			description:
-				"Hand this chat back to main, the quick everyday model, once the work is done and the conversation is casual again. It takes over from the owner's next message.",
+				"Hand this chat back to main's everyday chat once the work (or the campaign talk) is done and the conversation is casual again. It takes over from the owner's next message.",
 			parameters: obj({ reason: str() }),
 			replay: "safe",
 			execute: async () => ({
 				output: [{ type: "text", text: "Noted: main takes over from the owner's next message. Tell the owner in one short line." }],
+			}),
+		}),
+	],
+});
+
+// Only in campaign chats: a question handed to workhorse to research in the background (the bridge starts it once the
+// answer that called it is out, and brings the findings back into the chat).
+const Investigate = defineExtension({
+	name: "investigate",
+	tools: [
+		defineTool({
+			name: "investigate",
+			description:
+				"Send workhorse, the bigger and slower model, to research a question about the campaign in the background: a plot theory, what past events or history imply, how factions, places and people connect, contradictions, real-world historical parallels. It reads the campaigns vault and its findings arrive in this chat in a few minutes; the conversation carries on meanwhile.",
+			parameters: obj({
+				question: str({ description: "The question, self-contained." }),
+				context: opt(str({ description: "What the investigator should know: the campaign and world, ideas from this chat it should weigh." })),
+			}),
+			replay: "safe",
+			execute: async () => ({
+				output: [{ type: "text", text: "Started: workhorse investigates once your answer is out, and its findings come back into this chat in a few minutes. Tell the owner in one line, then keep the conversation going." }],
 			}),
 		}),
 	],
@@ -123,13 +144,15 @@ install(Persona);
 const calls: Record<string, ServerCall> = {};
 // The campaigns vault's tools are for campaign chats only: registered, but in no conversation by default.
 let campaignTools: Extension | undefined;
+let loreTools: Extension | undefined; // the campaigns vault read-only, for the background investigator
 let notesTools: Extension | undefined; // the notes vault's, which campaign chats get too
 for (const [name, server] of Object.entries(config.tools)) {
 	const tools = await mcpExtension(name, server);
 	for (const tool of tools.approval) approval.add(tool);
-	if (name === "campaign") {
+	if (name === "campaign" || name === "lore") {
 		registry.install(tools.extension);
-		campaignTools = tools.extension;
+		if (name === "campaign") campaignTools = tools.extension;
+		else loreTools = tools.extension;
 	} else install(tools.extension, name !== "memory");
 	if (name === "notes") notesTools = tools.extension;
 	calls[name] = tools.call;
@@ -138,14 +161,24 @@ for (const [name, server] of Object.entries(config.tools)) {
 const memory = config.memory && calls.memory ? { call: calls.memory, quietMs: config.memory.quietMinutes * 60_000, roomName: config.memory.roomName } : undefined;
 if (memory) install(memoryExtension(memory.call));
 if (config.testTools) install(TestTools, true);
-if (MapTool) install(MapTool);
+// What campaign chats and investigations leave out of the defaults besides the homelab tools.
+const notForCampaigns: Extension[] = [];
+if (MapTool) {
+	install(MapTool);
+	notForCampaigns.push(MapTool);
+}
 // NetBird's access settings, read-only, when the CosmosAuditor token is given (agent.netbirdApi).
 const netbirdToken = optionalCredential("netbird-api-token");
-if (netbirdToken) install(netbirdExtension(netbirdToken, config.netbirdDeclared));
+if (netbirdToken) {
+	const netbird = netbirdExtension(netbirdToken, config.netbirdDeclared);
+	install(netbird);
+	notForCampaigns.push(netbird);
+}
 // Installed, but in no conversation by default: chats add the one for the model they're on.
 if (config.chat) {
 	registry.install(HandOff);
 	registry.install(HandBack);
+	if (campaignTools && loreTools) registry.install(Investigate);
 }
 
 const bridge = new Bridge({
@@ -167,7 +200,10 @@ const bridge = new Bridge({
 			homelab,
 			handOff: HandOff,
 			handBack: HandBack,
-			...(campaignTools && { campaign: { tools: campaignTools, ...(notesTools && { notes: notesTools }) } }),
+			...(campaignTools &&
+				loreTools && {
+					campaign: { tools: campaignTools, lore: loreTools, investigate: Investigate, drop: notForCampaigns, ...(notesTools && { notes: notesTools }) },
+				}),
 		},
 	}),
 	context,
