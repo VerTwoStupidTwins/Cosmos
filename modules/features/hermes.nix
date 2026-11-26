@@ -14,6 +14,7 @@ in
   flake.modules.nixos.hermes =
     {
       config,
+      options,
       lib,
       pkgs,
       ...
@@ -76,6 +77,32 @@ in
         rev = "4d8add79395c56b785fd730bbc78c5fcd7194b59";
         hash = "sha256-FxsUoK/LulPO6LLHoKoFdC3lYmytNyhMMD+0pSyJDSw=";
       };
+      # Plan mode: Hermes explores read-only and writes a plan; its writes, terminal and MCP tools wait until the owner
+      # approves it.
+      planModePlugin = pkgs.fetchFromGitHub {
+        name = "plan-mode";
+        owner = "100yenadmin";
+        repo = "hermes-plan-mode";
+        rev = "4619a8dca04451bf628f849897bddf0b90669eb2";
+        hash = "sha256-pcJ7tKqfJZA0xuTqysTze8VUDda9i3052b+5jg0mCnU=";
+      };
+      # Obsidian's own skills, for writing the vault's Markdown, Bases and Canvas files properly. Only those three:
+      # the CLI skill needs the desktop app, which lugh doesn't run; Headless signs into the Obsidian account, and the
+      # vault's sync isn't Hermes' business; Defuddle and Knap install npm packages when first used.
+      obsidianPlugin =
+        let
+          src = pkgs.fetchFromGitHub {
+            owner = "obsidianmd";
+            repo = "obsidian-skills";
+            rev = "a53f5910cd68e7bad88ea52f2f4eb95b9aa40800";
+            hash = "sha256-CBBR/Q9DlnSIypdWtaF+usOjHb8Pt0NP+E+LUgAoaIg=";
+          };
+        in
+        pkgs.runCommand "obsidian" { } ''
+          mkdir -p $out/skills
+          cp ${src}/plugins/obsidian/{plugin.json,LICENSE} $out/
+          cp -r ${src}/plugins/obsidian/skills/{obsidian-markdown,obsidian-bases,json-canvas} $out/skills/
+        '';
       # Ours: research subagents on Claude, deep dives on its strongest model, every other subagent local.
       researchRoutingPlugin = pkgs.runCommand "research-routing" { } ''
         cp -r ${./hermes/research-routing} $out
@@ -83,6 +110,7 @@ in
 
       hermesHome = "${cfg.stateDir}/.hermes";
       skillsDir = "${hermesHome}/skills";
+      claudePluginDir = "${hermesHome}/plugins/${claudePlugin.name}";
 
       # Hermes copies its bundled skills out of the Nix store with the store's read-only modes, so it can't edit or
       # patch them. The modes aren't part of the hash Hermes uses to spot user edits, so this doesn't stop updates.
@@ -182,9 +210,16 @@ in
       # fails every cron job. The module makes the home 2770 at boot (tmpfiles) and on every switch (activation), so
       # both are overridden: tmpfiles keeps the first line for a path, and this script runs after the module's.
       systemd.tmpfiles.rules = lib.mkBefore [ "d ${hermesHome} 2750 hermes hermes - -" ];
+      #
+      # Hermes stages a model-provider plugin by copying it and renaming the copy into place, which fails for a
+      # read-only directory from the Nix store (extraPlugins). The Claude provider gets a writable copy instead, made
+      # fresh on every boot and switch; its timestamps are kept, so Hermes sees it as changed only when it is.
       system.activationScripts.hermes-home-private = lib.stringAfter [ "hermes-agent-setup" ] ''
         chmod 2750 ${hermesHome}
         ${unlockSkills}
+        rm -rf ${claudePluginDir}
+        cp -r --no-preserve=mode --preserve=timestamps ${claudePlugin} ${claudePluginDir}
+        chown -R hermes:hermes ${claudePluginDir}
       '';
 
       # Hermes copies new bundled skills as it starts, so each start also unlocks the ones the previous start copied.
@@ -206,6 +241,11 @@ in
         enable = true;
         addToSystemPackages = true;
 
+        # The flake builds Hermes without a version, so it calls itself 0.0.0, and plugins that ask for a minimum
+        # Hermes (VCC, the Claude provider, plan mode) are skipped. This is the release the pinned commit builds on:
+        # `git describe --tags --match 'v0.*' <rev>` in Hermes' repo. Update it with the flake input.
+        package = options.services.hermes-agent.package.default.override { version = "0.23.4"; };
+
         # The dashboard (with everything Hermes Desktop and the phone app use), on loopback behind nginx.
         # dashboard.public_url below makes Hermes trust that name and ask for sign-in.
         backend = {
@@ -226,8 +266,9 @@ in
         # The memory provider (hermes/memory-plugin): recall for every message, every exchange stored, memory_* tools.
         extraPlugins = [
           memoryPlugin
-          claudePlugin
           vccPlugin
+          planModePlugin
+          obsidianPlugin
           researchRoutingPlugin
         ];
         environmentFiles = [ config.sops.templates."hermes.env".path ];
@@ -308,6 +349,8 @@ in
           plugins.enabled = [
             "research-routing"
             "hermes-vcc-engine"
+            "plan-mode"
+            "obsidian"
           ];
 
           # The decision model approves clearly safe commands. Anything it denies or is unsure about asks the owner.
