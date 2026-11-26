@@ -1,8 +1,8 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
-# Clients ask for a role: main (also called workhorse) on the RX 7900 XT for chats and long work alike, swapping with
-# image when a picture is asked for; helper, which names chats, on one P100 (the other is free); vision,
-# transcription, decision, embedding and reranker on the Arc Pro B50.
+# Clients ask for a role: main on the RX 7900 XT for chats, subagents and long work alike, swapping with
+# image when a picture is asked for; helper, which names chats, and speech, Hermes' voice, on one P100 (the other is
+# free); vision, transcription, decision, embedding and reranker on the Arc Pro B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -25,6 +25,53 @@ in
       pkgs,
       ...
     }:
+    let
+      # qwentts.cpp: Qwen3-TTS on GGML, with an OpenAI-style tts-server. Built for the P100s' compute capability only.
+      qwentts =
+        let
+          cuda = config.gpu.nvidia.cudaPackages;
+        in
+        pkgs.stdenv.mkDerivation {
+          pname = "qwentts-cpp";
+          version = "0-unstable-2026-11-26";
+          src = pkgs.fetchFromGitHub {
+            owner = "ServeurpersoCom";
+            repo = "qwentts.cpp";
+            rev = "2edb35f87b709a070b2d5379f77e5c52a1daa585";
+            fetchSubmodules = true;
+            hash = "sha256-3WdKoa/1Jm61vB9eST0RoeC5ks99zBShDlZGHLTfCGA=";
+          };
+          nativeBuildInputs = [
+            pkgs.cmake
+            pkgs.ninja
+            cuda.cuda_nvcc
+            pkgs.autoAddDriverRunpath
+          ];
+          buildInputs = [
+            cuda.cuda_cudart
+            cuda.libcublas
+            cuda.cccl
+          ];
+          cmakeFlags = [
+            "-DGGML_CUDA=ON"
+            "-DCMAKE_CUDA_ARCHITECTURES=60"
+            "-DGGML_NATIVE=OFF"
+            # Its libraries are found next to the programs rather than in the build folder.
+            "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON"
+            "-DCMAKE_INSTALL_RPATH=${placeholder "out"}/lib"
+          ];
+          # Its install rules don't cover the tools; take the programs and libraries from the build.
+          installPhase = ''
+            runHook preInstall
+            mkdir -p $out/bin $out/lib
+            find . -maxdepth 2 -type f -executable \( -name 'qwen-*' -o -name 'tts-*' \) -exec cp {} $out/bin/ \;
+            find . -name '*.so*' -exec cp -P {} $out/lib/ \;
+            runHook postInstall
+          '';
+        };
+
+      voice = "/models/voice/qwen3-tts";
+    in
     {
       imports = [ nixos.llm-swap ];
 
@@ -38,11 +85,8 @@ in
       # Swift's 430 and 50-70 on both P100s.
       llm.models.main = {
         backend = "rocm";
-        # Clients that ask for workhorse get it with thinking on; main runs without unless a request asks.
-        aliases = [
-          "workhorse"
-          "ornith-35b"
-        ];
+        # It always thinks: with thinking off it skipped instructions and tool calls it should have made (2026-11-26).
+        aliases = [ "ornith-35b" ];
         args = [
           "-m /models/ornith-1.5-35b/Ornith-1.5-35B-A3B-Abliterated-MTPv2-APEX-I-Mini-v2D-lite.gguf"
           "-dev ROCm0"
@@ -69,7 +113,6 @@ in
           # The model card's sampling.
           "--temp 0.6 --top-p 0.95 --top-k 20 --min-p 0"
         ];
-        requestDefaults.main.chat_template_kwargs.enable_thinking = false;
         # Pictures take the card while they're drawn (image, below); main's file is in the page cache, so it's back
         # about 4 s after the next request.
         card = "7900xt";
@@ -103,6 +146,32 @@ in
           "--temp 0.3 --top-k 64 --top-p 0.95"
         ];
         requestDefaults.helper.chat_template_kwargs.enable_thinking = false;
+      };
+
+      # Hermes' voice: Qwen3-TTS 1.7B Base (Q8) on the helper's P100, cloning a voice designed with the VoiceDesign
+      # model ("woman around forty-eight, gentle warm mid-low voice, light British accent, composed, crisp, a senior
+      # infrastructure engineer"; voices/female-b.*, 2026-11-26). Speaks about 1.1-1.7x faster than real time alone;
+      # 2.9 GB, 12.4 GB on the card with the helper. They slow each other down when both are busy (RESULTS.md).
+      # tts-server answers only in WAV or PCM and forgets voices when it stops, so speech.py starts it, registers the
+      # voices and encodes the mp3 or Opus Hermes asks for.
+      llm.models.speech = {
+        command = lib.concatStringsSep " " [
+          "${pkgs.python3.interpreter} ${./speech.py}"
+          "--port \${PORT}"
+          "--voices ${voice}/voices"
+          "--voice female-b"
+          "--"
+          (lib.getExe' qwentts "tts-server")
+          "--model ${voice}/qwen-talker-1.7b-base-Q8_0.gguf"
+          "--codec ${voice}/qwen-tokenizer-12hz-Q8_0.gguf"
+          "--device CUDA1"
+          "--alias speech"
+          "--lang English"
+        ];
+        path = [ pkgs.ffmpeg-headless ];
+        inherit (config.llama.backends.cuda) env units;
+        # The adapter listens only once the voices are registered.
+        checkEndpoint = "/v1/models";
       };
 
       # Qwen-Image 2.1 (Q8, leejet) with Qwen3-VL-8B Q4_K_M as its text encoder (plus its vision part, for editing a
@@ -145,7 +214,7 @@ in
 
       # Gemma 4 E4B with a Heretic edit, Q4_K_M: pictures, handwriting, translation and quick text jobs. It read the
       # user's handwritten note with 1 error in 49 words, reads a picture in about 3 s, writes 43 tokens a second and
-      # translates about as well as the workhorse. It hears audio too, but transcription has its own model.
+      # translates about as well as Swift 27B did. It hears audio too, but transcription has its own model.
       llm.models.vision = {
         backend = "sycl";
         aliases = [ "gemma-4-e4b-heretic" ];

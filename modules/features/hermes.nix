@@ -318,9 +318,8 @@ in
         hermesHomeFiles."SOUL.md" = ./hermes/SOUL.md;
 
         settings = {
-          # main and workhorse are one Ornith 35B process on the 7900 XT: main without thinking, workhorse with it.
-          # 262K context shared by two slots, so 131K a conversation. Ornith doesn't read images here; the vision
-          # role does.
+          # main: Ornith 35B on the 7900 XT, always thinking (tool calls go wrong without it). 262K context shared by
+          # two slots, so 131K a conversation. Ornith doesn't read images here; the vision role does.
           model = {
             provider = "custom";
             base_url = models;
@@ -330,9 +329,9 @@ in
             supports_vision = false;
           };
 
-          # Subagents think: the same process, so no model swap. Research goes to Claude instead (research-routing).
+          # Subagents run on main too, so no model swap. Research goes to Claude instead (research-routing).
           delegation = {
-            model = "workhorse";
+            model = "main";
             base_url = models;
             api_key = modelKey;
             backend = "research-routing";
@@ -387,8 +386,16 @@ in
             openai.model = "transcription";
           };
 
-          # Spoken replies stay on lugh (Piper) rather than Hermes' default, which sends the text to Microsoft.
-          tts.provider = "piper";
+          # Spoken replies come from nabu's speech model (Qwen3-TTS, a voice designed for Hermes) rather than Hermes'
+          # default, which sends the text to Microsoft. The voice is also speech's default.
+          tts = {
+            provider = "openai";
+            openai = {
+              base_url = models;
+              model = "speech";
+              voice = "female-b";
+            };
+          };
           # Hermes Desktop would otherwise call the speech servers itself.
           voice.client_direct = false;
 
