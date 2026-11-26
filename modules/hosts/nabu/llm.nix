@@ -1,14 +1,14 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
-# Clients ask for a role: main (also called workhorse) on the RX 7900 XT for chats and long work alike; helper, which
-# names chats, on one P100; image on the other; vision, transcription, decision, embedding and reranker on the Arc Pro
-# B50.
+# Clients ask for a role: main (also called workhorse) on the RX 7900 XT for chats and long work alike, swapping with
+# image when a picture is asked for; helper, which names chats, on one P100 (the other is free); vision,
+# transcription, decision, embedding and reranker on the Arc Pro B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
 
   helpers = "/models/helpers";
-  mossModels = "/models/image/moss";
+  imageModels = "/models/image/qwen-image-2.1";
 
   # The B50 is the only Intel card, so SYCL's first device. Its five models together peak at 12.9 GB of its 16.
   # Gemma needs about 1.5 GB more while it reads a picture; short of it, it crashes.
@@ -70,6 +70,9 @@ in
           "--temp 0.6 --top-p 0.95 --top-k 20 --min-p 0"
         ];
         requestDefaults.main.chat_template_kwargs.enable_thinking = false;
+        # Pictures take the card while they're drawn (image, below); main's file is in the page cache, so it's back
+        # about 4 s after the next request.
+        card = "7900xt";
       };
 
       # Gemma 4 12B with a Heretic (ARA) edit on Google's QAT weights, by SC117, in the Q4_0 those weights were
@@ -102,38 +105,40 @@ in
         requestDefaults.helper.chat_template_kwargs.enable_thinking = false;
       };
 
-      # MOSS-Image SFT (5B), Q8, with Qwen3.5-9B Q8 as its text encoder and the FLUX.2 VAE, all on the first P100: it
-      # follows prompts closely (people in their places, short text) and isn't censored. Peak 15.9 GB of 16. A
-      # 1024x1024 image takes about 50 s warm, 65 s with loading.
-      # The 8-step DMD LoRA (lodestones) has to be applied at runtime: merged into Q8 its delta is lost to rounding and
-      # the images come out ghosted. sd-server ignores LoRA tags in prompts, so callers send the LoRAs by full path
-      # in each prompt's <sd_cpp_extra_args>{"lora":[…]}</sd_cpp_extra_args> (Hermes' pictures plugin), the NSFW LoRA
-      # only in dark chats. The tokenizer must be MOSS's own; Qwen3.5-9B's differs and garbles prompts.
+      # Qwen-Image 2.1 (Q8, leejet) with Qwen3-VL-8B Q4_K_M as its text encoder (plus its vision part, for editing a
+      # reference picture) and its own VAE, on the 7900 XT in main's place. It draws the Foundry art: tokens, item
+      # icons and scenes, painterly or anime. Chosen over FLUX.3 Image Klein (2026-11-26, nabu RESULTS.md): 12-14 s a
+      # 1024x1024 picture against 19 s, and edits from a reference that keep a character or an item set the same, in
+      # 17 s. Peak 19.7 GB of 20 while editing. On a P100, Pascal's fp16 overflowed Klein to blank pictures.
+      # LightX2V's 4-step LoRA is applied at runtime and must come with each request, by full path, in the prompt's
+      # <sd_cpp_extra_args>{"lora":[…]}</sd_cpp_extra_args>: sd-server ignores LoRA tags in prompts, and merged into a
+      # Q8 file a LoRA's delta is lost to rounding. Without it the model wants about 40 steps with CFG.
       llm.models.image = {
         command = lib.concatStringsSep " " [
           (lib.getExe' (pkgs.stable-diffusion-cpp.override {
-            cudaSupport = true;
-            inherit (config.gpu.nvidia) cudaPackages;
+            rocmSupport = true;
+            inherit (config.gpu.amd) rocmPackages;
+            rocmGpuTargets = config.gpu.amd.targets;
           }) "sd-server")
           "--listen-port \${PORT}"
-          "--backend te=cuda0,diffusion=cuda0,vae=cuda0"
-          "--diffusion-model ${mossModels}/MOSS-Image-SFT-Q8_0.gguf"
-          "--llm ${mossModels}/Qwen3.5-9B-Q8_0.gguf"
-          "--vae ${mossModels}/vae/flux2-vae.safetensors"
-          "--tokenizer ${mossModels}/tokenizer/tokenizer.json"
-          "--lora-model-dir ${mossModels}/loras"
+          "--diffusion-model ${imageModels}/qwen_image_2.1-Q8_0.gguf"
+          "--llm ${imageModels}/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          "--llm_vision ${imageModels}/mmproj-Qwen3VL-8B-Instruct-F16.gguf"
+          "--vae ${imageModels}/vae/qwen_image_2.1_vae_bf16.safetensors"
+          "--lora-model-dir ${imageModels}/loras"
           "--lora-apply-mode at_runtime"
-          # The 8-step LoRA's settings (without it, MOSS wants 50 steps at CFG 3: 8 minutes on a P100).
-          "--steps 8"
+          # The 4-step LoRA's settings.
+          "--steps 4"
           "--cfg-scale 1"
           "--sampling-method euler"
           "-W 1024 -H 1024"
           # Otherwise every request uses seed 42, and the same prompt always gives the same image.
           "--seed -1"
         ];
-        # The same card numbers as llama.cpp's CUDA models.
-        env.CUDA_DEVICE_ORDER = "PCI_BUS_ID";
-        units = config.llama.backends.cuda.units;
+        inherit (config.llama.backends.rocm) env units;
+        card = "7900xt";
+        # Loaded only when a picture is asked for, so main keeps the card the rest of the time.
+        preload = false;
         # sd-server answers at once and loads its models with the first request, which takes a few seconds longer.
         checkEndpoint = "/";
       };

@@ -182,6 +182,17 @@ in
                     default = true;
                     description = "Load it when llama-swap starts, so the first request doesn't wait for it to load.";
                   };
+
+                  card = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    example = "7900xt";
+                    description = ''
+                      A card it shares with other models, by any name they all use. Only one of them is loaded at a
+                      time: a request for another unloads the one there and loads the one asked for. Models without
+                      a card stay loaded side by side.
+                    '';
+                  };
                 };
               }
             )
@@ -237,16 +248,25 @@ in
             healthCheckTimeout = 300;
             models = lib.mapAttrs entry cfg.models;
 
-            # Each model has its own cards, so they all stay loaded side by side instead of swapping.
-            # Models that share a card would need a group of their own that swaps.
+            # Models with cards of their own stay loaded side by side. Models that share a card get a group of their own
+            # that swaps; it's persistent and not exclusive too, so loading one never unloads anything elsewhere.
             routing.router = {
               use = "group";
-              settings.groups.loaded = {
-                persistent = true;
-                swap = false;
-                exclusive = false;
-                members = lib.attrNames cfg.models;
-              };
+              settings.groups =
+                let
+                  group = members: swap: {
+                    persistent = true;
+                    inherit swap members;
+                    exclusive = false;
+                  };
+                  shared = lib.groupBy (name: cfg.models.${name}.card) (
+                    lib.attrNames (lib.filterAttrs (_: model: model.card != null) cfg.models)
+                  );
+                in
+                {
+                  loaded = group (lib.attrNames (lib.filterAttrs (_: model: model.card == null) cfg.models)) false;
+                }
+                // lib.mapAttrs' (card: members: lib.nameValuePair "card-${card}" (group members true)) shared;
             };
 
             hooks.on_startup.preload = lib.attrNames (lib.filterAttrs (_: model: model.preload) cfg.models);
