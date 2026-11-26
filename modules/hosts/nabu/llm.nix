@@ -1,8 +1,8 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
 # Clients ask for a role: main on the RX 7900 XT for chats, subagents and long work alike, swapping with
-# image when a picture is asked for; helper, which names chats and reads pictures (also called vision), and speech,
-# Hermes' voice, on one P100 (the other is free); transcription, decision, embedding and reranker on the Arc Pro B50.
+# image when a picture is asked for; helper, which names chats and reads pictures (also called vision), on one P100;
+# transcription and speech, Hermes' voice, on the other; decision, embedding and reranker on the Arc Pro B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -10,7 +10,7 @@ let
   helpers = "/models/helpers";
   imageModels = "/models/image/qwen-image-2.1";
 
-  # The B50 is the only Intel card, so SYCL's first device. Its four models take about 8 GB of its 16. Qwen3-VL-Reranker-2B
+  # The B50 is the only Intel card, so SYCL's first device. Its three models take about 7 GB of its 16. Qwen3-VL-Reranker-2B
   # would fit too and ranked all 17 test questions right (the 0.6B 16), but took 5.9 s a query against 2.9 (2026-11-26).
   b50 = [
     "-dev SYCL0"
@@ -71,6 +71,14 @@ in
         };
 
       voice = "/models/voice/qwen3-tts";
+
+      # whisper.cpp takes its compute library from llama-cpp, so both are built for CUDA here. One of llama.cpp's tests
+      # (test-llama-mmap) fails in the build sandbox.
+      whisperCuda = pkgs.whisper-cpp.override {
+        cudaSupport = true;
+        inherit (config.gpu.nvidia) cudaPackages;
+        llama-cpp = pkgs.llama-cpp.overrideAttrs { doCheck = false; };
+      };
     in
     {
       imports = [ nixos.llm-swap ];
@@ -125,14 +133,14 @@ in
       # them itself. On a P100 through the fork it reads about 390 tokens a second and writes about 50; at 64K it
       # took 8.2 GB of the card's 16, and it held 160K in a test, so 96K leaves room.
       # It reads pictures too, as vision, in place of Gemma 4 E4B on the B50 (2026-11-26): the user's handwritten note
-      # with 1 error in 49 words, as E4B, but in 1.9 s against 8.1. With its projector and the voice the card peaked
-      # at 15.0 GB of 16 while reading a picture and speaking at once.
+      # with 1 error in 49 words, as E4B, but in 1.9 s against 8.1. With its projector it takes about 11.4 GB of the
+      # card's 16.
       llm.models.helper = {
         backend = "cuda";
         aliases = [ "gemma-4-12b-heretic" ];
         args = [
           "-m ${helpers}/gemma-4-12b-heretic-qat-sc117/gemma-4-12B-it-heretic-QAT-UD-Q4_K_XL.gguf"
-          # The second P100 in PCI order; the first is free.
+          # The second P100 in PCI order; the first transcribes and speaks.
           "-dev CUDA1"
           "-ngl 99"
           "-fa on"
@@ -159,10 +167,10 @@ in
         };
       };
 
-      # Hermes' voice: Qwen3-TTS 1.7B Base (Q8) on the helper's P100, cloning a voice designed with the VoiceDesign
-      # model ("woman around forty-eight, gentle warm mid-low voice, light British accent, composed, crisp, a senior
-      # infrastructure engineer"; voices/female-b.*, 2026-11-26). Speaks about 1.1-1.7x faster than real time alone;
-      # 2.9 GB, 12.4 GB on the card with the helper. They slow each other down when both are busy (RESULTS.md).
+      # Hermes' voice: Qwen3-TTS 1.7B Base (Q8) on the first P100 beside transcription, cloning a voice designed with
+      # the VoiceDesign model ("woman around forty-eight, gentle warm mid-low voice, light British accent, composed,
+      # crisp, a senior infrastructure engineer"; voices/female-b.*, 2026-11-26). Speaks about 1.1-1.7x faster than real time alone;
+      # 2.9 GB. It left the helper's card, where each slowed the other down when both were busy (RESULTS.md).
       # tts-server answers only in WAV or PCM and forgets voices when it stops, so speech.py starts it, registers the
       # voices and encodes the mp3 or Opus Hermes asks for.
       llm.models.speech = {
@@ -175,7 +183,7 @@ in
           (lib.getExe' qwentts "tts-server")
           "--model ${voice}/qwen-talker-1.7b-base-Q8_0.gguf"
           "--codec ${voice}/qwen-tokenizer-12hz-Q8_0.gguf"
-          "--device CUDA1"
+          "--device CUDA0"
           "--alias speech"
           "--lang English"
         ];
@@ -223,24 +231,24 @@ in
         checkEndpoint = "/";
       };
 
-      # Whisper large-v3-turbo through whisper.cpp's Vulkan build, beside the SYCL models on the B50, as on lugh: 3 words
-      # wrong in 166 across clean and noisy clips, about a second a clip, 1.1 GB. Qwen3-ASR-1.7B made 1 mistake, but
-      # took 3.7 GB, prefixes its transcripts with a language tag and won't read Ogg.
+      # Whisper large-v3 (f16) through whisper.cpp's CUDA build on the free P100 (2026-11-26): 1 word wrong in 166 across
+      # clean and noisy clips, against 3 for large-v3-turbo on the B50, and 0.7-0.8 s a clip against 1.1-1.5; 4.3 GB.
+      # Qwen3-ASR-1.7B also made 1 mistake, but prefixes its transcripts with a language tag and won't read Ogg.
       llm.models.transcription = {
         command = lib.concatStringsSep " " [
-          (lib.getExe' pkgs.whisper-cpp-vulkan "whisper-server")
+          (lib.getExe' whisperCuda "whisper-server")
           "--host 127.0.0.1"
           "--port \${PORT}"
-          # whisper.cpp takes a Vulkan device's number alone. Vulkan lists the 7900 XT, the B50, then the P100s.
-          "--device 1"
-          "-m ${helpers}/whisper-large-v3-turbo/ggml-large-v3-turbo-q8_0.bin"
+          # whisper.cpp takes a device's number alone: the first P100 in PCI order (CUDA_DEVICE_ORDER).
+          "--device 0"
+          "-m ${helpers}/whisper-large-v3/ggml-large-v3.bin"
           "--language en"
           "--inference-path /v1/audio/transcriptions"
           # Telegram sends voice messages as Ogg, which whisper-server reads only after converting with ffmpeg.
           "--convert"
         ];
         path = [ pkgs.ffmpeg-headless ];
-        units = config.llama.backends.sycl.units;
+        inherit (config.llama.backends.cuda) env units;
         checkEndpoint = "/";
       };
 
