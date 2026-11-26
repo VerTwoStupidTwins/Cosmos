@@ -126,6 +126,36 @@ in
         };
       };
 
+      # The home router's own admin page. The link is a LAN address, so it only opens from a device on the home
+      # network. lugh's pings to it (internet.nix) give the numbers, so the card shows whether the router is answering.
+      router = "10.77.10.1";
+      routerCard = {
+        Router = {
+          icon = "mdi-router-wireless";
+          href = "http://${router}";
+          description = "Admin page, on the home network only";
+          widget = {
+            type = "prometheusmetric";
+            url = prometheus;
+            refreshInterval = 30000;
+            metrics = [
+              (metric "Ping"
+                ''1000 * histogram_quantile(0.5, sum by (le) (rate(smokeping_response_duration_seconds_bucket{host="${router}"}[5m])))''
+                {
+                  type = "number";
+                  options.maximumFractionDigits = 1;
+                  suffix = " ms";
+                }
+              )
+              (metric "Loss"
+                ''100 * (1 - sum(rate(smokeping_response_duration_seconds_count{host="${router}"}[5m])) / sum(rate(smokeping_requests_total{host="${router}"}[5m])))''
+                percent
+              )
+            ];
+          };
+        };
+      };
+
       # Alerts firing now and not silenced, from Alertmanager: one line each, its summary and severity.
       alerts = {
         "Firing alerts" = {
@@ -254,6 +284,7 @@ in
               # Media joins the apps on Home: one row, not two half-empty ones.
               Apps = (sited.Apps or [ ]) ++ (sited.Media or [ ]);
               Network = [
+                routerCard
                 internet
                 blocky
               ];
