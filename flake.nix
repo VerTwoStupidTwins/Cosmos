@@ -22,6 +22,12 @@
       url = "github:sadjow/claude-code-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # The homelab's agent (modules/features/hermes.nix). It keeps its own nixpkgs: its patchelf fix only applies to
+    # the patchelf in the revision it locks.
+    hermes-agent = {
+      url = "github:NousResearch/hermes-agent";
+      inputs.home-manager.follows = "home-manager";
+    };
     llama-cpp = {
       url = "github:ggml-org/llama.cpp";
       inputs.nixpkgs.follows = "nixpkgs";

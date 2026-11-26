@@ -22,6 +22,7 @@ in
       nixos.krita
       nixos.monitor-station
       nixos.netbird-api
+      nixos.hermes-desktop
       nixos.observed
     ];
 

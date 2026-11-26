@@ -29,6 +29,7 @@ in
       nixos.ntfy
       nixos.matrix
       nixos.agent
+      nixos.hermes
       nixos.memory-store
       nixos.shared-nas
       nixos.observability
