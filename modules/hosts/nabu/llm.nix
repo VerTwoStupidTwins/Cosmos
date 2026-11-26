@@ -28,7 +28,7 @@ in
     {
       imports = [ nixos.llm-swap ];
 
-      # The agent on lugh thinks with these models (modules/features/agent.nix).
+      # Hermes on lugh thinks with these models (modules/features/hermes.nix).
       llm.openOnMesh = true;
 
       # Ornith 1.5 35B-A3B (a Qwen 3.5-family MoE), abliterated: gbuzhf's APEX-I-Mini quant with its MTP head. It
@@ -106,8 +106,8 @@ in
       # follows prompts closely (people in their places, short text) and isn't censored. Peak 15.9 GB of 16. A
       # 1024x1024 image takes about 50 s warm, 65 s with loading.
       # The 8-step DMD LoRA (lodestones) has to be applied at runtime: merged into Q8 its delta is lost to rounding and
-      # the images come out ghosted. sd-server ignores LoRA tags in prompts, so the agent sends the LoRAs by full path
-      # in each prompt's <sd_cpp_extra_args>{"lora":[…]}</sd_cpp_extra_args> (agent.chat.pictureLoras), the NSFW LoRA
+      # the images come out ghosted. sd-server ignores LoRA tags in prompts, so callers send the LoRAs by full path
+      # in each prompt's <sd_cpp_extra_args>{"lora":[…]}</sd_cpp_extra_args> (Hermes' pictures plugin), the NSFW LoRA
       # only in dark chats. The tokenizer must be MOSS's own; Qwen3.5-9B's differs and garbles prompts.
       llm.models.image = {
         command = lib.concatStringsSep " " [

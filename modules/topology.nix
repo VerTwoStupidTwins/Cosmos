@@ -126,14 +126,11 @@ in
     imports = [ inputs.nix-topology.nixosModules.default ];
   };
 
-  # The agent's homelab_map tool reads this.
-  flake.modules.nixos.agent =
-    { pkgs, ... }:
-    {
-      agent.topologyFile = pkgs.writeText "homelab-map.md" (
-        render config.flake.topology.x86_64-linux.config
-      );
-    };
+  # The homelab map for Hermes, in its home (its SOUL.md points it there).
+  flake.modules.nixos.hermes = {
+    services.hermes-agent.hermesHomeFiles."homelab-map.md" =
+      render config.flake.topology.x86_64-linux.config;
+  };
 
   perSystem = {
     topology.modules = [

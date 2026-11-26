@@ -91,7 +91,7 @@ fn default_limit() -> i64 {
 #[derive(Deserialize, schemars::JsonSchema)]
 struct LogsRequest {
     /// A LogQL query. Streams have the labels host, unit (such as nginx.service), level and identifier. For example
-    /// `{host="lugh", unit="tuwunel.service"}` or `{host="nabu"} |~ "(?i)error|fail"`.
+    /// `{host="lugh", unit="hermes-agent.service"}` or `{host="nabu"} |~ "(?i)error|fail"`.
     query: String,
     /// How far back, such as 30m, 6h, 2d (up to 30d).
     #[serde(default = "default_since")]

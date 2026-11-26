@@ -249,13 +249,4 @@ in
       };
     };
   };
-
-  # The declaration as JSON, for the agent's drift check.
-  config.flake.modules.nixos.agent =
-    { pkgs, ... }:
-    {
-      agent.netbirdDeclared = pkgs.writeText "netbird-declared.json" (
-        builtins.toJSON config.cosmos.netbird
-      );
-    };
 }

@@ -4,7 +4,7 @@ let
 in
 {
   # The homelab's infrastructure server: it watches every host (metrics, logs, dashboards, alerts to the phone through
-  # ntfy), runs the homelab's Matrix server and its agent (with its memory's Qdrant), and builds for the others and keeps
+  # ntfy), runs the homelab's agent (Hermes, with its memory on Qdrant), and builds for the others and keeps
   # their builds in the binary cache. For play: game streaming from the B580 (Wolf) and Foundry VTT, with modded
   # Minecraft servers to come, all over NetBird.
   hosts.lugh = {
@@ -27,8 +27,6 @@ in
       nixos.monitor
       nixos.web
       nixos.ntfy
-      nixos.matrix
-      nixos.agent
       nixos.hermes
       nixos.memory-store
       nixos.shared-nas

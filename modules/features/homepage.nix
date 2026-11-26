@@ -18,6 +18,7 @@ in
     { config, ... }:
     let
       port = 8082;
+      themeDir = "/var/lib/home-theme";
       prometheus = "http://127.0.0.1:${toString config.services.prometheus.port}";
       percent = {
         type = "percent";
@@ -183,7 +184,7 @@ in
       ];
       tabGroups = lib.concatMap (tab: map (group: group.name) tab.groups) tabs;
 
-      # The desktop's palette (tenjin pushes it to the chat site, chat-theme.nix) mapped onto Homepage's ten-step
+      # The desktop's palette (tenjin puts it at /theme.css, home-theme.nix) mapped onto Homepage's ten-step
       # scale, so the page recolours with the wallpaper. Before any palette arrives, Homepage's slate applies.
       scale = {
         "50" = "base07";
@@ -358,7 +359,7 @@ in
           }
         ];
         customCSS = ''
-          @import url("https://chat.gatica.one/theme.css");
+          @import url("/theme.css");
 
           html.theme-slate, .theme-slate {
           ${
@@ -376,6 +377,36 @@ in
         healthPath = "/api/healthcheck";
         sso = true;
       };
+
+      # The desktop's palette as CSS variables, put here by tenjin (modules/desktop/home-theme.nix) whenever the
+      # wallpaper changes, and served to every browser. Reading it needs no sign-in (it's colours only); writing it
+      # needs the theme token, checked in an include that sops renders at runtime, so the token never reaches the store.
+      sops.secrets.chat-theme-token.sopsFile = ../../secrets/common.yaml;
+      sops.templates."home-theme-auth.conf" = {
+        owner = "nginx";
+        content = ''
+          if ($http_authorization != "Bearer ${config.sops.placeholder.chat-theme-token}") {
+            set $theme_write "''${theme_write}-unauthorised";
+          }
+        '';
+        restartUnits = [ "nginx.service" ];
+      };
+      systemd.tmpfiles.rules = [ "d ${themeDir} 0755 nginx nginx - -" ];
+      systemd.services.nginx.serviceConfig.ReadWritePaths = [ themeDir ];
+      services.nginx.virtualHosts."home.gatica.one".locations."= /theme.css".extraConfig = ''
+        auth_request off;
+        root ${themeDir};
+        default_type text/css;
+        add_header Cache-Control "no-cache" always;
+        dav_methods PUT;
+        client_max_body_size 16k;
+        set $theme_write $request_method;
+        include ${config.sops.templates."home-theme-auth.conf".path};
+        # 403, not 401: the site turns a 401 into a redirect to the sign-in page, which curl would take as success.
+        if ($theme_write = "PUT-unauthorised") {
+          return 403;
+        }
+      '';
 
       # For the homelab map (modules/topology.nix).
       topology.self.services.homepage = {

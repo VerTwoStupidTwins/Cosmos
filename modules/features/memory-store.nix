@@ -1,17 +1,19 @@
 # modules/features/memory-store.nix
 {
-  # Qdrant, the search index of the agent's long-term memory (agent.nix runs the memory server that owns it). It holds
-  # only what the memory server's SQLite file holds, so it can be wiped and rebuilt from that at any time. It listens
-  # on localhost; its dashboard is at memory.gatica.one (mesh only), opened with the read-only key.
+  # Long-term memory and search by meaning, on Qdrant.
   #
-  # The memory service: the Rust memory server (agent-tools/memory) running on its own, serving MCP over HTTP on
-  # loopback for Hermes and its memory plugin (hermes.nix), and consolidating conversations once they go quiet. It only
-  # runs once the Matrix agent is gone: until then that agent runs its own copy of the server over stdio on the same
-  # Qdrant collection, and two writers would split memory. On its first start it takes over the agent's database.
+  # The memory service: the Rust memory server (agent-tools/memory) serving MCP over HTTP on loopback for Hermes and
+  # its memory plugin (hermes.nix), and consolidating conversations once they go quiet. Its SQLite file is the truth;
+  # Qdrant only indexes it, so the collection can be wiped and rebuilt from that at any time. On its first start it took
+  # over the database of the Matrix agent that came before it.
+  #
+  # Search by meaning in the notes vaults: each vault has a collection of its own, embedded and reranked by nabu's
+  # models, and a <collection>-index service that keeps it in step. The notes tools search it (memory.vaultSearchArgs).
+  #
+  # Qdrant listens on localhost; its dashboard is at memory.gatica.one (mesh only), opened with the read-only key.
   flake.modules.nixos.memory-store =
     {
       config,
-      options,
       lib,
       pkgs,
       ...
@@ -20,7 +22,6 @@
       port = 6333;
       hostSecrets = ../../secrets/${config.networking.hostName}.yaml;
 
-      serve = !(options ? agent);
       servicePort = 8095;
       stateDir = "/var/lib/memory";
       agentDatabase = "/var/lib/agent/memory.sqlite";
@@ -35,7 +36,26 @@
         meta.mainProgram = "memory";
       };
 
-      # Once, before the first start: a consistent copy of the Matrix agent's memory database, if there is one.
+      # Each vault by its collection's name, where the notes vaults are (notes.nix).
+      indexedVaults = lib.optionalAttrs (config ? notes) (
+        {
+          notes = config.notes.vault;
+        }
+        // lib.mapAttrs' (name: path: lib.nameValuePair "notes-${name}" path) config.notes.extraVaultPaths
+      );
+      vaultSearchArgs = collection: [
+        "--qdrant"
+        "http://127.0.0.1:${toString port}"
+        "--collection"
+        collection
+        "--models"
+        "http://nabu.netbird.cloud:8080/v1"
+        # Obsidian Copilot's saved chats and skill docs: the plugin's files, not the owner's notes.
+        "--exclude"
+        "copilot"
+      ];
+
+      # Once, before the first start: a consistent copy of the old Matrix agent's memory database, if there is one.
       takeOver = pkgs.writeShellScript "memory-take-over" ''
         if [ ! -e ${stateDir}/memory.sqlite ] && [ -e ${agentDatabase} ]; then
           ${lib.getExe pkgs.sqlite} ${agentDatabase} ".backup '${stateDir}/memory.sqlite'"
@@ -45,15 +65,23 @@
       '';
     in
     {
-      options.memory.url = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        readOnly = true;
-        default = if serve then "http://127.0.0.1:${toString servicePort}/mcp" else null;
-        description = "The memory service's MCP endpoint, for Hermes; null while the Matrix agent owns memory.";
+      options.memory = {
+        url = lib.mkOption {
+          type = lib.types.str;
+          readOnly = true;
+          default = "http://127.0.0.1:${toString servicePort}/mcp";
+          description = "The memory service's MCP endpoint, for Hermes.";
+        };
+        vaultSearchArgs = lib.mkOption {
+          type = lib.types.functionTo (lib.types.listOf lib.types.str);
+          readOnly = true;
+          default = vaultSearchArgs;
+          description = "The notes tool's arguments for searching a vault's collection by meaning.";
+        };
       };
 
       config = lib.mkMerge [
-        (lib.mkIf serve {
+        {
           users.users.memory = {
             isSystemUser = true;
             group = "memory";
@@ -118,7 +146,47 @@
             units = [ "memory" ];
             ports.memory = servicePort;
           };
-        })
+        }
+
+        {
+          # Re-embeds a vault's notes as they change (a few seconds after a save), and at least hourly; searches catch
+          # up on anything newer themselves.
+          systemd.services = lib.mapAttrs' (
+            collection: vault:
+            lib.nameValuePair "${collection}-index" {
+              description = "Keep the search index of the vault at ${vault} in step with it";
+              wantedBy = [ "multi-user.target" ];
+              wants = [ "network-online.target" ];
+              after = [
+                "network-online.target"
+                "netbird-wt0.service"
+                "qdrant.service"
+              ];
+              serviceConfig = {
+                ExecStart = lib.escapeShellArgs (
+                  [
+                    (lib.getExe config.notes.package)
+                    "--vault"
+                    vault
+                    "index"
+                  ]
+                  ++ vaultSearchArgs collection
+                );
+                DynamicUser = true;
+                # Reads the vault; writes only to Qdrant.
+                SupplementaryGroups = [ "notes" ];
+                LoadCredential = [ "qdrant-api-key:${config.sops.secrets.qdrant-api-key.path}" ];
+                ProtectHome = true;
+                PrivateTmp = true;
+                NoNewPrivileges = true;
+                Restart = "always";
+                RestartSec = 30;
+              };
+            }
+          ) indexedVaults;
+
+          monitor.units = map (collection: "${collection}-index") (lib.attrNames indexedVaults);
+        }
         {
           # The read/write key is the memory server's; the read-only key opens the dashboard and lets Prometheus scrape.
           sops.secrets.qdrant-api-key.sopsFile = hostSecrets;
@@ -158,17 +226,17 @@
           topology.self.services.qdrant = {
             name = "Qdrant";
             info = "127.0.0.1:6333, dashboard memory.gatica.one";
-            details.role.text = "The agent's memory index (dense + BM25 vectors); the truth is SQLite in /var/lib/agent.";
+            details.role.text = "Memory and vault search index (dense + BM25 vectors); memory's truth is SQLite in /var/lib/memory.";
           };
 
           web.sites.memory = {
             inherit port;
             healthPath = "/healthz";
             homepage = {
-              name = "Agent memory";
+              name = "Memory";
               group = "Infrastructure";
               icon = "qdrant.png";
-              description = "Qdrant, the agent's long-term memory";
+              description = "Qdrant: long-term memory and vault search";
               path = "/dashboard";
             };
           };
