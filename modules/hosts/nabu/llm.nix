@@ -1,8 +1,8 @@
 # nabu's models, served through llama-swap on port 8080. Measurements: /models/benchmarks/RESULTS.md on nabu.
 #
 # Clients ask for a role: main on the RX 7900 XT for chats, subagents and long work alike, swapping with
-# image when a picture is asked for; helper, which names chats, and speech, Hermes' voice, on one P100 (the other is
-# free); vision, transcription, decision, embedding and reranker on the Arc Pro B50.
+# image when a picture is asked for; helper, which names chats and reads pictures (also called vision), and speech,
+# Hermes' voice, on one P100 (the other is free); transcription, decision, embedding and reranker on the Arc Pro B50.
 { config, ... }:
 let
   nixos = config.flake.modules.nixos;
@@ -10,8 +10,8 @@ let
   helpers = "/models/helpers";
   imageModels = "/models/image/qwen-image-2.1";
 
-  # The B50 is the only Intel card, so SYCL's first device. Its five models together peak at 12.9 GB of its 16.
-  # Gemma needs about 1.5 GB more while it reads a picture; short of it, it crashes.
+  # The B50 is the only Intel card, so SYCL's first device. Its four models take about 8 GB of its 16. Qwen3-VL-Reranker-2B
+  # would fit too and ranked all 17 test questions right (the 0.6B 16), but took 5.9 s a query against 2.9 (2026-11-26).
   b50 = [
     "-dev SYCL0"
     "-ngl 99"
@@ -124,12 +124,15 @@ in
       # against 61, with no refusals and summaries a fifth the length. It names the agent's chats; main compacts
       # them itself. On a P100 through the fork it reads about 390 tokens a second and writes about 50; at 64K it
       # took 8.2 GB of the card's 16, and it held 160K in a test, so 96K leaves room.
+      # It reads pictures too, as vision, in place of Gemma 4 E4B on the B50 (2026-11-26): the user's handwritten note
+      # with 1 error in 49 words, as E4B, but in 1.9 s against 8.1. With its projector and the voice the card peaked
+      # at 15.0 GB of 16 while reading a picture and speaking at once.
       llm.models.helper = {
         backend = "cuda";
         aliases = [ "gemma-4-12b-heretic" ];
         args = [
           "-m ${helpers}/gemma-4-12b-heretic-qat-sc117/gemma-4-12B-it-heretic-QAT-UD-Q4_K_XL.gguf"
-          # The second P100 in PCI order; the first draws images.
+          # The second P100 in PCI order; the first is free.
           "-dev CUDA1"
           "-ngl 99"
           "-fa on"
@@ -141,11 +144,19 @@ in
           "-md ${helpers}/gemma-4-12b-heretic-qat-sc117/mtp-gemma-4-12B-it.gguf"
           "--spec-type draft-mtp"
           "-ngld 99"
+          "--mmproj ${helpers}/gemma-4-12b-heretic-qat-sc117/mmproj-BF16.gguf"
+          # 560 tokens a picture read as well as 1120 or 2240 and fastest. Gemma takes in a picture in one batch, so
+          # the batch must hold all of it: at the default 512 llama.cpp aborted on a picture.
+          "--image-min-tokens 560 --image-max-tokens 560"
+          "-b 2304 -ub 2304"
           "--jinja"
           # Steady sampling for background jobs; it doesn't think (the helper test ran without it).
           "--temp 0.3 --top-k 64 --top-p 0.95"
         ];
-        requestDefaults.helper.chat_template_kwargs.enable_thinking = false;
+        requestDefaults = {
+          helper.chat_template_kwargs.enable_thinking = false;
+          vision.chat_template_kwargs.enable_thinking = false;
+        };
       };
 
       # Hermes' voice: Qwen3-TTS 1.7B Base (Q8) on the helper's P100, cloning a voice designed with the VoiceDesign
@@ -210,26 +221,6 @@ in
         preload = false;
         # sd-server answers at once and loads its models with the first request, which takes a few seconds longer.
         checkEndpoint = "/";
-      };
-
-      # Gemma 4 E4B with a Heretic edit, Q4_K_M: pictures, handwriting, translation and quick text jobs. It read the
-      # user's handwritten note with 1 error in 49 words, reads a picture in about 3 s, writes 43 tokens a second and
-      # translates about as well as Swift 27B did. It hears audio too, but transcription has its own model.
-      llm.models.vision = {
-        backend = "sycl";
-        aliases = [ "gemma-4-e4b-heretic" ];
-        args = b50 ++ [
-          "-m ${helpers}/gemma-4-e4b-heretic/gemma-4-E4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
-          "--mmproj ${helpers}/gemma-4-e4b-heretic/gemma-4-E4B-it-mmproj-BF16.gguf"
-          "-c 16384"
-          "-np 1"
-          # Every picture gets Gemma's largest budget: at the default (about 280 tokens) it misread handwriting.
-          "--image-min-tokens 2240 --image-max-tokens 2240"
-          "--reasoning off"
-          "--jinja"
-          # Google's recommended sampling.
-          "--temp 1.0 --top-k 64 --top-p 0.95"
-        ];
       };
 
       # Whisper large-v3-turbo through whisper.cpp's Vulkan build, beside the SYCL models on the B50, as on lugh: 3 words
