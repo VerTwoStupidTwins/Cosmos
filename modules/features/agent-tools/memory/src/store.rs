@@ -575,6 +575,28 @@ impl Store {
             .optional()?)
     }
 
+    /// Changes made since a time, oldest first: the evening digest, and what the owner can ask to undo.
+    pub fn changes_since(&self, since: &str, limit: i64) -> Result<Vec<Change>> {
+        let mut stmt = self
+            .db
+            .prepare(&format!("SELECT {} FROM changes c WHERE c.at >= ?1 ORDER BY c.id LIMIT ?2", Self::CHANGE_FIELDS))?;
+        let rows = stmt.query_map(params![since, limit], |r| self.change_row(r))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Conversations with exchanges not consolidated yet whose last exchange is older than `before`: they've gone quiet.
+    pub fn quiet_rooms(&self, before: &str) -> Result<Vec<String>> {
+        let mut stmt = self.db.prepare(
+            "SELECT p.room FROM points p LEFT JOIN consolidated c ON c.room = p.room
+             WHERE p.type = 'exchange' AND p.room IS NOT NULL
+             GROUP BY p.room
+             HAVING max(p.id) > coalesce(max(c.upto), 0) AND max(p.created) < ?1
+             ORDER BY max(p.created)",
+        )?;
+        let rows = stmt.query_map([before], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn change(&self, id: i64) -> Result<Option<Change>> {
         Ok(self
             .db
@@ -764,5 +786,35 @@ mod tests {
         s.mark_indexed(&[(a, 0), (b, 0)], "m").unwrap();
         assert_eq!(s.needs_index("m", 10).unwrap().len(), 1);
         assert_eq!(s.needs_index("other-model", 10).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn quiet_rooms_are_unconsolidated_and_old() {
+        let mut s = store();
+        s.add_exchange("old", "$o1", "Owner: a", &[], Some("2026-11-01T10:00:00Z")).unwrap();
+        let (done, _) = s.add_exchange("done", "$d1", "Owner: b", &[], Some("2026-11-01T10:00:00Z")).unwrap();
+        s.add_exchange("fresh", "$f1", "Owner: c", &[], Some("2026-11-01T12:00:00Z")).unwrap();
+        let tx = s.transaction().unwrap();
+        Store::mark_consolidated(&tx, "done", done).unwrap();
+        tx.commit().unwrap();
+        assert_eq!(s.quiet_rooms("2026-11-01T11:00:00Z").unwrap(), vec!["old".to_string()]);
+        // A new exchange in a consolidated room makes it count again once it's quiet.
+        s.add_exchange("done", "$d2", "Owner: d", &[], Some("2026-11-01T10:30:00Z")).unwrap();
+        assert_eq!(s.quiet_rooms("2026-11-01T11:00:00Z").unwrap(), vec!["old".to_string(), "done".to_string()]);
+    }
+
+    #[test]
+    fn changes_since_lists_writes_and_undo_by_number() {
+        let mut s = store();
+        let tx = s.transaction().unwrap();
+        let first = Store::create_item(&tx, "idea", "A duct for the P100s", None, false, &[], &[], None, "chat").unwrap();
+        tx.commit().unwrap();
+        let changes = s.changes_since("2000-01-01T00:00:00Z", 10).unwrap();
+        assert_eq!(changes.iter().map(|c| c.change).collect::<Vec<_>>(), vec![first]);
+        let undo = s.undo(first).unwrap();
+        assert!(s.undo(first).is_err(), "a change is undone once");
+        let changes = s.changes_since("2000-01-01T00:00:00Z", 10).unwrap();
+        assert_eq!(changes.last().map(|c| (c.change, c.undoes)), Some((undo, Some(first))));
+        assert!(s.changes_since("2999-01-01T00:00:00Z", 10).unwrap().is_empty());
     }
 }

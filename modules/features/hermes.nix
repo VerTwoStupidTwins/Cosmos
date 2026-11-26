@@ -37,6 +37,13 @@ in
       # https://hermes.gatica.one/auth/callback). The username and password still sign in when Pocket ID can't.
       oidcClientId = "c32ad4e2-65da-445d-8efc-44f8bec9384f";
 
+      # Our long-term memory (memory-store.nix serves it; null while the Matrix agent still owns it). Hermes names a
+      # Nix-managed plugin nix-managed-<derivation name>, and that's the provider's name too.
+      memoryUrl = config.memory.url;
+      memoryPlugin = pkgs.runCommand "cosmos-memory" { } ''
+        cp -r ${./hermes/memory-plugin} $out
+      '';
+
       hermesHome = "${cfg.stateDir}/.hermes";
       skillsDir = "${hermesHome}/skills";
 
@@ -133,7 +140,18 @@ in
 
       # Hermes copies new bundled skills as it starts, so each start also unlocks the ones the previous start copied.
       # The repo carries no skills: they're Hermes' own, kept in its state and changed only by Hermes or the owner.
-      systemd.services.hermes-agent.preStart = lib.mkAfter unlockSkills;
+      # Conversations start with memory's core block, so Hermes waits for the memory service.
+      systemd.services.hermes-agent = lib.mkMerge [
+        { preStart = lib.mkAfter unlockSkills; }
+        (lib.mkIf (memoryUrl != null) {
+          after = [ "memory.service" ];
+          wants = [ "memory.service" ];
+        })
+      ];
+      systemd.services.hermes-backend = lib.mkIf (memoryUrl != null) {
+        after = [ "memory.service" ];
+        wants = [ "memory.service" ];
+      };
 
       services.hermes-agent = {
         enable = true;
@@ -152,7 +170,11 @@ in
           # Voice messages go to nabu's Whisper through Hermes' OpenAI-style transcription, which also needs a key.
           STT_OPENAI_BASE_URL = models;
           VOICE_TOOLS_OPENAI_KEY = modelKey;
-        };
+        }
+        // lib.optionalAttrs (memoryUrl != null) { COSMOS_MEMORY_URL = memoryUrl; };
+
+        # The memory provider (hermes/memory-plugin): recall for every message, every exchange stored, memory_* tools.
+        extraPlugins = lib.optional (memoryUrl != null) memoryPlugin;
         environmentFiles = [ config.sops.templates."hermes.env".path ];
 
         # Converts audio for voice messages.
@@ -184,10 +206,10 @@ in
           # The decision model approves clearly safe commands. Anything it denies or is unsure about asks the owner.
           approvals.mode = "smart";
 
-          # Memory is ours (phase 3: the Qdrant memory service and its provider plugin), so Hermes' built-in
-          # MEMORY.md and USER.md stay off. Settings merge into Hermes' config file, so the provider is always set.
+          # Memory is ours (the memory service and its provider plugin), so Hermes' built-in MEMORY.md and USER.md
+          # stay off. Settings merge into Hermes' config file, so the provider is always set, empty until it's served.
           memory = {
-            provider = "";
+            provider = if memoryUrl != null then "nix-managed-${lib.getName memoryPlugin}" else "";
             memory_enabled = false;
             user_profile_enabled = false;
           };

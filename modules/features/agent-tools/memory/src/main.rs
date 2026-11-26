@@ -53,6 +53,17 @@ struct Args {
     /// The most memories auto-recall attaches to a message.
     #[arg(long, default_value_t = 5)]
     auto_limit: usize,
+    /// Serve MCP over HTTP at this address (such as 127.0.0.1:8095) as a long-running service, instead of over stdio.
+    /// The service also consolidates conversations once they've gone quiet.
+    #[arg(long)]
+    listen: Option<std::net::SocketAddr>,
+    /// How long a conversation stays quiet before the service consolidates it (with --listen).
+    #[arg(long, default_value_t = 30)]
+    quiet_minutes: i64,
+    /// Word the instructions for Hermes (tools named memory_<tool>, changes in the evening digest) rather than for the
+    /// Matrix agent.
+    #[arg(long)]
+    hermes: bool,
 }
 
 /// Reranker scores below these were unrelated in the old memory server's tests.
@@ -69,6 +80,19 @@ memory__remember right away, with the status their words give it (parked when th
 they have started). When the conversation changes a kept item (an idea started, finished, dropped or put off), \
 update it with memory__update. Use memory__retract when they say a memory is wrong. Never save secrets or \
 lookups. Every change is announced to the owner in the Memory room. Refer to items by number (#12).";
+
+/// The same for Hermes, whose tools are memory_<tool> and where changes go to an evening digest instead of a room.
+const CORE_INSTRUCTIONS_HERMES: &str = "You have a long-term memory database about the owner, their ideas and plans, \
+and the homelab, built from past conversations. Memories relevant to the owner's message are attached to it inside \
+<memories>: they are context from the past, not part of what the owner just wrote. When something may have come up \
+before, or you need more, search with memory_recall before answering. The owner relies on memory being automatic and \
+will not ask for it: each conversation is also reviewed after it goes quiet, but save what matters as it comes up. \
+When the owner proposes an idea, decides or plans something, commits to something, or states a preference, call \
+memory_remember right away, with the status their words give it (parked when they put it off, in_progress when they \
+have started). When the conversation changes a kept item (an idea started, finished, dropped or put off), update it \
+with memory_update. Use memory_retract when they say a memory is wrong. Never save secrets or lookups. Every change \
+is listed in the owner's evening memory digest; when they ask to undo one, find it with memory_changes and undo it \
+with memory_undo_change. Refer to items by number (#12).";
 
 pub struct App {
     pub store: Mutex<Store>,
@@ -327,6 +351,25 @@ struct AnnouncedRequest {
     event: String,
 }
 
+fn default_change_days() -> i64 {
+    1
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ChangesRequest {
+    /// How many days back: 1 (default) is the last 24 hours.
+    #[serde(default = "default_change_days")]
+    days: i64,
+    #[serde(default = "default_list_limit")]
+    limit: i64,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct ChangeRequest {
+    /// The change's number, from memory changes.
+    change: i64,
+}
+
 #[derive(Deserialize, schemars::JsonSchema)]
 struct EventRequest {
     /// A Memory room notice's Matrix event.
@@ -459,6 +502,42 @@ impl Memory {
         )
     }
 
+    /// Recent changes to memory, oldest first, each with its number: what was saved, changed, retracted or undone, and
+    /// by whom (chat, the session review, undo). For the evening digest, and to find a change the owner wants undone.
+    #[tool(annotations(read_only_hint = true, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn changes(&self, Parameters(req): Parameters<ChangesRequest>) -> CallToolResult {
+        or_error(
+            async {
+                let since = (chrono::Utc::now() - chrono::Duration::days(req.days.clamp(1, 90)))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                let changes = self.app.store.lock().await.changes_since(&since, req.limit.clamp(1, 200))?;
+                let rows: Vec<Value> = changes
+                    .iter()
+                    .map(|c| json!({ "change": c.change, "item": c.item, "action": c.action, "by": c.origin, "at": c.at,
+                                     "undoes": c.undoes, "text": c.notice_text }))
+                    .collect();
+                Ok(json!({ "changes": rows }))
+            }
+            .await,
+        )
+    }
+
+    /// Undo one change by its number, when the owner asks: a new item is retracted, a retraction restored, an edit put
+    /// back. The undo is a change of its own, in the history.
+    #[tool(annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false))]
+    async fn undo_change(&self, Parameters(req): Parameters<ChangeRequest>) -> CallToolResult {
+        or_error(
+            async {
+                let undo = self.app.store.lock().await.undo(req.change)?;
+                if let Err(e) = self.app.index_pending().await {
+                    eprintln!("memory: indexing after an undo failed (retried later): {e:#}");
+                }
+                self.app.change_json(undo).await
+            }
+            .await,
+        )
+    }
+
     // ---- for the agent's code
 
     /// (Agent) Memories for an incoming message, above the auto-recall score.
@@ -504,7 +583,8 @@ impl Memory {
                 } else {
                     items.iter().map(|p| format!("- #{} ({}): {}", p.id, p.kind.as_deref().unwrap_or("item"), p.content)).collect::<Vec<_>>().join("\n")
                 };
-                Ok(json!({ "text": format!("{CORE_INSTRUCTIONS}\n\nCore items:\n{core}") }))
+                let instructions = if self.app.args.hermes { CORE_INSTRUCTIONS_HERMES } else { CORE_INSTRUCTIONS };
+                Ok(json!({ "text": format!("{instructions}\n\nCore items:\n{core}") }))
             }
             .await,
         )
@@ -632,6 +712,58 @@ async fn main() -> Result<()> {
             Err(e) => eprintln!("memory: indexing at start failed (retried on the next write): {e:#}"),
         }
     });
-    Memory { app, tool_router: Memory::tool_router() }.serve(stdio()).await?.waiting().await?;
+    match app.args.listen {
+        None => {
+            Memory { app, tool_router: Memory::tool_router() }.serve(stdio()).await?.waiting().await?;
+        }
+        Some(addr) => serve_http(app, addr).await?,
+    }
     Ok(())
+}
+
+/// The long-running service: MCP over HTTP at /mcp, without sessions (each request stands alone, answered as JSON),
+/// so Hermes and its memory plugin can both call it. Only loopback Host headers are accepted.
+async fn serve_http(app: Arc<App>, addr: std::net::SocketAddr) -> Result<()> {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::never::NeverSessionManager,
+    };
+    tokio::spawn(consolidate_quiet(app.clone()));
+    let config = StreamableHttpServerConfig::default()
+        .with_legacy_session_mode(false)
+        .with_json_response(true)
+        .with_sse_keep_alive(None);
+    let service = StreamableHttpService::new(
+        move || Ok(Memory { app: app.clone(), tool_router: Memory::tool_router() }),
+        Arc::new(NeverSessionManager::default()),
+        config,
+    );
+    let router = axum::Router::new().nest_service("/mcp", service);
+    let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
+    eprintln!("memory: serving MCP on http://{addr}/mcp");
+    axum::serve(listener, router).await?;
+    Ok(())
+}
+
+/// Every five minutes, each conversation that has gone quiet (no exchange for --quiet-minutes) and has exchanges not
+/// consolidated yet is turned into topics and item changes. It lives here, not in Hermes, so a restart loses nothing.
+async fn consolidate_quiet(app: Arc<App>) {
+    let mut tick = tokio::time::interval(std::time::Duration::from_secs(300));
+    loop {
+        tick.tick().await;
+        let before = (chrono::Utc::now() - chrono::Duration::minutes(app.args.quiet_minutes))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let rooms = match app.store.lock().await.quiet_rooms(&before) {
+            Ok(rooms) => rooms,
+            Err(e) => {
+                eprintln!("memory: finding quiet conversations failed: {e:#}");
+                continue;
+            }
+        };
+        for room in rooms {
+            match consolidate::run(&app, &room).await {
+                Ok(result) => eprintln!("memory: consolidated {room}: {result}"),
+                Err(e) => eprintln!("memory: consolidating {room} failed (tried again later): {e:#}"),
+            }
+        }
+    }
 }

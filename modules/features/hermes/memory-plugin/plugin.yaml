@@ -1,0 +1,6 @@
+name: cosmos-memory
+version: 1.0.0
+description: "The homelab's long-term memory: the Rust memory service on lugh (SQLite + Qdrant), recalled for every message and fed every exchange."
+author: twins
+config_keys:
+  - memory.cosmos
