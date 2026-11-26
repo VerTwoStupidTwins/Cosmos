@@ -131,7 +131,15 @@
                   workModel
                   titleModel
                   ;
-                pictures = if cfg.chat.pictureModel == null then null else { model = cfg.chat.pictureModel; };
+                pictures =
+                  if cfg.chat.pictureModel == null then
+                    null
+                  else
+                    {
+                      model = cfg.chat.pictureModel;
+                      loras = cfg.chat.pictureLoras;
+                      dark = cfg.chat.pictureDark;
+                    };
               }
             else
               null;
@@ -330,6 +338,64 @@
               The llama-swap image model (OpenAI's /v1/images/generations) that picture mode draws with: main writes the
               prompts. Pictures are kept in the agent's state folder. null: no picture mode.
             '';
+          };
+          pictureLoras = lib.mkOption {
+            type = lib.types.listOf (
+              lib.types.submodule {
+                options = {
+                  path = lib.mkOption {
+                    type = lib.types.str;
+                    description = "The LoRA's full path on the image server's host.";
+                  };
+                  multiplier = lib.mkOption {
+                    type = lib.types.float;
+                    default = 1.0;
+                  };
+                };
+              }
+            );
+            # MOSS-Image's 8-step LoRA on nabu (modules/hosts/nabu/llm.nix), which the server's 8 steps need.
+            default = [ { path = "/models/image/moss/loras/moss-image-sft-8step-dmd.safetensors"; } ];
+            description = ''
+              LoRAs sent with every picture, in the prompt's <sd_cpp_extra_args> (stable-diffusion.cpp's sd-server
+              ignores LoRA tags in prompts).
+            '';
+          };
+          pictureDark = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                loras = lib.mkOption {
+                  type = lib.types.listOf (
+                    lib.types.submodule {
+                      options = {
+                        path = lib.mkOption { type = lib.types.str; };
+                        multiplier = lib.mkOption {
+                          type = lib.types.float;
+                          default = 1.0;
+                        };
+                      };
+                    }
+                  );
+                  default = [ ];
+                };
+                trigger = lib.mkOption {
+                  type = lib.types.str;
+                  default = "";
+                  description = "Put before the prompt in dark chats, for their LoRAs.";
+                };
+              };
+            };
+            # axiomofmind's MOSS-Image NSFW LoRA, at its recommended 0.8 with its trigger phrase.
+            default = {
+              loras = [
+                {
+                  path = "/models/image/moss/loras/moss-nsfw.safetensors";
+                  multiplier = 0.8;
+                }
+              ];
+              trigger = "moss_xvstyle";
+            };
+            description = "What dark chats' pictures add: more LoRAs, and a trigger phrase before the prompt.";
           };
         };
 

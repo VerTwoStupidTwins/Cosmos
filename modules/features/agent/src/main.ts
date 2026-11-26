@@ -192,8 +192,11 @@ if (config.chat) {
 }
 
 // Picture mode, where the image model is set up: its pictures live in the agent's state folder.
-const pictures = config.chat?.pictures ? new Pictures(join(process.env.STATE_DIRECTORY ?? ".", "pictures"), config.models.endpoint, config.chat.pictures.model) : undefined;
-if (pictures) registry.install(pictures.extension);
+const pictures = config.chat?.pictures ? new Pictures(join(process.env.STATE_DIRECTORY ?? ".", "pictures"), config.models.endpoint, config.chat.pictures) : undefined;
+if (pictures) {
+	registry.install(pictures.extension);
+	registry.install(pictures.darkExtension);
+}
 
 const bridge = new Bridge({
 	matrix,
@@ -219,7 +222,9 @@ const bridge = new Bridge({
 				loreTools && {
 					campaign: { tools: campaignTools, lore: loreTools, investigate: Investigate, drop: notForCampaigns, ...(notesTools && { notes: notesTools }) },
 				}),
-			...(pictures && { pictures: { tools: pictures.extension, read: (id: string) => pictures.read(id), drop: notForCampaigns } }),
+			...(pictures && {
+				pictures: { tools: pictures.extension, darkTools: pictures.darkExtension, read: (id: string) => pictures.read(id), drop: notForCampaigns },
+			}),
 			...(memoryTools && { memory: memoryTools }),
 		},
 	}),

@@ -5,6 +5,8 @@ import { join } from "node:path";
 // expose: false keeps a tool off the model's list; only the agent's own code calls it.
 export type ToolPolicy = { replay?: "safe" | "unsafe"; approval?: boolean; expose?: boolean };
 
+export type Lora = { path: string; multiplier: number };
+
 export type Config = {
 	owner: string;
 	homeserver: string;
@@ -20,7 +22,15 @@ export type Config = {
 	netbirdDeclared: string | null; // modules/netbird-policies.nix as JSON, for the drift check
 	// Chats (web app + Matrix Chat room): they start on `mainModel` and hand off to `workModel` for homelab work.
 	// pictures: picture mode, with the llama-swap image model it draws with, or null.
-	chat: { roomName: string; port: number; mainModel: string; workModel: string; titleModel: string; pictures: { model: string } | null } | null;
+	// loras go with every picture; dark adds more, and a trigger phrase, in dark chats.
+	chat: {
+		roomName: string;
+		port: number;
+		mainModel: string;
+		workModel: string;
+		titleModel: string;
+		pictures: { model: string; loras: Lora[]; dark: { loras: Lora[]; trigger: string } } | null;
+	} | null;
 	models: {
 		endpoint: string;
 		default: string;

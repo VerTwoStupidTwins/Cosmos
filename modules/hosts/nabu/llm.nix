@@ -8,7 +8,7 @@ let
   nixos = config.flake.modules.nixos;
 
   helpers = "/models/helpers";
-  imageModels = "/models/image/qwen-image-2.1";
+  mossModels = "/models/image/moss";
 
   # The B50 is the only Intel card, so SYCL's first device. Its five models together peak at 12.9 GB of its 16.
   # Gemma needs about 1.5 GB more while it reads a picture; short of it, it crashes.
@@ -102,12 +102,13 @@ in
         requestDefaults.helper.chat_template_kwargs.enable_thinking = false;
       };
 
-      # Qwen-Image 2.1 with chatrlabs' Omni adapter (uncensored: explicit scenes and anime as well as photos), Q8, with
-      # chatrlabs' 8-step Turbo LoRA merged in (sd-cli -M convert; sd-server doesn't take LoRAs from a prompt). Its text
-      # encoder (Qwen3-VL-8B, Qwen's Q4_K_M), the model and the VAE all run on the first P100: about 55 s for a
-      # 1024x1024 image, peak 15.2 GB of 16. 1024x1536 takes about 100 s; at 1536x1536 the VAE decodes in tiles on its
-      # own. OpenAI's /v1/images/generations takes a prompt and a size; other settings ride in the prompt as
-      # <sd_cpp_extra_args>{...}</sd_cpp_extra_args>.
+      # MOSS-Image SFT (5B), Q8, with Qwen3.5-9B Q8 as its text encoder and the FLUX.2 VAE, all on the first P100: it
+      # follows prompts closely (people in their places, short text) and isn't censored. Peak 15.9 GB of 16. A
+      # 1024x1024 image takes about 50 s warm, 65 s with loading.
+      # The 8-step DMD LoRA (lodestones) has to be applied at runtime: merged into Q8 its delta is lost to rounding and
+      # the images come out ghosted. sd-server ignores LoRA tags in prompts, so the agent sends the LoRAs by full path
+      # in each prompt's <sd_cpp_extra_args>{"lora":[…]}</sd_cpp_extra_args> (agent.chat.pictureLoras), the NSFW LoRA
+      # only in dark chats. The tokenizer must be MOSS's own; Qwen3.5-9B's differs and garbles prompts.
       llm.models.image = {
         command = lib.concatStringsSep " " [
           (lib.getExe' (pkgs.stable-diffusion-cpp.override {
@@ -116,10 +117,13 @@ in
           }) "sd-server")
           "--listen-port \${PORT}"
           "--backend te=cuda0,diffusion=cuda0,vae=cuda0"
-          "--diffusion-model ${imageModels}/chatrlabs-omni-turbo-Q8_0.gguf"
-          "--llm ${imageModels}/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
-          "--vae ${imageModels}/vae/qwen_image_2.1_vae_bf16.safetensors"
-          # The Turbo LoRA's settings.
+          "--diffusion-model ${mossModels}/MOSS-Image-SFT-Q8_0.gguf"
+          "--llm ${mossModels}/Qwen3.5-9B-Q8_0.gguf"
+          "--vae ${mossModels}/vae/flux2-vae.safetensors"
+          "--tokenizer ${mossModels}/tokenizer/tokenizer.json"
+          "--lora-model-dir ${mossModels}/loras"
+          "--lora-apply-mode at_runtime"
+          # The 8-step LoRA's settings (without it, MOSS wants 50 steps at CFG 3: 8 minutes on a P100).
           "--steps 8"
           "--cfg-scale 1"
           "--sampling-method euler"

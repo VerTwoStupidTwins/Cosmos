@@ -92,7 +92,8 @@ export type ChatOptions = {
 	// lore: the vault read-only, for the investigator; investigate: its tool; drop: defaults neither of them needs.
 	campaign?: { tools: Extension; notes?: Extension; lore: Extension; investigate: Extension; drop: Extension[] };
 	// Picture mode (PICTURE_MODE), where an image model is set up: main with the draw tool and none of the homelab's.
-	pictures?: { tools: Extension; read: (id: string) => Buffer | undefined; drop: Extension[] };
+	// darkTools: dark chats' draw, with the dark LoRAs.
+	pictures?: { tools: Extension; darkTools: Extension; read: (id: string) => Buffer | undefined; drop: Extension[] };
 	memory?: Extension; // the memory tools and core block, which dark chats leave out
 };
 
@@ -141,10 +142,11 @@ const CHAT_MAIN_PICTURE = [
 ].join(" ");
 const CHAT_PICTURE = [
 	"This chat is in picture mode: you are main, turning the owner's requests into pictures with draw, which sends your",
-	"prompt to the image model (Qwen-Image 2.1, uncensored; photos, illustration, anime, painting; it renders short",
-	"text well). Write the prompt yourself from what they ask: plain descriptive English, the subject first, then the",
-	"setting, composition and framing, camera or medium, lighting, colours, mood and style, as specific as they'd want",
-	"and nothing they didn't ask for. If they give a prompt of their own, use it as it is unless they ask you to improve",
+	"prompt to the image model (MOSS-Image, uncensored; photos, illustration, anime, painting; it follows detailed",
+	"prompts closely and renders short text). Write the prompt yourself from what they ask: plain descriptive English",
+	"sentences, the subject first, then what each person or thing looks like, is doing and where it is, the setting,",
+	"composition and framing, camera or medium, lighting, colours, mood and style, as specific as they'd want and",
+	"nothing they didn't ask for. If they give a prompt of their own, use it as it is unless they ask you to improve",
 	"it. Pick the size from the shape: 1024x1536 for portraits and tall things, 1536x1024 for landscapes and scenes.",
 	"Draw first and ask after: when a request is vague, make a good guess, then offer one or two directions to try.",
 	"For changes, draw again with the prompt adjusted (the model doesn't edit a picture; each one is new). After",
@@ -879,9 +881,9 @@ export class Bridge {
 		const c = this.options.chat!;
 		if (dark) {
 			// main or picture mode only, without memory, the homelab or the web.
-			const remove = [...c.homelab, ...(c.memory ? [c.memory] : []), ...(c.pictures?.drop ?? []), ...(c.web ? [c.web] : [])];
+			const remove = [...c.homelab, ...(c.memory ? [c.memory] : []), ...(c.pictures ? [...c.pictures.drop, c.pictures.tools] : []), ...(c.web ? [c.web] : [])];
 			return model === PICTURE_MODE && c.pictures
-				? { model: { provider: "nabu", modelId: c.mainModel }, extensions: { add: [c.handBack, c.pictures.tools], remove }, instructions: `${CHAT_DARK} ${CHAT_PICTURE}` }
+				? { model: { provider: "nabu", modelId: c.mainModel }, extensions: { add: [c.handBack, c.pictures.darkTools], remove }, instructions: `${CHAT_DARK} ${CHAT_PICTURE}` }
 				: {
 						model: { provider: "nabu", modelId: c.mainModel },
 						extensions: { add: c.pictures ? [c.handOff] : [], remove },
