@@ -214,12 +214,15 @@ in
       # Hermes stages a model-provider plugin by copying it and renaming the copy into place, which fails for a
       # read-only directory from the Nix store (extraPlugins). The Claude provider gets a writable copy instead, made
       # fresh on every boot and switch; its timestamps are kept, so Hermes sees it as changed only when it is.
+      # Obsidian's plugin is an Agent Plugin (plugin.json, no plugin.yaml), which extraPlugins refuses, so it's linked
+      # here too.
       system.activationScripts.hermes-home-private = lib.stringAfter [ "hermes-agent-setup" ] ''
         chmod 2750 ${hermesHome}
         ${unlockSkills}
         rm -rf ${claudePluginDir}
         cp -r --no-preserve=mode --preserve=timestamps ${claudePlugin} ${claudePluginDir}
         chown -R hermes:hermes ${claudePluginDir}
+        ln -sfn ${obsidianPlugin} ${hermesHome}/plugins/obsidian
       '';
 
       # Hermes copies new bundled skills as it starts, so each start also unlocks the ones the previous start copied.
@@ -268,7 +271,6 @@ in
           memoryPlugin
           vccPlugin
           planModePlugin
-          obsidianPlugin
           researchRoutingPlugin
         ];
         environmentFiles = [ config.sops.templates."hermes.env".path ];
