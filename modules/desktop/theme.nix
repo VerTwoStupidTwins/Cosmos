@@ -507,9 +507,6 @@ in
                     # rofi isn't used, and this target still sets home-manager's renamed
                     # programs.rofi.font, which warns on every build.
                     rofi.enable = false;
-                    # wayprompt isn't used either, and nixpkgs removed it: home-manager dropped its module, so this
-                    # target's programs.wayprompt fails the build (seen by the weekly update, 2026-11-22).
-                    wayprompt.enable = false;
                   };
 
                   programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
