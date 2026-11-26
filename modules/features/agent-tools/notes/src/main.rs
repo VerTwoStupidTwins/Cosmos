@@ -53,6 +53,9 @@ enum Command {
         /// Read only: no create, edit or move tools.
         #[arg(long)]
         read_only: bool,
+        /// New notes only: create, but no edit or move, so nothing already in the vault can be changed.
+        #[arg(long)]
+        create_only: bool,
         /// File reviewed inbox notes: the file_note and discard_note tools.
         #[arg(long)]
         filing: bool,
@@ -89,10 +92,10 @@ enum Command {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Serve { inbox, read_only, filing, tasks_note, meaning } => {
+        Command::Serve { inbox, read_only, create_only, filing, tasks_note, meaning } => {
             let index = meaning::Index::new(&meaning)?.map(Arc::new);
-            let filing = (filing && !read_only).then_some(tasks_note);
-            tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only, filing, index))
+            let filing = (filing && !read_only && !create_only).then_some(tasks_note);
+            tokio::runtime::Runtime::new()?.block_on(serve(cli.vault, inbox, read_only, create_only, filing, index))
         }
         Command::Index { meaning } => {
             let index = meaning::Index::new(&meaning)?.context("--qdrant is needed")?;
@@ -311,7 +314,8 @@ impl Notes {
         self.write(|lib| lib.discard(&self.inbox, &req.note))
     }
 
-    /// Write a new note into the vault's inbox (never over an existing one). Read the vault's rules and the
+    /// Write a new note into the vault's inbox, or the folder this server files new notes in (never over an existing
+    /// one). Read the vault's rules and the
     /// matching template first, and fill the template in rather than copying it. Give the owner the note's name.
     #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
     async fn create(&self, Parameters(req): Parameters<CreateRequest>) -> CallToolResult {
@@ -349,10 +353,15 @@ async fn serve(
     vault: PathBuf,
     inbox: String,
     read_only: bool,
+    create_only: bool,
     tasks_note: Option<String>,
     index: Option<Arc<meaning::Index>>,
 ) -> Result<()> {
     let mut tool_router = Notes::tool_router();
+    if create_only {
+        tool_router.remove_route("edit");
+        tool_router.remove_route("move");
+    }
     if index.is_none() {
         tool_router.remove_route("search_by_meaning");
     }

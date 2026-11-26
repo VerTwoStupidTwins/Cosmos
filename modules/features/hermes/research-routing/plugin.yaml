@@ -1,0 +1,5 @@
+name: research-routing
+version: 1.0.0
+description: "Delegation strategy: research subagents run on Claude through the subscription plugin, deep dives on its strongest model, and every other subagent keeps the local route."
+author: twins
+kind: backend

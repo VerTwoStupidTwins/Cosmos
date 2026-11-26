@@ -56,6 +56,31 @@ in
       # request.
       imageLora = "/models/image/qwen-image-2.1/loras/lightx2v-4step.safetensors";
 
+      # Plugins from Hermes' plugin catalog, at the commits it lists.
+      # Nous Research's official provider for Claude through the owner's subscription, via the Claude Code CLI.
+      claudePlugin = pkgs.runCommand "claude-subscription-directsdk" { } ''
+        cp -r ${
+          pkgs.fetchFromGitHub {
+            owner = "NousResearch";
+            repo = "hermes-official-plugins";
+            rev = "968160cec673d7c41b225e51604cc47048ceca8f";
+            hash = "sha256-ispIxsQgIYNYUl6i+u6+r254E2dW0JF056Oq7bxUtqg=";
+          }
+        }/claude-subscription-directsdk $out
+      '';
+      # Compaction without a model call: the summary keeps commands, errors and files, each linked to its message.
+      vccPlugin = pkgs.fetchFromGitHub {
+        name = "hermes-vcc-engine";
+        owner = "danbiocchi";
+        repo = "hermes-vcc-engine";
+        rev = "4d8add79395c56b785fd730bbc78c5fcd7194b59";
+        hash = "sha256-FxsUoK/LulPO6LLHoKoFdC3lYmytNyhMMD+0pSyJDSw=";
+      };
+      # Ours: research subagents on Claude, deep dives on its strongest model, every other subagent local.
+      researchRoutingPlugin = pkgs.runCommand "research-routing" { } ''
+        cp -r ${./hermes/research-routing} $out
+      '';
+
       hermesHome = "${cfg.stateDir}/.hermes";
       skillsDir = "${hermesHome}/skills";
 
@@ -80,6 +105,14 @@ in
           restartUnits = [ "hermes-backend.service" ];
         };
         tavily-api-key.sopsFile = ../../secrets/common.yaml;
+        # Qdrant's key again, for the wiki tool's search by meaning: Hermes starts its MCP servers itself, so they get
+        # no systemd credentials.
+        qdrant-api-key-hermes = {
+          sopsFile = ../../secrets/${config.networking.hostName}.yaml;
+          key = "qdrant-api-key";
+          owner = "hermes";
+          mode = "0400";
+        };
         # The dashboard's own sign-in, for when Pocket ID is down or an app can't use it.
         hermes-dashboard-password.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
         hermes-dashboard-secret.sopsFile = ../../secrets/${config.networking.hostName}.yaml;
@@ -141,6 +174,10 @@ in
       # Lets twins read Hermes' config, logs and skills, and add skills to its skills folder.
       users.users.twins.extraGroups = [ "hermes" ];
 
+      # The wiki tool writes research into the Notes vault, which is the notes group's (notes.nix). Hermes' services
+      # see the rest of the system read-only, so the vault is opened for writing too.
+      users.users.hermes.extraGroups = [ "notes" ];
+
       # With twins in the group, Hermes counts a group-writable home as unsafe and refuses to reach its gateway, which
       # fails every cron job. The module makes the home 2770 at boot (tmpfiles) and on every switch (activation), so
       # both are overridden: tmpfiles keeps the first line for a path, and this script runs after the module's.
@@ -157,10 +194,12 @@ in
         preStart = lib.mkAfter unlockSkills;
         after = [ "memory.service" ];
         wants = [ "memory.service" ];
+        serviceConfig.ReadWritePaths = [ config.notes.vault ];
       };
       systemd.services.hermes-backend = {
         after = [ "memory.service" ];
         wants = [ "memory.service" ];
+        serviceConfig.ReadWritePaths = [ config.notes.vault ];
       };
 
       services.hermes-agent = {
@@ -181,16 +220,45 @@ in
           STT_OPENAI_BASE_URL = models;
           VOICE_TOOLS_OPENAI_KEY = modelKey;
           COSMOS_MEMORY_URL = memoryUrl;
+          CLAUDE_SUBSCRIPTION_DIRECTSDK_COMMAND = lib.getExe pkgs.claude-code;
         };
 
         # The memory provider (hermes/memory-plugin): recall for every message, every exchange stored, memory_* tools.
-        extraPlugins = [ memoryPlugin ];
+        extraPlugins = [
+          memoryPlugin
+          claudePlugin
+          vccPlugin
+          researchRoutingPlugin
+        ];
         environmentFiles = [ config.sops.templates."hermes.env".path ];
 
-        # Converts audio for voice messages.
-        extraPackages = [ pkgs.ffmpeg-headless ];
+        extraPackages = [
+          # Converts audio for voice messages.
+          pkgs.ffmpeg-headless
+          # The Claude plugin sends every request through the official CLI, which holds the login. Log in once as
+          # the hermes user: sudo -u hermes -H claude auth login
+          pkgs.claude-code
+        ];
 
         # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp_<server>_<tool>.
+        # Research reports go into the Notes vault's Wiki folder: the notes tool reads and searches the whole vault but
+        # can only add new notes there, never change one, so it needs no approval.
+        mcpServers.wiki = {
+          command = lib.getExe config.notes.package;
+          args = [
+            "--vault"
+            config.notes.vault
+            "serve"
+            "--inbox"
+            "Wiki"
+            "--create-only"
+          ]
+          ++ config.memory.vaultSearchArgs "notes"
+          ++ [
+            "--qdrant-key-file"
+            config.sops.secrets.qdrant-api-key-hermes.path
+          ];
+        };
         mcpServers.art = {
           command = lib.getExe art;
           args = [
@@ -219,12 +287,28 @@ in
             supports_vision = false;
           };
 
-          # Subagents think: the same process, so no model swap.
+          # Subagents think: the same process, so no model swap. Research goes to Claude instead (research-routing).
           delegation = {
             model = "workhorse";
             base_url = models;
             api_key = modelKey;
+            backend = "research-routing";
+            backends.research-routing = {
+              # Everyday research, which uses less of the subscription's allowance.
+              model = "sonnet";
+              # Deep dives, only when asked for one.
+              deep_model = "opus";
+            };
           };
+
+          # Compaction by VCC: no model call, so main's slots stay free (it used to spend minutes on a summary).
+          context.engine = "vcc";
+
+          # Plugins that aren't model or memory providers load only when listed. The list doesn't merge across files.
+          plugins.enabled = [
+            "research-routing"
+            "hermes-vcc-engine"
+          ];
 
           # The decision model approves clearly safe commands. Anything it denies or is unsure about asks the owner.
           approvals.mode = "smart";
