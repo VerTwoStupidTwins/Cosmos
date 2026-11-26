@@ -44,6 +44,18 @@ in
         cp -r ${./hermes/memory-plugin} $out
       '';
 
+      # The art tool (agent-tools/art): pictures from nabu's image model, kept in Hermes' state.
+      art = pkgs.rustPlatform.buildRustPackage {
+        pname = "art";
+        version = "0.1.0";
+        src = ./agent-tools/art;
+        cargoLock.lockFile = ./agent-tools/art/Cargo.lock;
+        meta.mainProgram = "art";
+      };
+      # Qwen-Image 2.1's 4-step LoRA, by its path on nabu (modules/hosts/nabu/llm.nix): sd-server needs it with each
+      # request.
+      imageLora = "/models/image/qwen-image-2.1/loras/lightx2v-4step.safetensors";
+
       hermesHome = "${cfg.stateDir}/.hermes";
       skillsDir = "${hermesHome}/skills";
 
@@ -177,6 +189,19 @@ in
 
         # Converts audio for voice messages.
         extraPackages = [ pkgs.ffmpeg-headless ];
+
+        # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp_<server>_<tool>.
+        mcpServers.art = {
+          command = lib.getExe art;
+          args = [
+            "--models"
+            models
+            "--lora"
+            "${imageLora}:1"
+            "--dir"
+            "${cfg.stateDir}/art"
+          ];
+        };
 
         # Who Hermes is here. The repo owns this file; Hermes' own notes go in its skills and memory.
         hermesHomeFiles."SOUL.md" = ./hermes/SOUL.md;

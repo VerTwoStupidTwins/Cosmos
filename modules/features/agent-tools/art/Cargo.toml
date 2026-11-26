@@ -1,0 +1,24 @@
+[package]
+name = "art"
+version = "0.1.0"
+edition = "2024"
+description = "Pictures from nabu's image model (new, or edited from reference pictures), as an MCP server over stdio"
+publish = false
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+clap = { version = "4", features = ["derive"] }
+# Only to make the small preview the chat shows.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+# Plain HTTP to nabu over NetBird: no TLS stack.
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart"] }
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+
+[profile.release]
+lto = "thin"
