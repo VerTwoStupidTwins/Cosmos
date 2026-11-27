@@ -338,6 +338,13 @@ in
           "Wiki"
           "--create-only"
         ];
+        # Research for the game (real geography, history, myth… as inspiration) goes into the campaigns vault's Research
+        # folder the same way: add only, so no approval.
+        mcpServers.campaign_research = vaultServer campaignsVault "notes-campaigns" [
+          "--inbox"
+          "Research"
+          "--create-only"
+        ];
         # The campaigns vault (D&D 5e 2024 homebrew: Worlds/ and Campaigns/), split the same way: new notes in its inbox
         # freely, edits and moves asked for.
         mcpServers.campaigns = vaultServer campaignsVault "notes-campaigns" [ ] // {
@@ -358,8 +365,12 @@ in
           ];
         };
 
-        # Who Hermes is here. The repo owns this file; Hermes' own notes go in its skills and memory.
+        # Who Hermes is here: identity and voice only, as Hermes' docs ask. How to work (tools, vaults, research) is
+        # AGENTS.md in its working directory, which Hermes loads into every chat as project context. The repo owns both;
+        # Hermes' own notes go in its skills and memory.
         hermesHomeFiles."SOUL.md" = ./hermes/SOUL.md;
+        workingDirectory = "/var/lib/hermes/workspace";
+        documents."AGENTS.md" = ./hermes/AGENTS.md;
 
         settings = {
           # main: Ornith 35B on the 7900 XT, always thinking (tool calls go wrong without it). 262K context shared by
