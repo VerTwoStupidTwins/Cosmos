@@ -33,6 +33,7 @@ in
       nixos.budget
       nixos.rss
       nixos.cloud
+      nixos.minecraft
       nixos.observability
       nixos.internet-monitor
       nixos.observed

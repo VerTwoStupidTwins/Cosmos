@@ -236,8 +236,11 @@ in
         from = [ "players" ];
         to = [ "CosmosInfra" ];
         protocol = "tcp";
-        ports = [ "443" ];
-        why = "players reach Foundry VTT (foundry.gatica.one, a shared site, modules/features/foundry.nix); nginx answers them 403 everywhere else";
+        ports = [
+          "443"
+          "25565"
+        ];
+        why = "players reach Foundry VTT (foundry.gatica.one, a shared site, modules/features/foundry.nix; nginx answers them 403 everywhere else) and the Minecraft server (mc.gatica.one, modules/features/minecraft.nix)";
       };
       "Homelab Access" = {
         from = [ "Olympus" ];
