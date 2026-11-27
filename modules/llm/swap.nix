@@ -201,6 +201,9 @@ in
       };
 
       config = lib.mkIf (cfg.models != { }) {
+        # The homelab plate shows it among the host's services (modules/features/monitor.nix).
+        monitor.units = [ "llama-swap" ];
+
         # Waits for its models' cards: started before the NVIDIA driver had loaded, llama-server finds no device
         # and the preload fails.
         systemd.services.llama-swap =

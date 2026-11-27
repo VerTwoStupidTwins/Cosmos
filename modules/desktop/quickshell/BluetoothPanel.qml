@@ -3,6 +3,7 @@
 // found by scanning while the plate is open. A click connects or disconnects a paired device, or
 // pairs a nearby one (then trusts and connects it); a paired device's × forgets it. Devices that
 // need a PIN typed have no agent here: SETTINGS opens bluetoothctl for those. Esc closes.
+// It closes itself after seven seconds without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -68,6 +69,17 @@ PanelWindow {
         id: keys
         focus: true
         Keys.onEscapePressed: Panels.open = ""
+    }
+
+    // Seven seconds without the pointer over the plate, it goes.
+    // The handler is on the window, so the header counts too.
+    HoverHandler {
+        id: pointer
+    }
+    Timer {
+        interval: 7000
+        running: panel.visible && !pointer.hovered
+        onTriggered: Panels.open = ""
     }
 
     Plate {

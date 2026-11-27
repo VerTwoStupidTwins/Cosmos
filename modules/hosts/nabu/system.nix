@@ -22,7 +22,11 @@ in
       nixos.llama-sycl
       nixos.llama-vulkan
       nixos.observed
+      nixos.monitor
     ];
+
+    # The desktop bar's homelab plate reads nabu's monitor.
+    monitor.allowStation = true;
 
     gpu.nvidia.cudaCapabilities = [ "6.0" ]; # Tesla P100
     observed.nvidia = true;

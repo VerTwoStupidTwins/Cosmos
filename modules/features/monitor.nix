@@ -4,7 +4,10 @@ let
   # The desktop bar's key (its private half is in secrets/tenjin.yaml), and the hosts its homelab
   # plate checks, by host key (modules/base/known-hosts.nix). Each of them sets monitor.allowStation.
   stationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMw0/t1en+PuDl7iQiW/6f0DLorwLSHcLP+WdOtpYIxw station-monitor";
-  labHosts = lib.getAttrs [ "lugh" ] config.cosmos.hostKeys;
+  labHosts = lib.getAttrs [
+    "lugh"
+    "nabu"
+  ] config.cosmos.hostKeys;
 in
 {
   # Read-only health checks and config lookups for a host, as an MCP server over stdio. What the host should be running

@@ -2,6 +2,7 @@
 // the wired link if there is one, and the Wi-Fi networks in range: connected first, then known
 // ones, then by signal. A click connects (asking for the password when the network needs one it
 // doesn't have) or disconnects; a known network's × forgets it. Esc closes.
+// It closes itself after seven seconds without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -89,6 +90,17 @@ PanelWindow {
         id: keys
         focus: true
         Keys.onEscapePressed: Panels.open = ""
+    }
+
+    // Seven seconds without the pointer over the plate, it goes. It waits while a password is being typed.
+    // The handler is on the window, so the header counts too.
+    HoverHandler {
+        id: pointer
+    }
+    Timer {
+        interval: 7000
+        running: panel.visible && !pointer.hovered && panel.asking === null
+        onTriggered: Panels.open = ""
     }
 
     Plate {

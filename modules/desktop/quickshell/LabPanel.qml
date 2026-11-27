@@ -3,7 +3,8 @@
 // system readings, disks, services, hardware health, config drift and the monitor's
 // warnings; a host that didn't answer says why. Two columns once there's more than one host,
 // scrolling when they don't fit. Open it with the station's LAB button, Mod+B, or
-// `qs -c bar ipc call lab toggle`; Esc closes, R checks again.
+// `qs -c bar ipc call lab toggle`; Esc closes, R checks again. It closes itself after seven
+// seconds without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -45,11 +46,20 @@ PanelWindow {
 
     onVisibleChanged: if (visible) keys.forceActiveFocus()
 
+    // Seven seconds after the pointer leaves (or never arrives), the page goes; a key press starts the count again.
+    Timer {
+        id: idle
+        interval: 7000
+        running: panel.visible && !hover.hovered
+        onTriggered: Homelab.open = false
+    }
+
     Item {
         id: keys
         focus: true
         Keys.onEscapePressed: Homelab.open = false
         Keys.onPressed: event => {
+            if (idle.running) idle.restart();
             if (event.key === Qt.Key_R) Homelab.check();
         }
     }
@@ -60,6 +70,11 @@ PanelWindow {
         spacing: 8
         opacity: 0
         y: -8
+
+        // Passive, so it stays hovered over the buttons and cards inside.
+        HoverHandler {
+            id: hover
+        }
 
         states: State {
             when: panel.visible
@@ -183,6 +198,8 @@ PanelWindow {
         readonly property var services: Object.entries(r?.services?.services ?? {})
         readonly property var failedUnits: r?.services?.failed_units ?? []
         readonly property var nvme: Object.entries(hw.nvme ?? {})
+        // Only where there's btrfs to count errors on; nabu and lugh are bcachefs.
+        readonly property bool hasBtrfs: Object.keys(hw.btrfs_errors ?? {}).length > 0
         readonly property int btrfsErrors: Object.values(hw.btrfs_errors ?? {})
             .reduce((n, dev) => n + Object.values(dev).reduce((a, b) => a + b, 0), 0)
         readonly property int kernelIssues: Object.keys(hw.kernel_this_boot ?? {}).length
@@ -382,10 +399,10 @@ PanelWindow {
             // drift's specifics follow underneath.
             Section {
                 text: "HEALTH"
-                visible: card.nvme.length > 0 || card.hw.btrfs_errors !== undefined || card.hasDrift
+                visible: card.nvme.length > 0 || card.hasBtrfs || card.hasDrift
             }
             Flow {
-                visible: card.nvme.length > 0 || card.hw.btrfs_errors !== undefined || card.hasDrift
+                visible: card.nvme.length > 0 || card.hasBtrfs || card.hasDrift
                 Layout.fillWidth: true
                 spacing: 14
 
@@ -404,7 +421,7 @@ PanelWindow {
                     }
                 }
                 Reading {
-                    visible: card.hw.btrfs_errors !== undefined
+                    visible: card.hasBtrfs
                     key: "BTRFS"
                     value: card.btrfsErrors === 0 ? "CLEAN" : card.btrfsErrors + " ERR"
                     tone: card.btrfsErrors === 0 ? Theme.fg : Theme.urgent

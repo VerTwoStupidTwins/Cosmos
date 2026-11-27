@@ -2,6 +2,7 @@
 // devices, the chosen one of each with its volume and mute, and every app playing sound with its
 // own. Click a device to make it the default; click or drag a level strip, or scroll on it, to set
 // it; click a mute button to toggle it. Esc closes; pavucontrol is a button away.
+// It closes itself after seven seconds without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -54,6 +55,17 @@ PanelWindow {
         id: keys
         focus: true
         Keys.onEscapePressed: Panels.open = ""
+    }
+
+    // Seven seconds without the pointer over the plate, it goes.
+    // The handler is on the window, so the header counts too.
+    HoverHandler {
+        id: pointer
+    }
+    Timer {
+        interval: 7000
+        running: panel.visible && !pointer.hovered
+        onTriggered: Panels.open = ""
     }
 
     Plate {
