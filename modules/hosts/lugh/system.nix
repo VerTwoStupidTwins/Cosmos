@@ -30,6 +30,9 @@ in
       nixos.hermes
       nixos.memory-store
       nixos.shared-nas
+      nixos.budget
+      nixos.rss
+      nixos.cloud
       nixos.observability
       nixos.internet-monitor
       nixos.observed
