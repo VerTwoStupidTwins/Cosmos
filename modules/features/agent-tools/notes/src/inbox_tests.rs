@@ -273,3 +273,21 @@ fn a_ticked_to_do_for_a_missing_note_is_still_cleared() {
     assert_eq!(out["cleared"].as_array().unwrap().len(), 1);
     assert!(out["left"][0].as_str().unwrap().contains("no such note"));
 }
+
+#[test]
+fn archiving_removes_the_folder_it_leaves_empty_but_not_the_top_folder() {
+    let (_dir, lib) = tasks_vault();
+    fs::write(lib.root.join("Reference/Tasks.md"), "- [x] Set up Minecraft server ([[Minecraft server]])\n").unwrap();
+    lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    assert!(!lib.root.join("Projects/Minecraft server").exists(), "its project folder is gone");
+    assert!(lib.root.join("Projects").is_dir(), "Projects stays");
+}
+
+#[test]
+fn a_folder_with_other_notes_stays_after_a_move() {
+    let (_dir, lib) = tasks_vault();
+    fs::write(lib.root.join("Projects/Minecraft server/Mods.md"), "mods\n").unwrap();
+    fs::write(lib.root.join("Reference/Tasks.md"), "- [x] Set up Minecraft server ([[Minecraft server]])\n").unwrap();
+    lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    assert!(lib.root.join("Projects/Minecraft server/Mods.md").exists());
+}

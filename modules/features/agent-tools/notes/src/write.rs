@@ -83,6 +83,7 @@ impl Library {
         }
         fs::create_dir_all(dest.parent().unwrap()).with_context(|| format!("making the folders for {to_rel}"))?;
         fs::rename(&from, &dest).with_context(|| format!("moving {from_rel}"))?;
+        let removed_folders = self.remove_empty_folders(from.parent());
         let dest_rel = self.show(&dest);
 
         // Links by name ([[Old]]) and by path ([[Folder/Old]]) both point at it; fix the ones that break.
@@ -96,7 +97,28 @@ impl Library {
                 relinked.push(found.rel);
             }
         }
-        Ok(json!({ "moved": from_rel, "to": dest_rel, "links_updated_in": relinked }))
+        Ok(json!({ "moved": from_rel, "to": dest_rel, "links_updated_in": relinked, "removed_empty_folders": removed_folders }))
+    }
+
+    /// Removes `dir` and the folders above it while they're empty, as a note moving out leaves them, but never a
+    /// top-level folder (Projects, Ideas, Inbox…) or the vault itself. Returns what it removed.
+    pub(crate) fn remove_empty_folders(&self, dir: Option<&Path>) -> Vec<String> {
+        let mut removed = Vec::new();
+        let mut at = dir.map(Path::to_path_buf);
+        while let Some(dir) = at {
+            let Ok(rel) = dir.strip_prefix(&self.root) else { break };
+            // Two levels at least: Projects/X, never Projects.
+            if rel.components().count() < 2 {
+                break;
+            }
+            // remove_dir only removes an empty folder, so a folder with anything left in it stays.
+            if fs::remove_dir(&dir).is_err() {
+                break;
+            }
+            removed.push(rel.to_string_lossy().into_owned());
+            at = dir.parent().map(Path::to_path_buf);
+        }
+        removed
     }
 
     /// Where the note called `name` (any case) is, if there is one.
