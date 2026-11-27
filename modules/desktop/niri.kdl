@@ -1,0 +1,336 @@
+// niri's config for Cosmos, written by hand (niri.nix validates it at build time). The look follows the
+// Quickshell bar: square corners, a thin accent border, tight gaps, quick animations. Colours here are
+// fallbacks; the wallpaper's palette replaces them through the include at the end (theme.nix).
+// Reference: https://niri-wm.github.io/niri/Configuration:-Introduction.html
+
+input {
+    keyboard {
+        xkb {
+        }
+        numlock
+    }
+
+    touchpad {
+        tap
+        natural-scroll
+    }
+}
+
+layout {
+    gaps 8
+    center-focused-column "never"
+    // A lone window sits in the middle rather than against the left edge.
+    always-center-single-column
+
+    preset-column-widths {
+        proportion 0.33333
+        proportion 0.5
+        proportion 0.66667
+    }
+    default-column-width { proportion 0.5; }
+
+    // A thin border on every window, accent on the focused one, takes the place of the glow ring.
+    focus-ring {
+        off
+    }
+    border {
+        on
+        width 2
+        active-color "#7fc8ff"
+        inactive-color "#3a3a3a"
+        urgent-color "#ff5c5c"
+    }
+
+    // Close and hard-edged, like the bar's plates sitting on the desktop.
+    shadow {
+        on
+        softness 12
+        spread 0
+        offset x=0 y=4
+        draw-behind-window true
+        color "#00000088"
+    }
+
+    // Tabbed columns (Mod+W): square strips along the top, inside the column.
+    tab-indicator {
+        hide-when-single-tab
+        place-within-column
+        position "top"
+        gap 4
+        width 3
+        length total-proportion=1.0
+        gaps-between-tabs 2
+        corner-radius 0
+        active-color "#7fc8ff"
+        inactive-color "#3a3a3a"
+    }
+
+    insert-hint {
+        color "#7fc8ff60"
+    }
+
+    struts {
+    }
+}
+
+overview {
+    backdrop-color "#101010"
+    workspace-shadow {
+        softness 24
+        spread 4
+        offset x=0 y=6
+        color "#00000070"
+    }
+}
+
+// Apps drop their own rounded title bars and shadows where they can, so the border is the frame.
+prefer-no-csd
+
+// The bar is Quickshell, started as a systemd user service.
+spawn-at-startup "1password" "--silent"
+spawn-at-startup "wallpaper" "--restore"
+
+// Mod+Shift+/ shows the keys; no need for it at every login.
+hotkey-overlay {
+    skip-at-startup
+}
+
+screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
+
+// Quick and critically damped: things land without bouncing.
+animations {
+    workspace-switch {
+        spring damping-ratio=1.0 stiffness=1400 epsilon=0.0001
+    }
+    window-open {
+        duration-ms 120
+        curve "ease-out-expo"
+    }
+    window-close {
+        duration-ms 100
+        curve "ease-out-quad"
+    }
+    horizontal-view-movement {
+        spring damping-ratio=1.0 stiffness=1200 epsilon=0.0001
+    }
+    window-movement {
+        spring damping-ratio=1.0 stiffness=1200 epsilon=0.0001
+    }
+    window-resize {
+        spring damping-ratio=1.0 stiffness=1200 epsilon=0.0001
+    }
+    config-notification-open-close {
+        spring damping-ratio=1.0 stiffness=1200 epsilon=0.001
+    }
+    overview-open-close {
+        spring damping-ratio=1.0 stiffness=1200 epsilon=0.0001
+    }
+}
+
+// Every window square, CSD corners clipped off.
+window-rule {
+    geometry-corner-radius 0
+    clip-to-geometry true
+}
+
+// Small tools and stand-alone dialogs float instead of taking a whole column.
+window-rule {
+    match app-id=r#"^org\.pulseaudio\.pavucontrol$"#
+    match app-id=r#"^xdg-desktop-portal-gtk$"#
+    match app-id=r#"^com\.gabm\.satty$"#
+    match app-id=r#"^org\.gnome\.FileRoller$"#
+    match app-id=r#"^thunar$"# title=r#"^(File Operation Progress|Confirm to replace files|Rename ".*")$"#
+    match app-id=r#"^com\.onepassword\.OnePassword$"# title=r#"^Quick Access"#
+    match app-id=r#"^kitty-float$"#
+    open-floating true
+}
+window-rule {
+    match app-id=r#"^org\.pulseaudio\.pavucontrol$"#
+    default-column-width { fixed 720; }
+    default-window-height { fixed 520; }
+}
+// File pickers from the portal, roomy enough to browse in.
+window-rule {
+    match app-id=r#"^xdg-desktop-portal-gtk$"#
+    default-column-width { proportion 0.6; }
+    default-window-height { proportion 0.7; }
+}
+// The scratch terminal (Mod+Shift+Return).
+window-rule {
+    match app-id=r#"^kitty-float$"#
+    default-column-width { fixed 960; }
+    default-window-height { fixed 600; }
+}
+
+// 1Password is blacked out of every capture: screen shares, recordings, grim/satty and the whole-screen
+// and window screenshots niri takes. Only the interactive region shot, where the selection is in plain
+// view, still shows it.
+window-rule {
+    match app-id=r#"^com\.onepassword\.OnePassword$"#
+    block-out-from "screen-capture"
+}
+
+binds {
+    Mod+Shift+Slash { show-hotkey-overlay; }
+
+    // Apps.
+    Mod+Return hotkey-overlay-title="Terminal" { spawn "kitty"; }
+    Mod+Shift+Return hotkey-overlay-title="Floating Terminal" { spawn "kitty" "--class" "kitty-float"; }
+    Mod+Space hotkey-overlay-title="Launcher" { spawn "qs" "-c" "bar" "ipc" "call" "launcher" "toggle"; }
+    Mod+E hotkey-overlay-title="Files" { spawn "thunar"; }
+    Mod+Shift+B hotkey-overlay-title="Browser" { spawn "firefox"; }
+    Mod+Shift+O hotkey-overlay-title="Obsidian" { spawn "obsidian"; }
+    Mod+P hotkey-overlay-title="1Password" { spawn "1password" "--toggle"; }
+    Mod+Shift+Space hotkey-overlay-title="1Password Quick Access" { spawn "1password" "--quick-access"; }
+
+    // The bar's pages and plates. Mod+Alt is the bar's modifier.
+    Mod+S hotkey-overlay-title="Command Station" { spawn "qs" "-c" "bar" "ipc" "call" "station" "toggle"; }
+    Mod+B hotkey-overlay-title="Homelab" { spawn "qs" "-c" "bar" "ipc" "call" "lab" "toggle"; }
+    Mod+Alt+A hotkey-overlay-title="Audio" { spawn "qs" "-c" "bar" "ipc" "call" "panels" "audio"; }
+    Mod+Alt+W hotkey-overlay-title="Network" { spawn "qs" "-c" "bar" "ipc" "call" "panels" "network"; }
+    Mod+Alt+B hotkey-overlay-title="Bluetooth" { spawn "qs" "-c" "bar" "ipc" "call" "panels" "bluetooth"; }
+    Mod+Alt+M hotkey-overlay-title="Media" { spawn "qs" "-c" "bar" "ipc" "call" "media" "toggle"; }
+    Mod+Alt+D hotkey-overlay-title="Drives" { spawn "qs" "-c" "bar" "ipc" "call" "drives" "toggle"; }
+    Mod+Alt+P hotkey-overlay-title="Pen Menu" { spawn "qs" "-c" "bar" "ipc" "call" "pen" "menu"; }
+    Mod+Alt+C hotkey-overlay-title="Caffeine" { spawn "qs" "-c" "bar" "ipc" "call" "caffeine" "toggle"; }
+    Mod+Alt+N hotkey-overlay-title="Night Light" { spawn "qs" "-c" "bar" "ipc" "call" "nightlight" "toggle"; }
+    Mod+N hotkey-overlay-title="Do Not Disturb" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "dnd"; }
+    Mod+Shift+N hotkey-overlay-title="Notification Log" { spawn "qs" "-c" "bar" "ipc" "call" "notifications" "log"; }
+    Mod+Ctrl+V hotkey-overlay-title="Clipboard History" { spawn "qs" "-c" "bar" "ipc" "call" "clipboard" "toggle"; }
+    Mod+Shift+W hotkey-overlay-title="Wallpaper" { spawn "wallpaper"; }
+
+    // Capture. The Chromebook has no Print key.
+    Mod+Shift+S hotkey-overlay-title="Screenshot a Region" { screenshot; }
+    Mod+Ctrl+S hotkey-overlay-title="Screenshot the Window" { screenshot-window; }
+    Mod+Ctrl+Shift+S hotkey-overlay-title="Screenshot the Screen" { screenshot-screen; }
+    Mod+Alt+S hotkey-overlay-title="Record a Region (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "region"; }
+    Mod+Alt+Shift+S hotkey-overlay-title="Record the Screen (again to stop)" { spawn "qs" "-c" "bar" "ipc" "call" "recorder" "screen"; }
+
+    // Session.
+    Mod+Alt+L hotkey-overlay-title="Lock the Screen" { spawn "loginctl" "lock-session"; }
+    Mod+Shift+E hotkey-overlay-title="Power Menu" { spawn "qs" "-c" "bar" "ipc" "call" "power" "toggle"; }
+    Mod+Shift+P { power-off-monitors; }
+    Mod+Escape allow-inhibiting=false { toggle-keyboard-shortcuts-inhibit; }
+    Ctrl+Alt+Delete { quit; }
+
+    // Media and brightness keys.
+    XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }
+    XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }
+    XF86AudioMicMute     allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"; }
+    XF86AudioPlay        allow-when-locked=true { spawn-sh "playerctl play-pause"; }
+    XF86AudioStop        allow-when-locked=true { spawn-sh "playerctl stop"; }
+    XF86AudioPrev        allow-when-locked=true { spawn-sh "playerctl previous"; }
+    XF86AudioNext        allow-when-locked=true { spawn-sh "playerctl next"; }
+    XF86MonBrightnessUp   allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set +10% && qs -c bar ipc call osd brightness"; }
+    XF86MonBrightnessDown allow-when-locked=true { spawn-sh "brightnessctl --class=backlight set 10%- && qs -c bar ipc call osd brightness"; }
+    Alt+XF86MonBrightnessUp   allow-when-locked=true { spawn "qs" "-c" "bar" "ipc" "call" "kbdlight" "up"; }
+    Alt+XF86MonBrightnessDown allow-when-locked=true { spawn "qs" "-c" "bar" "ipc" "call" "kbdlight" "down"; }
+
+    // Windows.
+    Mod+Q repeat=false { close-window; }
+    Mod+O repeat=false { toggle-overview; }
+    Mod+Tab { focus-window-previous; }
+    Mod+Grave { focus-workspace-previous; }
+
+    Mod+Left  { focus-column-left; }
+    Mod+Down  { focus-window-down; }
+    Mod+Up    { focus-window-up; }
+    Mod+Right { focus-column-right; }
+    Mod+H     { focus-column-left; }
+    Mod+J     { focus-window-down; }
+    Mod+K     { focus-window-up; }
+    Mod+L     { focus-column-right; }
+
+    Mod+Ctrl+Left  { move-column-left; }
+    Mod+Ctrl+Down  { move-window-down; }
+    Mod+Ctrl+Up    { move-window-up; }
+    Mod+Ctrl+Right { move-column-right; }
+    Mod+Ctrl+H     { move-column-left; }
+    Mod+Ctrl+J     { move-window-down; }
+    Mod+Ctrl+K     { move-window-up; }
+    Mod+Ctrl+L     { move-column-right; }
+
+    Mod+Home      { focus-column-first; }
+    Mod+End       { focus-column-last; }
+    Mod+Ctrl+Home { move-column-to-first; }
+    Mod+Ctrl+End  { move-column-to-last; }
+
+    Mod+BracketLeft  { consume-or-expel-window-left; }
+    Mod+BracketRight { consume-or-expel-window-right; }
+    Mod+Comma  { consume-window-into-column; }
+    Mod+Period { expel-window-from-column; }
+    Mod+W { toggle-column-tabbed-display; }
+
+    Mod+R { switch-preset-column-width; }
+    Mod+Shift+R { switch-preset-column-width-back; }
+    Mod+Ctrl+Shift+R { switch-preset-window-height; }
+    Mod+Ctrl+R { reset-window-height; }
+    Mod+F { maximize-column; }
+    Mod+Shift+F { fullscreen-window; }
+    Mod+M { maximize-window-to-edges; }
+    Mod+Ctrl+F { expand-column-to-available-width; }
+    Mod+C { center-column; }
+    Mod+Ctrl+C { center-visible-columns; }
+    Mod+Shift+C { center-window; }
+    Mod+Minus { set-column-width "-10%"; }
+    Mod+Equal { set-column-width "+10%"; }
+    Mod+Shift+Minus { set-window-height "-10%"; }
+    Mod+Shift+Equal { set-window-height "+10%"; }
+
+    Mod+V       { toggle-window-floating; }
+    Mod+Shift+V { switch-focus-between-floating-and-tiling; }
+
+    // Workspaces. Mod+Ctrl+N takes the column along; Mod+Shift+N sends it and stays.
+    Mod+U       { focus-workspace-down; }
+    Mod+I       { focus-workspace-up; }
+    Mod+Ctrl+U  { move-column-to-workspace-down; }
+    Mod+Ctrl+I  { move-column-to-workspace-up; }
+    Mod+Shift+U { move-workspace-down; }
+    Mod+Shift+I { move-workspace-up; }
+
+    Mod+WheelScrollDown      cooldown-ms=150 { focus-workspace-down; }
+    Mod+WheelScrollUp        cooldown-ms=150 { focus-workspace-up; }
+    Mod+Ctrl+WheelScrollDown cooldown-ms=150 { move-column-to-workspace-down; }
+    Mod+Ctrl+WheelScrollUp   cooldown-ms=150 { move-column-to-workspace-up; }
+    Mod+WheelScrollRight      { focus-column-right; }
+    Mod+WheelScrollLeft       { focus-column-left; }
+    Mod+Ctrl+WheelScrollRight { move-column-right; }
+    Mod+Ctrl+WheelScrollLeft  { move-column-left; }
+    Mod+Shift+WheelScrollDown      { focus-column-right; }
+    Mod+Shift+WheelScrollUp        { focus-column-left; }
+    Mod+Ctrl+Shift+WheelScrollDown { move-column-right; }
+    Mod+Ctrl+Shift+WheelScrollUp   { move-column-left; }
+
+    Mod+1 { focus-workspace 1; }
+    Mod+2 { focus-workspace 2; }
+    Mod+3 { focus-workspace 3; }
+    Mod+4 { focus-workspace 4; }
+    Mod+5 { focus-workspace 5; }
+    Mod+6 { focus-workspace 6; }
+    Mod+7 { focus-workspace 7; }
+    Mod+8 { focus-workspace 8; }
+    Mod+9 { focus-workspace 9; }
+    Mod+Ctrl+1 { move-column-to-workspace 1; }
+    Mod+Ctrl+2 { move-column-to-workspace 2; }
+    Mod+Ctrl+3 { move-column-to-workspace 3; }
+    Mod+Ctrl+4 { move-column-to-workspace 4; }
+    Mod+Ctrl+5 { move-column-to-workspace 5; }
+    Mod+Ctrl+6 { move-column-to-workspace 6; }
+    Mod+Ctrl+7 { move-column-to-workspace 7; }
+    Mod+Ctrl+8 { move-column-to-workspace 8; }
+    Mod+Ctrl+9 { move-column-to-workspace 9; }
+    Mod+Shift+1 { move-column-to-workspace 1 focus=false; }
+    Mod+Shift+2 { move-column-to-workspace 2 focus=false; }
+    Mod+Shift+3 { move-column-to-workspace 3 focus=false; }
+    Mod+Shift+4 { move-column-to-workspace 4 focus=false; }
+    Mod+Shift+5 { move-column-to-workspace 5 focus=false; }
+    Mod+Shift+6 { move-column-to-workspace 6 focus=false; }
+    Mod+Shift+7 { move-column-to-workspace 7 focus=false; }
+    Mod+Shift+8 { move-column-to-workspace 8 focus=false; }
+    Mod+Shift+9 { move-column-to-workspace 9 focus=false; }
+}
+
+// The wallpaper's colours, written at runtime by `wallpaper` (theme.nix). Last, so it overrides the
+// fallbacks above; optional, since it doesn't exist until a wallpaper has been set.
+include optional=true "~/.local/state/theme/niri.kdl"

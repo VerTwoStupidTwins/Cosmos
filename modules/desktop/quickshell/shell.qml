@@ -132,6 +132,21 @@ ShellRoot {
         }
     }
 
+    // `qs -c bar ipc call panels audio|network|bluetooth` for the bottom bar's VOL, COM and BT plates.
+    IpcHandler {
+        target: "panels"
+
+        function audio(): void {
+            Panels.toggle("audio");
+        }
+        function network(): void {
+            Panels.toggle("network");
+        }
+        function bluetooth(): void {
+            Panels.toggle("bluetooth");
+        }
+    }
+
     // `qs -c bar ipc call drives toggle` for the drives plate.
     IpcHandler {
         target: "drives"

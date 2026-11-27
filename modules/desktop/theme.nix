@@ -299,6 +299,17 @@ in
                               inactive-color "${c "base03"}"
                               urgent-color "${c "base08"}"
                           }
+                          tab-indicator {
+                              active-color "${c "accent"}"
+                              inactive-color "${c "base03"}"
+                              urgent-color "${c "base08"}"
+                          }
+                          insert-hint {
+                              color "${c "accent"}60"
+                          }
+                      }
+                      overview {
+                          backdrop-color "${c "base00"}"
                       }
                     '';
                   };
