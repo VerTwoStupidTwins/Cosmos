@@ -1,7 +1,7 @@
 // The command station: a detailed system overview that drops down below the clock plate. Click
 // the clock, or run `qs -c bar ipc call station toggle`, to open and close it; Esc closes it
 // once it has focus. Its LAB button swaps it for the homelab page (LabPanel.qml).
-// It closes itself after seven seconds without the pointer over it.
+// It closes itself after a few seconds (Panels.idleClose) without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -66,13 +66,13 @@ PanelWindow {
         Keys.onEscapePressed: Station.open = false
     }
 
-    // Seven seconds without the pointer over the station, it goes.
+    // A few seconds without the pointer over the station, it goes.
     // The handler is on the window, so every plate in it counts.
     HoverHandler {
         id: pointer
     }
     Timer {
-        interval: 7000
+        interval: Panels.idleClose
         running: panel.visible && !pointer.hovered
         onTriggered: Station.open = false
     }

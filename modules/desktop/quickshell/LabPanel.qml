@@ -3,8 +3,8 @@
 // system readings, disks, services, hardware health, config drift and the monitor's
 // warnings; a host that didn't answer says why. Two columns once there's more than one host,
 // scrolling when they don't fit. Open it with the station's LAB button, Mod+B, or
-// `qs -c bar ipc call lab toggle`; Esc closes, R checks again. It closes itself after seven
-// seconds without the pointer over it.
+// `qs -c bar ipc call lab toggle`; Esc closes, R checks again. It closes itself after a few
+// seconds (Panels.idleClose) without the pointer over it.
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -46,10 +46,10 @@ PanelWindow {
 
     onVisibleChanged: if (visible) keys.forceActiveFocus()
 
-    // Seven seconds after the pointer leaves (or never arrives), the page goes; a key press starts the count again.
+    // A few seconds after the pointer leaves (or never arrives), the page goes; a key press starts the count again.
     Timer {
         id: idle
-        interval: 7000
+        interval: Panels.idleClose
         running: panel.visible && !hover.hovered
         onTriggered: Homelab.open = false
     }
