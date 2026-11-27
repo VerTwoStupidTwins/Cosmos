@@ -1,0 +1,20 @@
+[package]
+name = "netbird"
+version = "0.1.0"
+edition = "2024"
+description = "The NetBird mesh's access settings (policies, groups, peers) and their drift from the repo, read-only, as an MCP server over stdio"
+publish = false
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# NetBird's API is HTTPS: rustls with its own roots, so nothing depends on the host's certificate store.
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }
+
+[profile.release]
+lto = "thin"

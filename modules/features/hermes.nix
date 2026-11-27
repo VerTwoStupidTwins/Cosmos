@@ -1,6 +1,8 @@
 # modules/features/hermes.nix
-{ inputs, ... }:
+{ config, inputs, ... }:
 let
+  # The NetBird groups and policies the repo declares (modules/netbird-policies.nix), for the netbird tool's drift view.
+  netbirdDeclared = builtins.toJSON config.cosmos.netbird;
   # The dashboard's address. Phones, the desktop app and browsers reach it only over NetBird (web.nix).
   site = "hermes";
   domain = "gatica.one";
@@ -61,6 +63,23 @@ in
           "--qdrant-key-file"
           config.sops.secrets.qdrant-api-key-hermes.path
         ];
+      };
+
+      # Metrics, alerts and logs from every host (agent-tools/observe), read from the observability stack on lugh.
+      observe = pkgs.rustPlatform.buildRustPackage {
+        pname = "observe";
+        version = "0.1.0";
+        src = ./agent-tools/observe;
+        cargoLock.lockFile = ./agent-tools/observe/Cargo.lock;
+        meta.mainProgram = "observe";
+      };
+      # The NetBird mesh's access settings and their drift from the repo (agent-tools/netbird), read-only.
+      netbird = pkgs.rustPlatform.buildRustPackage {
+        pname = "netbird";
+        version = "0.1.0";
+        src = ./agent-tools/netbird;
+        cargoLock.lockFile = ./agent-tools/netbird/Cargo.lock;
+        meta.mainProgram = "netbird";
       };
 
       # The art tool (agent-tools/art): pictures from nabu's image model, kept in Hermes' state.
@@ -151,6 +170,14 @@ in
           restartUnits = [ "hermes-backend.service" ];
         };
         tavily-api-key.sopsFile = ../../secrets/common.yaml;
+        # The read-only NetBird token (CosmosAuditor, netbird-api.nix), for the netbird tool. Hermes starts its MCP
+        # servers itself, so the file has to be readable by hermes.
+        netbird-api-token-hermes = {
+          sopsFile = ../../secrets/common.yaml;
+          key = "netbird-api-token";
+          owner = "hermes";
+          mode = "0400";
+        };
         # Qdrant's key again, for the wiki tool's search by meaning: Hermes starts its MCP servers itself, so they get
         # no systemd credentials.
         qdrant-api-key-hermes = {
@@ -222,7 +249,11 @@ in
 
       # The vault tools write into the Notes and Campaigns vaults, which are the notes group's (notes.nix). Hermes'
       # services see the rest of the system read-only, so the vaults are opened for writing too.
-      users.users.hermes.extraGroups = [ "notes" ];
+      # notes: the vaults. systemd-journal: the host monitor reads logs.
+      users.users.hermes.extraGroups = [
+        "notes"
+        "systemd-journal"
+      ];
 
       # With twins in the group, Hermes counts a group-writable home as unsafe and refuses to reach its gateway, which
       # fails every cron job. The module makes the home 2770 at boot (tmpfiles) and on every switch (activation), so
@@ -308,6 +339,22 @@ in
         ];
 
         # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp_<server>_<tool>.
+        # The homelab, read-only: metrics, alerts and logs from every host; this host's health, services, hardware and
+        # config (the host monitor, monitor.nix); and who can reach what over NetBird. None of them can change anything.
+        mcpServers.observe.command = lib.getExe observe;
+        mcpServers.monitor = {
+          command = lib.head config.monitor.command;
+          args = lib.tail config.monitor.command;
+        };
+        mcpServers.netbird = {
+          command = lib.getExe netbird;
+          args = [
+            "--token-file"
+            config.sops.secrets.netbird-api-token-hermes.path
+            "--declared"
+            "${pkgs.writeText "netbird-declared.json" netbirdDeclared}"
+          ];
+        };
         # The Notes vault (its rules: Reference/How this vault works). Reading is free; editing and moving ask the owner
         # first (trust below), since nothing here has an undo.
         mcpServers.notes = vaultServer config.notes.vault "notes" [ ] // {

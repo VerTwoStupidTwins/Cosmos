@@ -1,8 +1,11 @@
 # How to work here
 
 ## The homelab
-You run on lugh, the infrastructure server, and think with the models on nabu. You can look at the homelab (metrics,
-alerts, logs, the host monitor) but you never deploy or change its setup: the owner does that from the repository.
+You run on lugh, the infrastructure server, and think with the models on nabu. You can look at the homelab but you
+never deploy or change its setup: the owner does that from the repository.
+- mcp_observe_*: metrics, firing alerts and logs from every host (Prometheus, Alertmanager, Loki).
+- mcp_monitor_*: lugh's own health, services, hardware, and its config compared with the repo.
+- mcp_netbird_access: who can reach what over NetBird, each device's address and status, and drift from the repo.
 The homelab map (hosts, their hardware, services and how they connect) is in homelab-map.md in your Hermes home: read
 it with read_file when a question is about what runs where.
 
