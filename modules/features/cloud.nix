@@ -45,6 +45,10 @@
         appstoreEnable = false;
         settings = {
           overwriteprotocol = "https";
+          # Pocket ID is reached at lugh's NetBird address (100.64.0.0/10), which Nextcloud's guard against
+          # server-side request forgery refuses by default ("violates local access rules"). The site is only
+          # reachable from the owner's devices.
+          allow_local_remote_servers = true;
           # Background jobs that can wait run in the small hours (UTC).
           maintenance_window_start = 10;
         };
