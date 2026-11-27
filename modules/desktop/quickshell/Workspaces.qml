@@ -1,5 +1,5 @@
-// Workspaces over ext-workspace, as slanted plates numbered 01, 02…, with the icons of the apps
-// on each from niri (Niri.qml). Click one to switch to it.
+// Workspaces over ext-workspace, as slanted plates numbered 01, 02… (or named: WEB), with the icons
+// of the apps on each from niri (Niri.qml). Click one to switch to it.
 import QtQuick
 import Quickshell
 import Quickshell.Widgets
@@ -40,7 +40,11 @@ Row {
                 return Quickshell.iconPath(entry?.icon || appId, true);
             }
 
-            width: 28 + (shownApps.length > 0 ? shownApps.length * 15 + (more > 0 ? 16 : 0) + 2 : 0)
+            // Named workspaces (niri.kdl's web, notes, chat) in capitals; the rest by number, 01, 02…
+            readonly property string label: /^\d+$/.test(String(modelData.name))
+                ? String(modelData.name).padStart(2, "0") : String(modelData.name).toUpperCase()
+
+            width: number.implicitWidth + 14 + (shownApps.length > 0 ? shownApps.length * 15 + (more > 0 ? 16 : 0) + 2 : 0)
             height: 18
 
             Behavior on width {
@@ -63,7 +67,7 @@ Row {
                 id: number
                 x: 7
                 anchors.verticalCenter: parent.verticalCenter
-                text: String(button.modelData.name).padStart(2, "0")
+                text: button.label
                 color: button.lit ? Theme.bg : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.6)
                 font.pixelSize: 11
                 font.bold: button.lit

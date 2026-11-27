@@ -127,10 +127,43 @@ animations {
     }
 }
 
+// Home workspaces, always there and first, so Mod+1-3 reach them; unnamed ones follow from 04.
+workspace "web"
+workspace "notes"
+workspace "chat"
+
 // Every window square, CSD corners clipped off.
 window-rule {
     geometry-corner-radius 0
     clip-to-geometry true
+}
+
+// Apps that open on their home workspace. Picture-in-picture stays with whatever is on screen.
+window-rule {
+    match app-id=r#"^firefox$"#
+    exclude title=r#"^Picture-in-Picture$"#
+    open-on-workspace "web"
+}
+window-rule {
+    match app-id=r#"^md\.obsidian\.Obsidian$"#
+    open-on-workspace "notes"
+}
+window-rule {
+    match app-id=r#"^discord$"#
+    match app-id=r#"^org\.telegram\.desktop$"#
+    open-on-workspace "chat"
+}
+
+// Widths on open: the big apps take two thirds, a terminal a third, so a new window doesn't
+// push everything else off screen.
+window-rule {
+    match app-id=r#"^firefox$"#
+    match app-id=r#"^md\.obsidian\.Obsidian$"#
+    default-column-width { proportion 0.66667; }
+}
+window-rule {
+    match app-id=r#"^kitty$"#
+    default-column-width { proportion 0.33333; }
 }
 
 // Small tools and stand-alone dialogs float instead of taking a whole column.
@@ -162,11 +195,52 @@ window-rule {
     default-window-height { fixed 600; }
 }
 
-// 1Password is blacked out of every capture: screen shares, recordings, grim/satty and the whole-screen
-// and window screenshots niri takes. Only the interactive region shot, where the selection is in plain
-// view, still shows it.
+// Picture-in-picture floats small in the bottom-right corner.
+window-rule {
+    match app-id=r#"^firefox$"# title=r#"^Picture-in-Picture$"#
+    open-floating true
+    default-column-width { fixed 480; }
+    default-window-height { fixed 270; }
+    default-floating-position x=16 y=16 relative-to="bottom-right"
+}
+
+// See-through. Windows you aren't using fade a little, floating tools a little more, with the
+// wallpaper blurred behind them; kitty makes only its own background see-through (Stylix, theme.nix), so
+// its text stays solid. Mod+Ctrl+O turns it off for one window.
+window-rule {
+    match is-active=false
+    opacity 0.92
+}
+window-rule {
+    match is-floating=true
+    opacity 0.9
+    background-effect {
+        blur true
+    }
+}
+window-rule {
+    match app-id=r#"^kitty(-float)?$"#
+    background-effect {
+        blur true
+    }
+}
+// Never faded: video, game streams, picture-in-picture and the screenshot editor. After the rules
+// above, so it wins.
+window-rule {
+    match app-id=r#"^mpv$"#
+    match app-id=r#"^com\.moonlight_stream\.Moonlight$"#
+    match app-id=r#"^firefox$"# title=r#"^Picture-in-Picture$"#
+    match app-id=r#"^com\.gabm\.satty$"#
+    opacity 1.0
+}
+
+// Blacked out of every capture: screen shares, recordings, grim/satty and the whole-screen and window
+// screenshots niri takes. Only the interactive region shot, where the selection is in plain view, still
+// shows them. 1Password for its secrets, the chat apps for private conversations.
 window-rule {
     match app-id=r#"^com\.onepassword\.OnePassword$"#
+    match app-id=r#"^discord$"#
+    match app-id=r#"^org\.telegram\.desktop$"#
     block-out-from "screen-capture"
 }
 
@@ -280,6 +354,7 @@ binds {
 
     Mod+V       { toggle-window-floating; }
     Mod+Shift+V { switch-focus-between-floating-and-tiling; }
+    Mod+Ctrl+O hotkey-overlay-title="Toggle See-Through for the Window" { toggle-window-rule-opacity; }
 
     // Workspaces. Mod+Ctrl+N takes the column along; Mod+Shift+N sends it and stays.
     Mod+U       { focus-workspace-down; }

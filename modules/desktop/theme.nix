@@ -94,6 +94,9 @@ in
               dark = "Papirus-Dark";
               light = "Papirus-Light";
             };
+            # kitty's background only, so its text stays solid; niri blurs the wallpaper behind it
+            # (niri.kdl).
+            opacity.terminal = 0.85;
           };
 
           home-manager.sharedModules = [
