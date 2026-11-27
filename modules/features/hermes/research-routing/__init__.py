@@ -40,9 +40,15 @@ GUIDANCE = (
     "research routes use the owner's limited Claude subscription and send the task to Anthropic, "
     "so never send them private files, secrets, the owner's notes or memories, or explicit content. If a "
     "research task fails, for example at a usage limit, tell the user and redo it with route='local'. "
-    "When a research task finishes, file its report in the owner's Notes vault with mcp_wiki_create: it "
-    "goes in the Wiki folder. Search the vault first, so a report adds to what is there rather than "
-    "repeating it, and link related notes."
+    "Ask research tasks for figures where a picture explains better than words (examples of each kind, a "
+    "process, a map): the subagent makes them itself with the figures tools of the vault the report is for "
+    "(mcp__figures__* for the Notes vault, mcp__campaign_figures__* for the campaigns vault) and puts their embed "
+    "lines and captions in its report. Keep those lines as they are when filing it. "
+    "Tell every research task to return its report to you and not to file anything itself: one question "
+    "is one report, so when several tasks share a question, merge their reports into one. "
+    "File the report yourself: game research in the campaigns vault with mcp__campaign_research__create, "
+    "everything else in the Notes vault's Wiki folder with mcp__wiki__create. Search the vault first, so a "
+    "report adds to what is there rather than repeating it, and link related notes."
 )
 
 

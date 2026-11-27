@@ -51,6 +51,7 @@ in
       campaignsVault = config.notes.extraVaultPaths.campaigns;
       # The notes tool serving one vault: its search by meaning, then the serve flags.
       vaultServer = vault: collection: serveArgs: {
+        inherit vault;
         command = lib.getExe config.notes.package;
         args = [
           "--vault"
@@ -89,6 +90,59 @@ in
         src = ./agent-tools/art;
         cargoLock.lockFile = ./agent-tools/art/Cargo.lock;
         meta.mainProgram = "art";
+      };
+      # The figures tool (agent-tools/figures): diagrams Hermes draws as SVG, images from the web and art-tool
+      # pictures, saved into a vault's _attachments/Figures for notes to embed. Add only, like the inbox tools.
+      figures = pkgs.rustPlatform.buildRustPackage {
+        pname = "figures";
+        version = "0.1.0";
+        src = ./agent-tools/figures;
+        cargoLock.lockFile = ./agent-tools/figures/Cargo.lock;
+        meta.mainProgram = "figures";
+      };
+      figuresServer = vault: {
+        inherit vault;
+        command = lib.getExe figures;
+        args = [
+          "--vault"
+          vault
+          "--art-dir"
+          "${cfg.stateDir}/art"
+          "--fonts"
+          "${pkgs.dejavu_fonts}/share/fonts"
+        ];
+      };
+      # The tools that write the vaults, each run in a unit of its own (hermes-vault-<name>@, below) that may write its
+      # vault, while Hermes and everything it runs see the vaults read-only. Hermes reaches each over a socket, so its
+      # own file and terminal tools can't change a note around the tools' rules: the inbox and research folders take
+      # new notes only, and edits and moves wait for the owner.
+      vaultTools = {
+        notes = vaultServer config.notes.vault "notes" [ ];
+        inbox = vaultServer config.notes.vault "notes" [ "--create-only" ];
+        filing = vaultServer config.notes.vault "notes" [ "--filing" ];
+        wiki = vaultServer config.notes.vault "notes" [
+          "--inbox"
+          "Wiki"
+          "--create-only"
+        ];
+        campaign_research = vaultServer campaignsVault "notes-campaigns" [
+          "--inbox"
+          "Research"
+          "--create-only"
+        ];
+        campaigns = vaultServer campaignsVault "notes-campaigns" [ ];
+        campaign_inbox = vaultServer campaignsVault "notes-campaigns" [ "--create-only" ];
+        figures = figuresServer config.notes.vault;
+        campaign_figures = figuresServer campaignsVault;
+      };
+      vaultSocket = name: "/run/hermes-vault/${name}.sock";
+      # What Hermes runs for a vault tool: a pipe to its socket.
+      vaultClient = name: {
+        command = lib.getExe pkgs.socat;
+        args = [
+          "STDIO"
+          "UNIX-CONNECT:${vaultSocket name}"
+        ];
       };
       # Qwen-Image 2.1's 4-step LoRA, by its path on nabu (modules/hosts/nabu/llm.nix): sd-server needs it with each
       # request.
@@ -247,9 +301,8 @@ in
       # Lets twins read Hermes' config, logs and skills, and add skills to its skills folder.
       users.users.twins.extraGroups = [ "hermes" ];
 
-      # The vault tools write into the Notes and Campaigns vaults, which are the notes group's (notes.nix). Hermes'
-      # services see the rest of the system read-only, so the vaults are opened for writing too.
-      # notes: the vaults. systemd-journal: the host monitor reads logs.
+      # notes: reading the vaults (notes.nix), which only the vault tools' own units write (vaultTools).
+      # systemd-journal: the host monitor reads logs.
       users.users.hermes.extraGroups = [
         "notes"
         "systemd-journal"
@@ -277,23 +330,54 @@ in
       # Hermes copies new bundled skills as it starts, so each start also unlocks the ones the previous start copied.
       # The repo carries no skills: they're Hermes' own, kept in its state and changed only by Hermes or the owner.
       # Conversations start with memory's core block, so Hermes waits for the memory service.
-      systemd.services.hermes-agent = {
-        preStart = lib.mkAfter unlockSkills;
-        after = [ "memory.service" ];
-        wants = [ "memory.service" ];
-        serviceConfig.ReadWritePaths = [
-          config.notes.vault
-          campaignsVault
-        ];
-      };
-      systemd.services.hermes-backend = {
-        after = [ "memory.service" ];
-        wants = [ "memory.service" ];
-        serviceConfig.ReadWritePaths = [
-          config.notes.vault
-          campaignsVault
-        ];
-      };
+      systemd.services = {
+        hermes-agent = {
+          preStart = lib.mkAfter unlockSkills;
+          after = [ "memory.service" ];
+          wants = [ "memory.service" ];
+        };
+        hermes-backend = {
+          after = [ "memory.service" ];
+          wants = [ "memory.service" ];
+        };
+      }
+      # Each vault tool (vaultTools): one instance per connection, talking MCP over the socket, as hermes but able to
+      # write only its own vault.
+      // lib.mapAttrs' (
+        name: tool:
+        lib.nameValuePair "hermes-vault-${name}@" {
+          description = "Hermes' ${name} vault tool";
+          serviceConfig = {
+            ExecStart = lib.escapeShellArgs ([ tool.command ] ++ tool.args);
+            StandardInput = "socket";
+            StandardOutput = "socket";
+            StandardError = "journal";
+            User = "hermes";
+            Group = "hermes";
+            SupplementaryGroups = [ "notes" ];
+            # New notes and figures stay writable by the notes group, for the vault's sync.
+            UMask = "0007";
+            ProtectSystem = "strict";
+            ReadWritePaths = [ tool.vault ];
+            ProtectHome = true;
+            PrivateTmp = true;
+            NoNewPrivileges = true;
+          };
+        }
+      ) vaultTools;
+      systemd.sockets = lib.mapAttrs' (
+        name: _:
+        lib.nameValuePair "hermes-vault-${name}" {
+          wantedBy = [ "sockets.target" ];
+          listenStreams = [ (vaultSocket name) ];
+          socketConfig = {
+            Accept = true;
+            SocketUser = "hermes";
+            SocketGroup = "hermes";
+            SocketMode = "0600";
+          };
+        }
+      ) vaultTools;
 
       services.hermes-agent = {
         enable = true;
@@ -338,7 +422,7 @@ in
           pkgs.claude-code
         ];
 
-        # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp_<server>_<tool>.
+        # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp__<server>__<tool>.
         # The homelab, read-only: metrics, alerts and logs from every host; this host's health, services, hardware and
         # config (the host monitor, monitor.nix); and who can reach what over NetBird. None of them can change anything.
         mcpServers.observe.command = lib.getExe observe;
@@ -357,7 +441,7 @@ in
         };
         # The Notes vault (its rules: Reference/How this vault works). Reading is free; editing and moving ask the owner
         # first (trust below), since nothing here has an undo.
-        mcpServers.notes = vaultServer config.notes.vault "notes" [ ] // {
+        mcpServers.notes = vaultClient "notes" // {
           tools.exclude = [
             "create"
             "file_note"
@@ -365,13 +449,13 @@ in
           ];
         };
         # New notes go in its Inbox without asking: they never replace a note, and the owner reviews the inbox.
-        mcpServers.inbox = vaultServer config.notes.vault "notes" [ "--create-only" ] // {
+        mcpServers.inbox = vaultClient "inbox" // {
           tools.include = [ "create" ];
         };
         # Filing the Notes inbox, for the nightly job when nobody is there to ask. The owner's review mark is the
         # approval: file_note refuses a note still marked pending and discard_note deletes only one marked delete. A tick
         # in the tasks note is approval too: clear_done archives a note only once all its to-dos are ticked.
-        mcpServers.filing = vaultServer config.notes.vault "notes" [ "--filing" ] // {
+        mcpServers.filing = vaultClient "filing" // {
           tools.include = [
             "file_note"
             "discard_note"
@@ -380,26 +464,22 @@ in
         };
         # Research reports go into the Notes vault's Wiki folder: the notes tool reads and searches the whole vault but
         # can only add new notes there, never change one, so it needs no approval.
-        mcpServers.wiki = vaultServer config.notes.vault "notes" [
-          "--inbox"
-          "Wiki"
-          "--create-only"
-        ];
+        mcpServers.wiki = vaultClient "wiki";
         # Research for the game (real geography, history, myth… as inspiration) goes into the campaigns vault's Research
         # folder the same way: add only, so no approval.
-        mcpServers.campaign_research = vaultServer campaignsVault "notes-campaigns" [
-          "--inbox"
-          "Research"
-          "--create-only"
-        ];
+        mcpServers.campaign_research = vaultClient "campaign_research";
         # The campaigns vault (D&D 5e 2024 homebrew: Worlds/ and Campaigns/), split the same way: new notes in its inbox
         # freely, edits and moves asked for.
-        mcpServers.campaigns = vaultServer campaignsVault "notes-campaigns" [ ] // {
+        mcpServers.campaigns = vaultClient "campaigns" // {
           tools.exclude = [ "create" ];
         };
-        mcpServers.campaign_inbox = vaultServer campaignsVault "notes-campaigns" [ "--create-only" ] // {
+        mcpServers.campaign_inbox = vaultClient "campaign_inbox" // {
           tools.include = [ "create" ];
         };
+        # Figures for notes, one server per vault so a figure lands beside the notes that embed it. Research
+        # subagents inherit these, so a report can carry its own diagrams and images.
+        mcpServers.figures = vaultClient "figures";
+        mcpServers.campaign_figures = vaultClient "campaign_figures";
         mcpServers.art = {
           command = lib.getExe art;
           args = [

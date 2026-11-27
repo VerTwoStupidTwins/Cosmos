@@ -1,0 +1,28 @@
+[package]
+name = "figures"
+version = "0.1.0"
+edition = "2024"
+description = "Figures for the agent's notes (diagrams drawn as SVG, images from the web, pictures from the art tool), saved into an Obsidian vault as an MCP server over stdio"
+publish = false
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+# Checks that a file is a picture, and makes the small preview the chat shows.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+# Images from the web are HTTPS: rustls with its own roots, so nothing depends on the host's certificate store.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots"] }
+# SVG to PNG, without a browser or system libraries.
+resvg = "0.45"
+# The JSON Schema derive comes from rmcp's re-export, so its version always matches.
+rmcp = { version = "3.10", features = ["server", "transport-io", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
