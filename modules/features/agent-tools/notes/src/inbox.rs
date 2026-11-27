@@ -1,13 +1,15 @@
 //! Filing the inbox. The owner reviews each transcription in Obsidian and sets `review: accept` or `review: delete`;
 //! that mark is their approval, so these two need no other:
-//! - `file` puts an accepted note in its place: the vault's properties (type, status, tags, created) instead of the
-//!   transcriber's bookkeeping, its unchecked to-dos moved into the tasks note, links to related notes, and a move
-//!   (links to it fixed). The owner's text is kept as they wrote it. A note with no `review` at all (one saved from
-//!   chat) files too; one still `pending` waits.
-//! - `discard` deletes a note marked `review: delete`, with its drawing: the only thing here that deletes, and only
-//!   that.
+//! - `file` splits an accepted note into the notes it holds: each piece becomes a new note in its place (the vault's
+//!   properties: type, status, tags, created) or is added to the end of a note that already covers it, with links to
+//!   related notes. Open to-dos go only into the tasks note, each linked to the note it belongs to. The model tidies
+//!   the owner's words lightly (broken handwriting lines joined, slips fixed); drawing embeds and to-do lines never
+//!   reach a filed note. Then the inbox note and its drawing are deleted. A note with no `review` at all (one saved
+//!   from chat) files too; one still `pending` waits.
+//! - `discard` deletes a note marked `review: delete`, with its drawing.
 //!
-//! Once filed, a note has no fingerprint, so the transcriber treats it as the owner's and never changes it again.
+//! Nothing but the inbox note, its drawing and the end of the tasks note and of the notes pieces are added to is
+//! changed, and everything is checked before anything is.
 
 use crate::library::Library;
 use crate::note::{Note, quoted};
@@ -16,7 +18,6 @@ use anyhow::{Context, Result, bail};
 use regex::Regex;
 use serde_json::{Value, json};
 use std::fs;
-use std::path::Path;
 use std::sync::LazyLock;
 
 const TYPES: &[&str] = &["idea", "project", "reference"];
@@ -24,21 +25,50 @@ const STATUSES: &[&str] = &["open", "parked", "in-progress", "done", "dropped"];
 
 // An unchecked to-do: "- [ ] …" or "* [ ] …", indented or not.
 static TODO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[-*+] \[ \]\s+(.+?)\s*$").unwrap());
+// An embedded drawing: ![[….excalidraw]] (with or without .md, a size or a heading).
+static DRAWING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[[^\]]*\.excalidraw[^\]]*\]\]").unwrap());
 
-/// What a filed note becomes, as the model chose it.
+/// One note an inbox note is split into, as the model chose it: a new note (`to`) or an addition to an existing one
+/// (`into`).
+pub struct Piece<'a> {
+    /// A new note's path: folder and name.
+    pub to: Option<&'a str>,
+    /// An existing note this piece is added to: its path or name.
+    pub into: Option<&'a str>,
+    /// A new note's type, status and tags.
+    pub kind: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub tags: &'a [String],
+    /// The piece's text, in the owner's words, lightly tidied.
+    pub text: &'a str,
+    /// Notes to link to from it.
+    pub related: &'a [String],
+    /// Its open to-dos, for the tasks note.
+    pub todos: &'a [String],
+}
+
+/// How an inbox note is filed.
 pub struct Filing<'a> {
     pub inbox: &'a str,
     pub tasks: &'a str,
     pub note: &'a str,
-    /// Its new path: folder and name.
-    pub to: &'a str,
-    pub kind: &'a str,
-    pub status: Option<&'a str>,
-    pub tags: &'a [String],
-    /// YYYY-MM-DD; default: the day it was transcribed, else today.
+    pub pieces: &'a [Piece<'a>],
+    /// To-dos that belong to no piece.
+    pub todos: &'a [String],
+    /// YYYY-MM-DD for new notes; default: the day it was transcribed, else today.
     pub created: Option<&'a str>,
-    /// Notes to link to from it.
-    pub related: &'a [String],
+}
+
+/// A piece, checked and ready to write.
+struct Planned {
+    /// Where it's written, relative to the vault.
+    rel: String,
+    /// The note's name, for links.
+    name: String,
+    /// A new note's whole text, or what's appended to an existing one.
+    text: String,
+    new: bool,
+    todos: Vec<String>,
 }
 
 impl Library {
@@ -61,42 +91,9 @@ impl Library {
             Some("delete") => bail!("{rel} is marked review: delete; discard it instead"),
             Some(other) => bail!("{rel} is marked review: {other}; it waits until the owner accepts it"),
         }
-        if !TYPES.contains(&f.kind) {
-            bail!("type must be one of {}", TYPES.join(", "));
+        if f.pieces.is_empty() && f.todos.iter().all(|t| t.trim().is_empty()) {
+            bail!("nothing to file: give the notes it splits into (pieces), its to-dos, or both");
         }
-        let status = match (f.kind, f.status.map(str::trim).filter(|s| !s.is_empty())) {
-            ("reference", _) => None,
-            (_, Some(s)) if STATUSES.contains(&s) => Some(s),
-            (_, Some(s)) => bail!("status {s:?} isn't one of {}", STATUSES.join(", ")),
-            (_, None) => bail!("an {} needs a status: one of {}", f.kind, STATUSES.join(", ")),
-        };
-
-        // Where it goes, checked before anything changes.
-        let to = f.to.trim().trim_end_matches('/');
-        let to_rel = if to.ends_with(".md") { to.to_string() } else { format!("{to}.md") };
-        let (folder, name) = to_rel.rsplit_once('/').map_or(("", to_rel.as_str()), |(d, n)| (d, n));
-        let name = note_name(name)?;
-        if folder.is_empty() || folder.split('/').next() == Some(f.inbox) || folder.starts_with('_') {
-            bail!("{to_rel}: file it into a folder of the vault (Ideas, Projects/…, Reference…), not the top, the inbox or a _ folder");
-        }
-        if self.new_path(&to_rel)?.exists() {
-            bail!("{to_rel} already exists: pick another name");
-        }
-        let old_name = Path::new(&rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-        if !name.eq_ignore_ascii_case(&old_name)
-            && let Some(existing) = self.named(&name)?
-        {
-            bail!("a note called {name} already exists ({existing}): names are unique, pick another");
-        }
-        let mut related = Vec::new();
-        for r in f.related {
-            let path = self.find(r).with_context(|| format!("related note {r}"))?;
-            let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
-            if stem != old_name && !related.contains(&stem) {
-                related.push(stem);
-            }
-        }
-
         let note = Note::parse(&raw);
         let created = match f.created {
             Some(c) if is_date(c.trim()) => c.trim().to_string(),
@@ -107,35 +104,142 @@ impl Library {
                 .filter(|d| is_date(d))
                 .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string()),
         };
-        let (body, todos) = take_todos(note.body);
-        // Only the vault's properties and the drawing link: the transcriber's fields (review, transcribed,
-        // transcription, the fingerprints) are left behind.
-        let mut text = front_matter(f.kind, status, f.tags, &created, note.get("source").as_deref());
-        text.push_str(body.trim_start_matches('\n').trim_end());
-        text.push('\n');
-        if !related.is_empty() {
-            let links: Vec<String> = related.iter().map(|r| format!("[[{r}]]")).collect();
-            text.push_str(&format!("\nRelated: {}\n", links.join(", ")));
-        }
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let tasks_rel = if f.tasks.ends_with(".md") { f.tasks.to_string() } else { format!("{}.md", f.tasks) };
 
-        replace(&self.root.join(&rel), &text)?;
-        let moved = self.move_note(&rel, &to_rel)?;
-        if !todos.is_empty() {
-            self.add_tasks(f.tasks, &todos, &name)?;
+        // Every piece checked before anything changes.
+        let mut planned: Vec<Planned> = Vec::new();
+        for (i, p) in f.pieces.iter().enumerate() {
+            let which = format!("piece {}", i + 1);
+            let (text, mut todos) = take_todos(&DRAWING.replace_all(p.text, ""));
+            let text = text.trim().to_string();
+            todos.extend(p.todos.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()));
+            if text.is_empty() {
+                bail!("{which} has no text: a to-do on its own goes in todos, not in a piece");
+            }
+            let (target, name, new) = match (p.to.map(str::trim), p.into.map(str::trim)) {
+                (Some(to), None) => {
+                    let to = to.trim_end_matches('/');
+                    let to_rel = if to.ends_with(".md") { to.to_string() } else { format!("{to}.md") };
+                    let (folder, name) = to_rel.rsplit_once('/').map_or(("", to_rel.as_str()), |(d, n)| (d, n));
+                    let name = note_name(name)?;
+                    if folder.is_empty() || folder.split('/').next() == Some(f.inbox) || folder.starts_with('_') {
+                        bail!("{which}: {to_rel}: put it in a folder of the vault (Ideas, Projects/…, Reference…), not the top, the inbox or a _ folder");
+                    }
+                    if to_rel.eq_ignore_ascii_case(&tasks_rel) {
+                        bail!("{which}: {to_rel} is the tasks note; to-dos go in todos");
+                    }
+                    if self.new_path(&to_rel)?.exists() {
+                        bail!("{which}: {to_rel} already exists: add to it with into, or pick another name");
+                    }
+                    if let Some(existing) = self.named(&name)? {
+                        bail!("{which}: a note called {name} already exists ({existing}): add to it with into, or pick another name");
+                    }
+                    if planned.iter().any(|q| q.name.eq_ignore_ascii_case(&name)) {
+                        bail!("{which}: two pieces are both called {name}");
+                    }
+                    (to_rel, name, true)
+                }
+                (None, Some(into)) => {
+                    let path = self.find(into).with_context(|| format!("{which}: the note to add to"))?;
+                    let into_rel = self.show(&path);
+                    if into_rel.split('/').next() == Some(f.inbox) || into_rel.starts_with('_') || !into_rel.ends_with(".md") {
+                        bail!("{which}: {into_rel} can't be added to: only notes filed in the vault");
+                    }
+                    if into_rel.eq_ignore_ascii_case(&tasks_rel) {
+                        bail!("{which}: {into_rel} is the tasks note; to-dos go in todos");
+                    }
+                    let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                    (into_rel, name, false)
+                }
+                _ => bail!("{which}: give either to (a new note) or into (an existing note), not both or neither"),
+            };
+            let mut related = Vec::new();
+            for r in p.related {
+                let path = self.find(r).with_context(|| format!("{which}: related note {r}"))?;
+                let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                if !stem.eq_ignore_ascii_case(&name) && self.show(&path) != rel && !related.contains(&stem) {
+                    related.push(stem);
+                }
+            }
+            let links = |already: &str| -> String {
+                let fresh: Vec<String> =
+                    related.iter().filter(|r| !already.contains(&format!("[[{r}]]"))).map(|r| format!("[[{r}]]")).collect();
+                if fresh.is_empty() { String::new() } else { format!("\nRelated: {}\n", fresh.join(", ")) }
+            };
+            let body = if new {
+                let kind = p.kind.map(str::trim).unwrap_or("");
+                if !TYPES.contains(&kind) {
+                    bail!("{which}: type must be one of {}", TYPES.join(", "));
+                }
+                let status = match (kind, p.status.map(str::trim).filter(|s| !s.is_empty())) {
+                    ("reference", _) => None,
+                    (_, Some(s)) if STATUSES.contains(&s) => Some(s),
+                    (_, Some(s)) => bail!("{which}: status {s:?} isn't one of {}", STATUSES.join(", ")),
+                    (_, None) => bail!("{which}: an {kind} needs a status: one of {}", STATUSES.join(", ")),
+                };
+                format!("{}{text}\n{}", front_matter(kind, status, p.tags, &created, None), links(""))
+            } else {
+                let existing = fs::read_to_string(self.root.join(&target)).with_context(|| format!("reading {target}"))?;
+                format!("\n## Added {today}\n\n{text}\n{}", links(&existing))
+            };
+            planned.push(Planned { rel: target, name, text: body, new, todos });
         }
+        let loose: Vec<String> = f.todos.iter().map(|t| t.trim().to_string()).filter(|t| !t.is_empty()).collect();
+
+        // Then the writes: the notes, the to-dos, and last the inbox note and its drawing.
+        let mut created_notes = Vec::new();
+        let mut added_to = Vec::new();
+        for p in &planned {
+            let path = self.root.join(&p.rel);
+            if p.new {
+                if let Some(dir) = path.parent() {
+                    fs::create_dir_all(dir).with_context(|| format!("making the folder for {}", p.rel))?;
+                }
+                write_new(&path, &p.text)?;
+                created_notes.push(p.rel.clone());
+            } else {
+                let mut raw = fs::read_to_string(&path)?;
+                if !raw.ends_with('\n') {
+                    raw.push('\n');
+                }
+                raw.push_str(&p.text);
+                replace(&path, &raw)?;
+                added_to.push(p.rel.clone());
+            }
+        }
+        let mut todos_moved = Vec::new();
+        for p in &planned {
+            if !p.todos.is_empty() {
+                self.add_tasks(f.tasks, &p.todos, Some(&p.name))?;
+                todos_moved.extend(p.todos.iter().map(|t| format!("{t} ([[{}]])", p.name)));
+            }
+        }
+        if !loose.is_empty() {
+            self.add_tasks(f.tasks, &loose, None)?;
+            todos_moved.extend(loose.iter().cloned());
+        }
+        let deleted = self.delete_with_drawing(&rel, &raw)?;
         Ok(json!({
             "filed": rel,
-            "to": moved["to"],
-            "todos_moved_to": if todos.is_empty() { Value::Null } else { json!(f.tasks) },
-            "todos": todos,
-            "links_updated_in": moved["links_updated_in"],
+            "new_notes": created_notes,
+            "added_to": added_to,
+            "todos_moved_to": if todos_moved.is_empty() { Value::Null } else { json!(f.tasks) },
+            "todos": todos_moved,
+            "deleted": deleted,
         }))
     }
 
-    /// Appends to-dos to the tasks note, newest last, each linked to the note it came from; makes the note if needed.
-    fn add_tasks(&self, tasks: &str, todos: &[String], from: &str) -> Result<()> {
+    /// Appends to-dos to the tasks note, newest last, each linked to the note it belongs to; makes the note if needed.
+    fn add_tasks(&self, tasks: &str, todos: &[String], from: Option<&str>) -> Result<()> {
         let path = self.new_path(tasks)?;
-        let lines: String = todos.iter().map(|t| format!("- [ ] {t} ([[{from}]])\n")).collect();
+        let lines: String = todos
+            .iter()
+            .map(|t| match from {
+                Some(from) => format!("- [ ] {t} ([[{from}]])\n"),
+                None => format!("- [ ] {t}\n"),
+            })
+            .collect();
         if path.exists() {
             let mut raw = fs::read_to_string(&path)?;
             if !raw.ends_with('\n') {
@@ -144,6 +248,9 @@ impl Library {
             raw.push_str(&lines);
             replace(&path, &raw)
         } else {
+            if let Some(dir) = path.parent() {
+                fs::create_dir_all(dir)?;
+            }
             let today = chrono::Local::now().format("%Y-%m-%d");
             write_new(
                 &path,
@@ -159,8 +266,13 @@ impl Library {
         if review.as_deref() != Some("delete") {
             bail!("{rel} isn't marked review: delete; only notes the owner marked that way are deleted");
         }
+        Ok(json!({ "deleted": self.delete_with_drawing(&rel, &raw)? }))
+    }
+
+    /// Deletes an inbox note and the drawing in its `source:` (the .excalidraw.md and its exported .png).
+    fn delete_with_drawing(&self, rel: &str, raw: &str) -> Result<Vec<String>> {
         let mut deleted = Vec::new();
-        if let Some(link) = Note::parse(&raw).source_link()
+        if let Some(link) = Note::parse(raw).source_link()
             && link.ends_with(".excalidraw")
         {
             for file in [format!("{link}.md"), format!("{link}.png")] {
@@ -173,14 +285,13 @@ impl Library {
                 }
             }
         }
-        fs::remove_file(self.root.join(&rel)).with_context(|| format!("deleting {rel}"))?;
-        deleted.insert(0, rel);
-        Ok(json!({ "deleted": deleted }))
+        fs::remove_file(self.root.join(rel)).with_context(|| format!("deleting {rel}"))?;
+        deleted.insert(0, rel.to_string());
+        Ok(deleted)
     }
 }
 
-/// The body with its unchecked to-dos taken out (a line saying where they went in place of the first), and the
-/// to-dos.
+/// The text with its unchecked to-dos taken out, and the to-dos.
 fn take_todos(body: &str) -> (String, Vec<String>) {
     let mut todos = Vec::new();
     let mut out = String::new();
@@ -191,12 +302,7 @@ fn take_todos(body: &str) -> (String, Vec<String>) {
             fence = !fence;
         }
         match TODO.captures(line).filter(|_| !fence) {
-            Some(c) => {
-                if todos.is_empty() {
-                    out.push_str("To-dos moved to [[Tasks]].\n");
-                }
-                todos.push(c[1].to_string());
-            }
+            Some(c) => todos.push(c[1].to_string()),
             None => {
                 out.push_str(line);
                 out.push('\n');

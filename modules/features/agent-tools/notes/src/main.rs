@@ -178,25 +178,48 @@ struct MeaningRequest {
 struct FileRequest {
     /// The inbox note: its path or name.
     note: String,
-    /// Where it goes: folder and a clear new name, following the vault's rules ("Ideas/Quieter server fan",
-    /// "Projects/Homelab/Game servers", "Reference/Ignition certification").
-    to: String,
-    /// idea, project or reference.
-    #[serde(rename = "type")]
-    kind: String,
-    /// For an idea or project: open, parked, in-progress, done or dropped.
+    /// The notes it splits into, one per separate subject. Leave it empty when the note is only to-dos.
     #[serde(default)]
-    status: Option<String>,
-    /// Its tags, for ongoing topics (homelab, health…): the vault's existing tags where they fit. Keep "handwritten"
-    /// on a transcription.
+    pieces: Vec<PieceRequest>,
+    /// Open to-dos that belong to no piece ("Call the dentist"). They go only into the tasks note.
     #[serde(default)]
-    tags: Vec<String>,
-    /// The day it was written, YYYY-MM-DD; default: the day it was transcribed.
+    todos: Vec<String>,
+    /// The day it was written, YYYY-MM-DD, for new notes; default: the day it was transcribed.
     #[serde(default)]
     created: Option<String>,
-    /// Existing notes it relates to (paths or names), linked from it.
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+struct PieceRequest {
+    /// A new note: folder and a clear name in the owner's terms, following the vault's rules ("Ideas/Quieter server
+    /// fan", "Projects/Ignition Core certification/Ignition Core certification", "Reference/Router passwords
+    /// location"). Give this or into.
+    #[serde(default)]
+    to: Option<String>,
+    /// An existing note that already covers this subject (path or name): the text is added to its end under a dated
+    /// heading. Use it rather than making a near-duplicate. Give this or to.
+    #[serde(default)]
+    into: Option<String>,
+    /// A new note's type: idea, project (something with a finish line) or reference (something to look up later).
+    #[serde(default, rename = "type")]
+    kind: Option<String>,
+    /// A new idea's or project's status: open, parked, in-progress, done or dropped.
+    #[serde(default)]
+    status: Option<String>,
+    /// A new note's tags, for ongoing topics: the vault's existing tags where they fit. Keep "handwritten" on pieces
+    /// of a transcription.
+    #[serde(default)]
+    tags: Vec<String>,
+    /// This piece's text in the owner's words, lightly tidied: join lines the handwriting broke, fix obvious slips
+    /// ("Claud" → "Claude"), keep their meaning and phrasing. No to-dos and no drawing.
+    text: String,
+    /// Existing notes genuinely about the same thing (paths or names), linked from it. None is fine; never link a
+    /// note just because it's there.
     #[serde(default)]
     related: Vec<String>,
+    /// This piece's open to-dos, for the tasks note, linked back to this piece's note.
+    #[serde(default)]
+    todos: Vec<String>,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
@@ -282,25 +305,40 @@ impl Notes {
         or_error(result.map_err(anyhow::Error::from).and_then(|r| r))
     }
 
-    /// File an inbox note the owner accepted (review: accept), or one with no review mark: it gets the vault's
-    /// properties, its open to-dos move into the tasks note, links to related notes are added, and it moves to its
-    /// place. Its text stays as the owner wrote it. No approval needed: their accept is the approval. A note still
-    /// marked pending is refused.
-    #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = false, open_world_hint = false))]
+    /// File an inbox note the owner accepted (review: accept), or one with no review mark, by splitting it into the
+    /// notes it holds. Each separate subject becomes a piece: a new note in its place (to), or an addition to an
+    /// existing note that already covers it (into); search the vault first to find those. Open to-dos go only into
+    /// the tasks note: give them in a piece's todos (linked to that note) or in todos (for ones that belong to no
+    /// note), never in a piece's text. A list of chores needs no note of its own. Then the inbox note and its drawing
+    /// are deleted. No approval needed: their accept is the approval. A note still marked pending is refused, and
+    /// nothing changes unless every piece checks out. If you can't tell what part of a note is for, don't file it:
+    /// leave it and say why.
+    #[tool(annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false))]
     async fn file_note(&self, Parameters(req): Parameters<FileRequest>) -> CallToolResult {
         let Some(tasks) = self.tasks_note.clone() else {
             return or_error(Err(anyhow::anyhow!("filing isn't on for this vault")));
         };
+        let pieces: Vec<inbox::Piece> = req
+            .pieces
+            .iter()
+            .map(|p| inbox::Piece {
+                to: p.to.as_deref(),
+                into: p.into.as_deref(),
+                kind: p.kind.as_deref(),
+                status: p.status.as_deref(),
+                tags: &p.tags,
+                text: &p.text,
+                related: &p.related,
+                todos: &p.todos,
+            })
+            .collect();
         let filing = inbox::Filing {
             inbox: &self.inbox,
             tasks: &tasks,
             note: &req.note,
-            to: &req.to,
-            kind: req.kind.trim(),
-            status: req.status.as_deref(),
-            tags: &req.tags,
+            pieces: &pieces,
+            todos: &req.todos,
             created: req.created.as_deref(),
-            related: &req.related,
         };
         self.write(|lib| lib.file(&filing))
     }

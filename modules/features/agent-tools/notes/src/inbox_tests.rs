@@ -14,51 +14,104 @@ fn vault() -> (TempDir, Library) {
             "---\nsource: \"[[_attachments/Excalidraw/Drawing 1.excalidraw]]\"\ntags:\n  - handwritten\ntranscribed: 2026-11-23 11:43\ntranscription: current\nreview: {review}\npng-sha256: aa\ntext-sha256: bb\n---\n{body}"
         )
     };
-    write("Inbox/Drawing 1.md", &transcribed("accept", "To do:\n- [ ] Set up Minecraft server\n- [x] Already done\n- [ ] Set up game streaming\n\nStudy for the cert.\n\n![[_attachments/Excalidraw/Drawing 1.excalidraw]]\n"));
+    write("Inbox/Drawing 1.md", &transcribed("accept", "To do:\n- [ ] Set up Minecraft server\n- [ ] Set up game streaming\n\nToday i need to start studying\nfor my Ignition Core certification\n\n![[_attachments/Excalidraw/Drawing 1.excalidraw]]\n"));
     write("Inbox/Pending.md", &transcribed("pending", "not checked yet\n"));
     write("Inbox/Rejected.md", &transcribed("delete", "garbled\n"));
     write("Inbox/From chat.md", "---\ntype: idea\n---\nA quieter fan.\n");
     write("_attachments/Excalidraw/Drawing 1.excalidraw.md", "drawing data\n");
     write("_attachments/Excalidraw/Drawing 1.excalidraw.png", "png\n");
-    write("Projects/Homelab/Homelab.md", "# Homelab\n");
-    write("Daily/2026-11-23.md", "Wrote [[Drawing 1]] today.\n");
+    write("Projects/Homelab/Homelab.md", "---\ntype: project\n---\n# Homelab\n\nRelated: [[Game servers]]\n");
+    write("Ideas/Game servers.md", "---\ntype: idea\n---\nServers for the group.\n");
     (dir, Library { root })
 }
 
-fn filing<'a>(note: &'a str, to: &'a str, tags: &'a [String], related: &'a [String]) -> Filing<'a> {
-    Filing { inbox: "Inbox", tasks: "Reference/Tasks.md", note, to, kind: "project", status: Some("open"), tags, created: None, related }
+fn new_piece<'a>(to: &'a str, text: &'a str, related: &'a [String], todos: &'a [String]) -> Piece<'a> {
+    Piece { to: Some(to), into: None, kind: Some("project"), status: Some("open"), tags: &[], text, related, todos }
+}
+
+fn into_piece<'a>(into: &'a str, text: &'a str, related: &'a [String], todos: &'a [String]) -> Piece<'a> {
+    Piece { to: None, into: Some(into), kind: None, status: None, tags: &[], text, related, todos }
+}
+
+fn filing<'a>(note: &'a str, pieces: &'a [Piece<'a>], todos: &'a [String]) -> Filing<'a> {
+    Filing { inbox: "Inbox", tasks: "Reference/Tasks.md", note, pieces, todos, created: None }
 }
 
 #[test]
-fn an_accepted_note_is_filed_with_its_text_kept() {
+fn a_note_is_split_into_new_and_existing_notes_and_deleted() {
     let (_dir, lib) = vault();
-    let tags = vec!["homelab".to_string(), "#games".to_string()];
+    let cert_todos = vec!["Start studying".to_string()];
+    let server_todos = vec!["Set up Minecraft server".to_string(), "Set up game streaming".to_string()];
     let related = vec!["Homelab".to_string()];
-    let out = lib.file(&filing("Drawing 1", "Projects/Homelab/Game servers", &tags, &related)).unwrap();
-    assert_eq!(out["to"], "Projects/Homelab/Game servers.md");
-    assert!(!lib.root.join("Inbox/Drawing 1.md").exists());
+    let tags = vec!["certification".to_string(), "handwritten".to_string()];
+    let mut cert = new_piece(
+        "Projects/Ignition Core certification/Ignition Core certification",
+        "Study for my Ignition Core certification.",
+        &[],
+        &cert_todos,
+    );
+    cert.tags = &tags;
+    let pieces = [cert, into_piece("Game servers", "Minecraft and game streaming, set up on lugh.", &related, &server_todos)];
+    let out = lib.file(&filing("Drawing 1", &pieces, &[])).unwrap();
 
-    let filed = fs::read_to_string(lib.root.join("Projects/Homelab/Game servers.md")).unwrap();
-    let note = Note::parse(&filed);
+    assert_eq!(out["new_notes"], json!(["Projects/Ignition Core certification/Ignition Core certification.md"]));
+    assert_eq!(out["added_to"], json!(["Ideas/Game servers.md"]));
+    assert_eq!(
+        out["deleted"],
+        json!(["Inbox/Drawing 1.md", "_attachments/Excalidraw/Drawing 1.excalidraw.md", "_attachments/Excalidraw/Drawing 1.excalidraw.png"]),
+        "the original and its drawing go"
+    );
+
+    let cert = fs::read_to_string(lib.root.join("Projects/Ignition Core certification/Ignition Core certification.md")).unwrap();
+    let note = Note::parse(&cert);
     assert_eq!(note.get("type").as_deref(), Some("project"));
     assert_eq!(note.get("status").as_deref(), Some("open"));
-    assert_eq!(note.list("tags"), ["homelab", "games"]);
+    assert_eq!(note.list("tags"), ["certification", "handwritten"]);
     assert_eq!(note.get("created").as_deref(), Some("2026-11-23"), "the day it was transcribed");
-    assert_eq!(note.source_link().as_deref(), Some("_attachments/Excalidraw/Drawing 1.excalidraw"), "the drawing stays linked");
+    assert!(note.source_link().is_none(), "the drawing is gone, so no link to it");
     for gone in ["review", "transcribed", "transcription", "png-sha256", "text-sha256"] {
         assert!(note.get(gone).is_none(), "{gone} is the transcriber's, and goes");
     }
-    assert!(!note.is_generated(), "the transcriber leaves a filed note alone");
-    assert!(filed.contains("Study for the cert."), "the owner's text is kept");
-    assert!(filed.contains("- [x] Already done"), "done to-dos stay");
-    assert!(filed.contains("To-dos moved to [[Tasks]]."));
-    assert!(!filed.contains("Minecraft"), "open to-dos move out");
-    assert!(filed.trim_end().ends_with("Related: [[Homelab]]"));
+    assert!(cert.contains("Study for my Ignition Core certification."));
+    assert!(!cert.contains("[ ]") && !cert.contains("Tasks"), "no to-dos and no pointer to them in the note");
+
+    let servers = fs::read_to_string(lib.root.join("Ideas/Game servers.md")).unwrap();
+    assert!(servers.starts_with("---\ntype: idea\n---\nServers for the group.\n"), "the existing text is untouched");
+    assert!(servers.contains("\n## Added "));
+    assert!(servers.contains("Minecraft and game streaming, set up on lugh.\n\nRelated: [[Homelab]]\n"));
 
     let tasks = fs::read_to_string(lib.root.join("Reference/Tasks.md")).unwrap();
-    assert!(tasks.contains("- [ ] Set up Minecraft server ([[Game servers]])\n- [ ] Set up game streaming ([[Game servers]])\n"));
-    let daily = fs::read_to_string(lib.root.join("Daily/2026-11-23.md")).unwrap();
-    assert!(daily.contains("[[Game servers]]"), "links to it follow the new name");
+    assert!(tasks.contains(
+        "- [ ] Start studying ([[Ignition Core certification]])\n- [ ] Set up Minecraft server ([[Game servers]])\n- [ ] Set up game streaming ([[Game servers]])\n"
+    ));
+}
+
+#[test]
+fn to_dos_and_drawings_never_reach_a_filed_note() {
+    let (_dir, lib) = vault();
+    let pieces = [new_piece(
+        "Ideas/Servers",
+        "Servers:\n- [ ] Set up Minecraft server\nThey should be quiet.\n![[_attachments/Excalidraw/Drawing 1.excalidraw]]",
+        &[],
+        &[],
+    )];
+    lib.file(&filing("Drawing 1", &pieces, &[])).unwrap();
+    let filed = fs::read_to_string(lib.root.join("Ideas/Servers.md")).unwrap();
+    assert!(!filed.contains("[ ]") && !filed.contains("excalidraw"), "{filed}");
+    assert!(filed.contains("They should be quiet."));
+    let tasks = fs::read_to_string(lib.root.join("Reference/Tasks.md")).unwrap();
+    assert!(tasks.contains("- [ ] Set up Minecraft server ([[Servers]])"));
+}
+
+#[test]
+fn a_note_of_only_chores_needs_no_new_note() {
+    let (_dir, lib) = vault();
+    let todos = vec!["Set up Minecraft server".to_string()];
+    let out = lib.file(&filing("Drawing 1", &[], &todos)).unwrap();
+    assert_eq!(out["new_notes"], json!([]));
+    let tasks = fs::read_to_string(lib.root.join("Reference/Tasks.md")).unwrap();
+    assert!(tasks.ends_with("- [ ] Set up Minecraft server\n"), "no link: it belongs to no note");
+    assert!(!lib.root.join("Inbox/Drawing 1.md").exists());
 }
 
 #[test]
@@ -66,7 +119,9 @@ fn tasks_are_added_to_the_end_of_an_existing_tasks_note() {
     let (_dir, lib) = vault();
     fs::create_dir_all(lib.root.join("Reference")).unwrap();
     fs::write(lib.root.join("Reference/Tasks.md"), "# Tasks\n- [ ] older").unwrap();
-    lib.file(&filing("Drawing 1", "Reference/Servers", &[], &[])).unwrap();
+    let todos = vec!["Set up Minecraft server".to_string()];
+    let pieces = [new_piece("Reference/Servers", "Servers.", &[], &todos)];
+    lib.file(&filing("Drawing 1", &pieces, &[])).unwrap();
     let tasks = fs::read_to_string(lib.root.join("Reference/Tasks.md")).unwrap();
     assert!(tasks.starts_with("# Tasks\n- [ ] older\n- [ ] Set up Minecraft server ([[Servers]])\n"));
 }
@@ -74,15 +129,16 @@ fn tasks_are_added_to_the_end_of_an_existing_tasks_note() {
 #[test]
 fn only_accepted_or_unreviewed_inbox_notes_are_filed() {
     let (_dir, lib) = vault();
-    let e = lib.file(&filing("Pending", "Ideas/P", &[], &[])).unwrap_err().to_string();
+    let pieces = [new_piece("Ideas/P", "text", &[], &[])];
+    let e = lib.file(&filing("Pending", &pieces, &[])).unwrap_err().to_string();
     assert!(e.contains("waits"), "{e}");
-    let e = lib.file(&filing("Rejected", "Ideas/R", &[], &[])).unwrap_err().to_string();
+    let e = lib.file(&filing("Rejected", &pieces, &[])).unwrap_err().to_string();
     assert!(e.contains("discard"), "{e}");
-    let e = lib.file(&filing("Homelab", "Ideas/H", &[], &[])).unwrap_err().to_string();
+    let e = lib.file(&filing("Homelab", &pieces, &[])).unwrap_err().to_string();
     assert!(e.contains("isn't in Inbox"), "{e}");
-    let mut chat = filing("From chat", "Ideas/Quiet fan", &[], &[]);
-    chat.kind = "idea";
-    lib.file(&chat).unwrap();
+    let mut chat = new_piece("Ideas/Quiet fan", "A quieter fan.", &[], &[]);
+    chat.kind = Some("idea");
+    lib.file(&filing("From chat", &[chat], &[])).unwrap();
     assert!(lib.root.join("Ideas/Quiet fan.md").exists(), "a note with no review mark files");
 }
 
@@ -90,34 +146,54 @@ fn only_accepted_or_unreviewed_inbox_notes_are_filed() {
 fn filing_checks_everything_before_changing_anything() {
     let (_dir, lib) = vault();
     let original = fs::read_to_string(lib.root.join("Inbox/Drawing 1.md")).unwrap();
-    for (to, why) in [
-        ("Projects/Homelab/Homelab", "exists"),
-        ("Ideas/Homelab", "unique"),
-        ("Inbox/Elsewhere", "inbox"),
-        ("Top level", "folder"),
-        ("_templates/X", "folder"),
+    let good = || new_piece("Ideas/Fine", "fine", &[], &[]);
+    for (bad, why) in [
+        (new_piece("Projects/Homelab/Homelab", "x", &[], &[]), "exists"),
+        (new_piece("Ideas/Homelab", "x", &[], &[]), "name taken"),
+        (new_piece("Inbox/Elsewhere", "x", &[], &[]), "inbox"),
+        (new_piece("Top level", "x", &[], &[]), "top"),
+        (new_piece("_templates/X", "x", &[], &[]), "_ folder"),
+        (new_piece("Reference/Tasks", "x", &[], &[]), "tasks note"),
+        (new_piece("Ideas/Empty", "- [ ] only a to-do", &[], &[]), "no text"),
+        (into_piece("No such note", "x", &[], &[]), "no note to add to"),
+        (into_piece("Pending", "x", &[], &[]), "adding to an inbox note"),
+        (Piece { to: Some("Ideas/A"), into: Some("Game servers"), ..good() }, "both to and into"),
+        (Piece { kind: Some("thought"), ..good() }, "unknown type"),
+        (Piece { status: Some("someday"), ..good() }, "unknown status"),
+        (Piece { status: None, ..good() }, "a project needs a status"),
     ] {
-        assert!(lib.file(&filing("Drawing 1", to, &[], &[])).is_err(), "{to} ({why}) should be refused");
+        let pieces = [good(), bad];
+        assert!(lib.file(&filing("Drawing 1", &pieces, &[])).is_err(), "{why} should be refused");
     }
-    let mut bad = filing("Drawing 1", "Ideas/X", &[], &[]);
-    bad.kind = "idea";
-    bad.status = Some("someday");
-    assert!(lib.file(&bad).is_err(), "an unknown status");
-    bad.status = None;
-    assert!(lib.file(&bad).is_err(), "an idea needs a status");
-    assert!(lib.file(&filing("Drawing 1", "Ideas/X", &[], &["No such note".to_string()])).is_err());
+    let missing = vec!["No such note".to_string()];
+    let pieces = [new_piece("Ideas/X", "x", &missing, &[])];
+    assert!(lib.file(&filing("Drawing 1", &pieces, &[])).is_err(), "an unknown related note");
+    let twice = [good(), good()];
+    assert!(lib.file(&filing("Drawing 1", &twice, &[])).is_err(), "two pieces with one name");
+    assert!(lib.file(&filing("Drawing 1", &[], &[])).is_err(), "nothing to file");
+
     assert_eq!(fs::read_to_string(lib.root.join("Inbox/Drawing 1.md")).unwrap(), original, "untouched");
+    assert!(!lib.root.join("Ideas/Fine.md").exists(), "not even the good piece was written");
     assert!(!lib.root.join("Reference/Tasks.md").exists());
 }
 
 #[test]
 fn a_reference_note_has_no_status() {
     let (_dir, lib) = vault();
-    let mut f = filing("Drawing 1", "Reference/Servers", &[], &[]);
-    f.kind = "reference";
-    lib.file(&f).unwrap();
+    let pieces = [Piece { kind: Some("reference"), ..new_piece("Reference/Servers", "Servers.", &[], &[]) }];
+    lib.file(&filing("Drawing 1", &pieces, &[])).unwrap();
     let filed = fs::read_to_string(lib.root.join("Reference/Servers.md")).unwrap();
     assert!(Note::parse(&filed).get("status").is_none());
+}
+
+#[test]
+fn links_already_in_a_note_are_not_added_again() {
+    let (_dir, lib) = vault();
+    let related = vec!["Game servers".to_string()];
+    let pieces = [into_piece("Homelab", "More on the lab.", &related, &[])];
+    lib.file(&filing("Drawing 1", &pieces, &[])).unwrap();
+    let homelab = fs::read_to_string(lib.root.join("Projects/Homelab/Homelab.md")).unwrap();
+    assert_eq!(homelab.matches("[[Game servers]]").count(), 1, "{homelab}");
 }
 
 #[test]

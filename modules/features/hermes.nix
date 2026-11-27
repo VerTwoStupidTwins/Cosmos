@@ -45,6 +45,24 @@ in
         cp -r ${./hermes/memory-plugin} $out
       '';
 
+      # The owner's Obsidian vaults, where they sync (notes.nix), and their search indexes (memory-store.nix).
+      campaignsVault = config.notes.extraVaultPaths.campaigns;
+      # The notes tool serving one vault: its search by meaning, then the serve flags.
+      vaultServer = vault: collection: serveArgs: {
+        command = lib.getExe config.notes.package;
+        args = [
+          "--vault"
+          vault
+          "serve"
+        ]
+        ++ serveArgs
+        ++ config.memory.vaultSearchArgs collection
+        ++ [
+          "--qdrant-key-file"
+          config.sops.secrets.qdrant-api-key-hermes.path
+        ];
+      };
+
       # The art tool (agent-tools/art): pictures from nabu's image model, kept in Hermes' state.
       art = pkgs.rustPlatform.buildRustPackage {
         pname = "art";
@@ -202,8 +220,8 @@ in
       # Lets twins read Hermes' config, logs and skills, and add skills to its skills folder.
       users.users.twins.extraGroups = [ "hermes" ];
 
-      # The wiki tool writes research into the Notes vault, which is the notes group's (notes.nix). Hermes' services
-      # see the rest of the system read-only, so the vault is opened for writing too.
+      # The vault tools write into the Notes and Campaigns vaults, which are the notes group's (notes.nix). Hermes'
+      # services see the rest of the system read-only, so the vaults are opened for writing too.
       users.users.hermes.extraGroups = [ "notes" ];
 
       # With twins in the group, Hermes counts a group-writable home as unsafe and refuses to reach its gateway, which
@@ -232,12 +250,18 @@ in
         preStart = lib.mkAfter unlockSkills;
         after = [ "memory.service" ];
         wants = [ "memory.service" ];
-        serviceConfig.ReadWritePaths = [ config.notes.vault ];
+        serviceConfig.ReadWritePaths = [
+          config.notes.vault
+          campaignsVault
+        ];
       };
       systemd.services.hermes-backend = {
         after = [ "memory.service" ];
         wants = [ "memory.service" ];
-        serviceConfig.ReadWritePaths = [ config.notes.vault ];
+        serviceConfig.ReadWritePaths = [
+          config.notes.vault
+          campaignsVault
+        ];
       };
 
       services.hermes-agent = {
@@ -284,23 +308,41 @@ in
         ];
 
         # Our tools, each a Rust MCP server over stdio. Hermes names their tools mcp_<server>_<tool>.
+        # The Notes vault (its rules: Reference/How this vault works). Reading is free; editing and moving ask the owner
+        # first (trust below), since nothing here has an undo.
+        mcpServers.notes = vaultServer config.notes.vault "notes" [ ] // {
+          tools.exclude = [
+            "create"
+            "file_note"
+            "discard_note"
+          ];
+        };
+        # New notes go in its Inbox without asking: they never replace a note, and the owner reviews the inbox.
+        mcpServers.inbox = vaultServer config.notes.vault "notes" [ "--create-only" ] // {
+          tools.include = [ "create" ];
+        };
+        # Filing the Notes inbox, for the nightly job when nobody is there to ask. The owner's review mark is the
+        # approval: file_note refuses a note still marked pending and discard_note deletes only one marked delete.
+        mcpServers.filing = vaultServer config.notes.vault "notes" [ "--filing" ] // {
+          tools.include = [
+            "file_note"
+            "discard_note"
+          ];
+        };
         # Research reports go into the Notes vault's Wiki folder: the notes tool reads and searches the whole vault but
         # can only add new notes there, never change one, so it needs no approval.
-        mcpServers.wiki = {
-          command = lib.getExe config.notes.package;
-          args = [
-            "--vault"
-            config.notes.vault
-            "serve"
-            "--inbox"
-            "Wiki"
-            "--create-only"
-          ]
-          ++ config.memory.vaultSearchArgs "notes"
-          ++ [
-            "--qdrant-key-file"
-            config.sops.secrets.qdrant-api-key-hermes.path
-          ];
+        mcpServers.wiki = vaultServer config.notes.vault "notes" [
+          "--inbox"
+          "Wiki"
+          "--create-only"
+        ];
+        # The campaigns vault (D&D 5e 2024 homebrew: Worlds/ and Campaigns/), split the same way: new notes in its inbox
+        # freely, edits and moves asked for.
+        mcpServers.campaigns = vaultServer campaignsVault "notes-campaigns" [ ] // {
+          tools.exclude = [ "create" ];
+        };
+        mcpServers.campaign_inbox = vaultServer campaignsVault "notes-campaigns" [ "--create-only" ] // {
+          tools.include = [ "create" ];
         };
         mcpServers.art = {
           command = lib.getExe art;
@@ -356,6 +398,12 @@ in
 
           # The decision model approves clearly safe commands. Anything it denies or is unsure about asks the owner.
           approvals.mode = "smart";
+
+          # Untrusted servers ask before every tool not marked read-only; our read tools carry that mark.
+          mcp_servers = {
+            notes.trust = "untrusted";
+            campaigns.trust = "untrusted";
+          };
 
           # Memory is ours (the memory service and its provider plugin), so Hermes' built-in MEMORY.md and USER.md
           # stay off.
