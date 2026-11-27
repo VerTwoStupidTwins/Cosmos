@@ -119,6 +119,15 @@ in
                     # Fail if Stylix's template grows a placeholder this doesn't convert.
                     if grep -E -- '-hex\}\}|-dec-' "$out"; then exit 1; fi
                   '';
+                # A tinted-theming template (what Stylix themes Helix and Zed from): its scheme name, author
+                # and variant become fixed words, then the colours convert as above.
+                fromTinted =
+                  name: template:
+                  pkgs.runCommand "${name}.tinted" { } ''
+                    sed -e 's/Base16 {{scheme-name}}/Cosmos/g' -e 's/{{scheme-name}}/Cosmos/g' \
+                      -e 's/{{scheme-author}}/Cosmos/g' -e 's/{{scheme-variant}}/${polarity}/g' \
+                      ${fromStylix name template} > "$out"
+                  '';
                 # The base16 colours, plus `accent`, which `wallpaper` picks from them (with_accent).
                 bases =
                   map (n: "base0${n}") [
@@ -325,6 +334,24 @@ in
                   # wallpaper's colours. Like GTK, Qt apps take it when they start.
                   "kvantum.kvconfig".file = fromStylix "kvconfig" "${inputs.stylix}/modules/qt/kvconfig.mustache";
                   "kvantum.svg".file = fromStylix "kvantum.svg" "${inputs.stylix}/modules/qt/kvantum.svg.mustache";
+
+                  # Helix rereads its config, and so its theme, on SIGUSR1. Stylix's template without the
+                  # background, as Stylix does for a see-through terminal, so kitty's opacity shows through.
+                  "helix.toml" = {
+                    file = fromTinted "helix.toml" (
+                      pkgs.runCommand "helix-transparent.mustache" { } ''
+                        sed 's/,\? bg = "base00"//g' ${inputs.stylix.inputs.base16-helix}/templates/base16.mustache > "$out"
+                      ''
+                    );
+                    hook = "${pkill} -USR1 -x '\\.?hx(-wrapped)?' || true";
+                  };
+
+                  # Zed watches its themes folder; the theme is copied in rather than linked, so a change
+                  # is a write there that Zed sees.
+                  "zed.json" = {
+                    file = fromTinted "zed.json" "${inputs.stylix.inputs.tinted-zed}/templates/base16.mustache";
+                    hook = "${pkgs.coreutils}/bin/install -Dm644 ${stateDir}/zed.json ${config.xdg.configHome}/zed/themes/cosmos.json";
+                  };
                 };
 
                 # Copies the Obsidian snippet into every vault Obsidian knows and turns it on in
@@ -521,6 +548,10 @@ in
                     # rofi isn't used, and this target still sets home-manager's renamed
                     # programs.rofi.font, which warns on every build.
                     rofi.enable = false;
+                    # Both take the wallpaper's palette instead (helix.toml, zed.json above); Zed keeps the
+                    # fonts.
+                    helix.enable = false;
+                    zed.colors.enable = false;
                   };
 
                   programs.kitty.extraConfig = "include ${stateDir}/kitty.conf";
@@ -535,6 +566,7 @@ in
                       "Kvantum/Cosmos/Cosmos.kvconfig".source =
                         config.lib.file.mkOutOfStoreSymlink "${stateDir}/kvantum.kvconfig";
                       "Kvantum/Cosmos/Cosmos.svg".source = config.lib.file.mkOutOfStoreSymlink "${stateDir}/kvantum.svg";
+                      "helix/themes/cosmos.toml".source = config.lib.file.mkOutOfStoreSymlink "${stateDir}/helix.toml";
                     };
                   xdg.dataFile."krita/color-schemes/Cosmos.colors".source =
                     config.lib.file.mkOutOfStoreSymlink "${stateDir}/krita.colors";
