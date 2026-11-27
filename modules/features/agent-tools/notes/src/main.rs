@@ -343,6 +343,17 @@ impl Notes {
         self.write(|lib| lib.file(&filing))
     }
 
+    /// Clear the to-dos the owner ticked in the tasks note and finish the notes they belonged to: a note whose to-dos
+    /// are all ticked is marked done and moved to Archive, keeping its folder. The tick is the owner's approval. A note
+    /// with a to-do still open stays. Run it after filing.
+    #[tool(annotations(read_only_hint = false, destructive_hint = false, idempotent_hint = true, open_world_hint = false))]
+    async fn clear_done(&self) -> CallToolResult {
+        let Some(tasks) = self.tasks_note.clone() else {
+            return or_error(Err(anyhow::anyhow!("filing isn't on for this vault")));
+        };
+        self.write(|lib| lib.clear_done(&tasks, "Archive"))
+    }
+
     /// Delete an inbox note the owner marked review: delete, with its drawing. Refused for any other note.
     #[tool(annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = false, open_world_hint = false))]
     async fn discard_note(&self, Parameters(req): Parameters<DiscardRequest>) -> CallToolResult {
@@ -406,6 +417,7 @@ async fn serve(
     if tasks_note.is_none() {
         tool_router.remove_route("file_note");
         tool_router.remove_route("discard_note");
+        tool_router.remove_route("clear_done");
     }
     let notes =
         Notes { library: Arc::new(Library { root: vault }), index, inbox, read_only, tasks_note, writing: Arc::default(), tool_router };

@@ -12,7 +12,7 @@
 //! changed, and everything is checked before anything is.
 
 use crate::library::Library;
-use crate::note::{Note, quoted};
+use crate::note::{Note, quoted, set_field};
 use crate::write::{note_name, replace, write_new};
 use anyhow::{Context, Result, bail};
 use regex::Regex;
@@ -25,6 +25,9 @@ const STATUSES: &[&str] = &["open", "parked", "in-progress", "done", "dropped"];
 
 // An unchecked to-do: "- [ ] …" or "* [ ] …", indented or not.
 static TODO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\s*[-*+] \[ \]\s+(.+?)\s*$").unwrap());
+// A to-do in the tasks note, ticked or not, and the note it links to at its end: "- [x] Call Bob ([[Dentist]])".
+static TASK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*[-*+] \[([ xX])\]\s+.*?(?:\(\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]\))?\s*$").unwrap());
 // An embedded drawing: ![[….excalidraw]] (with or without .md, a size or a heading).
 static DRAWING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"!\[\[[^\]]*\.excalidraw[^\]]*\]\]").unwrap());
 
@@ -257,6 +260,97 @@ impl Library {
                 &format!("---\ntype: reference\ntags:\n  - tasks\ncreated: {today}\n---\n# Tasks\n\nTo-dos from filed notes, newest last.\n\n{lines}"),
             )
         }
+    }
+
+    /// Clears the to-dos the owner ticked in the tasks note, and finishes the notes they belonged to: a note whose
+    /// to-dos are all ticked gets `status: done` (an idea or project) and moves to the archive, keeping its folder
+    /// ("Projects/Minecraft server/Minecraft server" → "Archive/Projects/Minecraft server/Minecraft server"), with
+    /// links to it fixed. The tick is the owner's approval. A note with a to-do still open stays where it is.
+    pub fn clear_done(&self, tasks: &str, archive: &str) -> Result<Value> {
+        let tasks = &if tasks.ends_with(".md") { tasks.to_string() } else { format!("{tasks}.md") };
+        let tasks_path = self.new_path(tasks)?;
+        if !tasks_path.exists() {
+            return Ok(json!({ "cleared": [], "archived": [], "left": [] }));
+        }
+        let raw = fs::read_to_string(&tasks_path).with_context(|| format!("reading {tasks}"))?;
+        let archive = archive.trim().trim_end_matches('/');
+
+        let (mut done, mut open, mut cleared) = (Vec::<String>::new(), Vec::<String>::new(), Vec::<String>::new());
+        let mut kept = String::new();
+        for line in raw.lines() {
+            match TASK.captures(line) {
+                Some(c) if &c[1] != " " => {
+                    cleared.push(line.trim().to_string());
+                    if let Some(note) = c.get(2) {
+                        done.push(note.as_str().trim().to_string());
+                    }
+                }
+                Some(c) => {
+                    if let Some(note) = c.get(2) {
+                        open.push(note.as_str().trim().to_lowercase());
+                    }
+                    kept.push_str(line);
+                    kept.push('\n');
+                }
+                None => {
+                    kept.push_str(line);
+                    kept.push('\n');
+                }
+            }
+        }
+        if cleared.is_empty() {
+            return Ok(json!({ "cleared": [], "archived": [], "left": [] }));
+        }
+
+        // Which notes are finished, and where they go: all checked before anything moves.
+        let mut moves: Vec<(String, String)> = Vec::new();
+        let mut left = Vec::new();
+        let mut seen = Vec::new();
+        for name in done {
+            let key = name.to_lowercase();
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key.clone());
+            if open.contains(&key) {
+                left.push(format!("{name}: a to-do is still open"));
+                continue;
+            }
+            let Ok(path) = self.find(&name) else {
+                left.push(format!("{name}: no such note"));
+                continue;
+            };
+            let rel = self.show(&path);
+            if rel.split('/').next() == Some(archive) {
+                continue;
+            }
+            if rel.starts_with('_') || rel.eq_ignore_ascii_case(tasks) {
+                left.push(format!("{rel}: not a note to archive"));
+                continue;
+            }
+            let to = format!("{archive}/{rel}");
+            if self.new_path(&to)?.exists() {
+                left.push(format!("{rel}: {to} already exists"));
+                continue;
+            }
+            moves.push((rel, to));
+        }
+
+        let mut archived = Vec::new();
+        for (rel, to) in &moves {
+            let path = self.root.join(rel);
+            let note_raw = fs::read_to_string(&path).with_context(|| format!("reading {rel}"))?;
+            let kind = Note::parse(&note_raw).get("type").map(|t| t.trim().to_lowercase());
+            if matches!(kind.as_deref(), Some("idea" | "project"))
+                && let Some(updated) = set_field(&note_raw, "status", "done")
+            {
+                replace(&path, &updated)?;
+            }
+            let moved = self.move_note(rel, to)?;
+            archived.push(json!({ "from": rel, "to": moved["to"] }));
+        }
+        replace(&tasks_path, &kept)?;
+        Ok(json!({ "cleared": cleared, "archived": archived, "left": left }))
     }
 
     /// Deletes an inbox note marked `review: delete`, and the drawing in its `source:` (the .excalidraw.md and its

@@ -217,3 +217,59 @@ fn to_dos_in_code_blocks_stay() {
     assert_eq!(todos, ["a task"]);
     assert!(body.contains("- [ ] not a task"));
 }
+
+fn tasks_vault() -> (TempDir, Library) {
+    let (dir, lib) = vault();
+    let write = |rel: &str, text: &str| {
+        let path = lib.root.join(rel);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    };
+    write("Projects/Minecraft server/Minecraft server.md", "---\ntype: project\nstatus: open\ntags: []\n---\nSet up Minecraft server\n");
+    write("Projects/Streaming/Streaming.md", "---\ntype: project\nstatus: open\n---\nStreaming\n");
+    write("Daily/2026-11-26.md", "Worked on [[Minecraft server]].\n");
+    write(
+        "Reference/Tasks.md",
+        "---\ntype: reference\n---\n# Tasks\n\n- [x] Set up Minecraft server ([[Minecraft server]])\n- [x] Buy a capture card ([[Streaming]])\n- [ ] Set up streaming ([[Streaming]])\n- [X] Call the ISP\n- [ ] Renew domain\n",
+    );
+    (dir, lib)
+}
+
+#[test]
+fn ticked_to_dos_are_cleared_and_finished_notes_archived() {
+    let (_dir, lib) = tasks_vault();
+    let out = lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    assert_eq!(out["archived"], json!([{ "from": "Projects/Minecraft server/Minecraft server.md", "to": "Archive/Projects/Minecraft server/Minecraft server.md" }]));
+    assert_eq!(out["cleared"].as_array().unwrap().len(), 3);
+
+    let archived = fs::read_to_string(lib.root.join("Archive/Projects/Minecraft server/Minecraft server.md")).unwrap();
+    assert_eq!(Note::parse(&archived).get("status").as_deref(), Some("done"));
+    assert!(archived.contains("tags: []"), "the rest of its properties stay as they were");
+    assert!(!lib.root.join("Projects/Minecraft server/Minecraft server.md").exists());
+
+    assert!(lib.root.join("Projects/Streaming/Streaming.md").exists(), "a to-do of its is still open");
+    assert!(out["left"].as_array().unwrap().iter().any(|l| l.as_str().unwrap().contains("Streaming")));
+
+    let tasks = fs::read_to_string(lib.root.join("Reference/Tasks.md")).unwrap();
+    assert!(tasks.ends_with("# Tasks\n\n- [ ] Set up streaming ([[Streaming]])\n- [ ] Renew domain\n"), "{tasks}");
+    let daily = fs::read_to_string(lib.root.join("Daily/2026-11-26.md")).unwrap();
+    assert!(daily.contains("[[Minecraft server]]"), "same name, so links still work");
+}
+
+#[test]
+fn clearing_twice_changes_nothing_more() {
+    let (_dir, lib) = tasks_vault();
+    lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    let out = lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    assert_eq!(out["cleared"], json!([]));
+    assert_eq!(out["archived"], json!([]));
+}
+
+#[test]
+fn a_ticked_to_do_for_a_missing_note_is_still_cleared() {
+    let (_dir, lib) = tasks_vault();
+    fs::write(lib.root.join("Reference/Tasks.md"), "- [x] Old thing ([[Gone]])\n").unwrap();
+    let out = lib.clear_done("Reference/Tasks.md", "Archive").unwrap();
+    assert_eq!(out["cleared"].as_array().unwrap().len(), 1);
+    assert!(out["left"][0].as_str().unwrap().contains("no such note"));
+}

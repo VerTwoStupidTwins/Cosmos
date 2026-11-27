@@ -322,11 +322,13 @@ in
           tools.include = [ "create" ];
         };
         # Filing the Notes inbox, for the nightly job when nobody is there to ask. The owner's review mark is the
-        # approval: file_note refuses a note still marked pending and discard_note deletes only one marked delete.
+        # approval: file_note refuses a note still marked pending and discard_note deletes only one marked delete. A tick
+        # in the tasks note is approval too: clear_done archives a note only once all its to-dos are ticked.
         mcpServers.filing = vaultServer config.notes.vault "notes" [ "--filing" ] // {
           tools.include = [
             "file_note"
             "discard_note"
+            "clear_done"
           ];
         };
         # Research reports go into the Notes vault's Wiki folder: the notes tool reads and searches the whole vault but
