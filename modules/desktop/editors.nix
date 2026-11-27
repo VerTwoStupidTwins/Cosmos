@@ -174,7 +174,13 @@
                     name = "helper";
                     display_name = "nabu helper (vision)";
                     max_tokens = 96000;
-                    capabilities.images = true;
+                    # Once given, Zed wants every capability spelled out, not just the one that changes.
+                    capabilities = {
+                      tools = true;
+                      images = true;
+                      parallel_tool_calls = false;
+                      prompt_cache_key = false;
+                    };
                   }
                 ];
               };
