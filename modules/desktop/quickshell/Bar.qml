@@ -27,6 +27,7 @@ PanelWindow {
     }
 
     Island {
+        id: left
         anchors.left: parent.left
         anchors.leftMargin: 8
         y: 6
@@ -35,13 +36,20 @@ PanelWindow {
         scale: Tablet.barScale
         transformOrigin: Item.TopLeft
 
-        Workspaces {}
+        Workspaces {
+            id: workspaces
+        }
         Divider {
+            id: divider
             visible: !bar.narrow
         }
+        // The title takes what's left before the clock plate, 12 px short of it, however wide the
+        // workspace plates have grown (named ones, app icons). The clock plate scales about its top centre in
+        // tablet mode, so its visible left edge is in from its x.
         WindowTitle {
             visible: !bar.narrow
-            Layout.maximumWidth: bar.width * 0.28 / Tablet.barScale
+            Layout.maximumWidth: Math.max(0, (centre.x + centre.width * (1 - Tablet.barScale) / 2 - left.x - 12) / Tablet.barScale
+                - left.padding * 2 - workspaces.implicitWidth - divider.implicitWidth - 14 * 2)
         }
     }
 
