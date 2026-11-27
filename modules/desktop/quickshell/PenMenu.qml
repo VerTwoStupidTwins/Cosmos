@@ -1,6 +1,6 @@
 // The pen menu: a plate on the right edge that comes up when the stylus leaves its garage (Pen.qml),
 // with big rows for the pen: a new Excalidraw drawing in the Notes vault, Krita, a region to mark up, or the whole
-// screen to draw on. It goes away after a tap, after eight seconds untouched, or when the pen goes back.
+// screen to draw on. It goes away after a tap, after a few seconds with nothing moving over it, or when the pen goes back.
 // The PEN readout on the bottom bar, or `qs -c bar ipc call pen menu`, brings it back.
 import QtQuick
 import QtQuick.Layouts
@@ -23,18 +23,24 @@ PanelWindow {
     implicitWidth: 300
     implicitHeight: plate.implicitHeight + 4
 
-    // Untouched for eight seconds, it gets out of the way.
+    // A few seconds (Panels.idleClose) with nothing moving over it, it gets out of the way. It counts from the last
+    // movement, not from the pointer leaving: the menu comes up where the cursor or the hovering pen often already is,
+    // and a pen that goes out of range over it never "leaves", which kept it open for good.
     Timer {
         id: idle
-        interval: 8000
-        running: panel.visible && !hover.hovered
+        interval: Panels.idleClose
+        running: panel.visible
         onTriggered: Pen.menu = false
     }
     onVisibleChanged: if (visible) idle.restart()
 
-    HoverHandler {
-        id: hover
-        onHoveredChanged: idle.restart()
+    // Sees pen and mouse movement over the whole menu without taking presses from the rows.
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton
+        hoverEnabled: true
+        onPositionChanged: idle.restart()
+        onEntered: idle.restart()
     }
 
     Plate {
