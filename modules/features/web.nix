@@ -97,6 +97,15 @@ in
                     encrypted tunnel. Either this or port.
                   '';
                 };
+                selfServed = lib.mkOption {
+                  type = lib.types.bool;
+                  default = false;
+                  description = ''
+                    The service's own module makes this nginx site (Nextcloud's PHP, say), so there's nothing to proxy:
+                    this adds only the certificate, the NetBird-only access, the start-page card and the probe. Set
+                    neither port nor upstream.
+                  '';
+                };
                 healthPath = lib.mkOption {
                   type = lib.types.str;
                   default = "/";
@@ -166,7 +175,7 @@ in
                 )
                 + "deny all;\n"
               );
-              locations =
+              locations = lib.mkIf (!site.selfServed) (
                 let
                   location = extra: {
                     proxyPass = target site;
@@ -183,7 +192,8 @@ in
                     name = "= ${path}";
                     value = location "auth_request off;\n";
                   })
-                );
+                )
+              );
             }
           ) cfg.sites;
         };
@@ -194,8 +204,12 @@ in
 
         assertions =
           lib.mapAttrsToList (name: site: {
-            assertion = (site.port == null) != (site.upstream == null);
-            message = "web.sites.${name}: set exactly one of port or upstream.";
+            assertion =
+              if site.selfServed then
+                site.port == null && site.upstream == null
+              else
+                (site.port == null) != (site.upstream == null);
+            message = "web.sites.${name}: set exactly one of port or upstream, or neither with selfServed.";
           }) cfg.sites
           ++ lib.mapAttrsToList (name: site: {
             # Without oauth2-proxy the nginx module adds no sign-in at all, and the site would be open.
