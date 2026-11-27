@@ -154,16 +154,11 @@ window-rule {
     open-on-workspace "chat"
 }
 
-// Widths on open: the big apps take two thirds, a terminal a third, so a new window doesn't
-// push everything else off screen.
+// Widths on open: the big apps take two thirds; everything else, kitty included, the default half.
 window-rule {
     match app-id=r#"^firefox$"#
     match app-id=r#"^md\.obsidian\.Obsidian$"#
     default-column-width { proportion 0.66667; }
-}
-window-rule {
-    match app-id=r#"^kitty$"#
-    default-column-width { proportion 0.33333; }
 }
 
 // Small tools and stand-alone dialogs float instead of taking a whole column.
