@@ -101,7 +101,7 @@ in
                   type = lib.types.bool;
                   default = false;
                   description = ''
-                    The service's own module makes this nginx site (Nextcloud's PHP, say), so there's nothing to proxy:
+                    The service's own module makes this nginx site (a PHP app's, say), so there's nothing to proxy:
                     this adds only the certificate, the NetBird-only access, the start-page card and the probe. Set
                     neither port nor upstream.
                   '';
